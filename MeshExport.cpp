@@ -306,7 +306,7 @@ void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& ba
                         for (int i = 0; i < mesh_data->num_vertex; i++)
                         {
                             const core::vec3f& v = vertex_list[uint32_t(i)];
-                            core::vec4d v1 = core::vec4d(v[0], v[1], v[2], 1.0f) *mesh_data->dumpped_matrix;
+                            core::vec4d v1 = core::vec4d(v[0], v[1], v[2], 1.0f) * mesh_data->dumpped_matrix;
 
                             lControlPoints[i] = FbxVector4(double(v1[0]), double(v1[1]), double(v1[2]));
                         }

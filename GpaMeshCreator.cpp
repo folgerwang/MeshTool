@@ -319,17 +319,19 @@ bool DumpGeFilesWithReference(const string& kml_name,
     ParseGoogleEarthKmlFile(kml_name, lines, polys);
     CreateMeshFromDumpFile(dump_name, group_mesh_data);
 
-    if (polys.size() == 0 || group_mesh_data->meshes.size() == 0)
+    if (group_mesh_data->meshes.size() == 0)
     {
         return false;
     }
 
     vector<cv::Point3d> target_point_list;
-    core::vec3d* poly_array = polys[0].second.get();
-    for (uint32_t i = 0; i < polys[0].first - 1; i++)
-    {
-        core::vec4d pos_ls = core::vec4d(poly_array[i].x, poly_array[i].y, poly_array[i].z, 1.0);
-        target_point_list.push_back(cv::Point3d(pos_ls.x, pos_ls.y, pos_ls.z));
+    if (polys.size() > 0) {
+        core::vec3d* poly_array = polys[0].second.get();
+        for (uint32_t i = 0; i < polys[0].first - 1; i++)
+        {
+            core::vec4d pos_ls = core::vec4d(poly_array[i].x, poly_array[i].y, poly_array[i].z, 1.0);
+            target_point_list.push_back(cv::Point3d(pos_ls.x, pos_ls.y, pos_ls.z));
+        }
     }
 
     vector<cv::Point3d> source_point_list;
@@ -365,12 +367,8 @@ bool DumpGeFilesWithReference(const string& kml_name,
         }
     }
 
-    if (num_non_tri_meshes == 0)
-    {
-        return false;
-    }
-
-    cv::Mat rigid_transform_matrix;
+    double data[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    cv::Mat rigid_transform_matrix =  cv::Mat(4, 4, CV_64F, data);
     GetRigidTransform(source_point_list, target_point_list, rigid_transform_matrix);
 
     for (uint32_t iMesh = 0; iMesh < group_mesh_data->meshes.size(); iMesh++)
@@ -390,22 +388,39 @@ bool DumpGeFilesWithReference(const string& kml_name,
                 core::GpsCoord gps_coord = FromCartesianToGpsSphereModel(core::vec3d(pos_gs));
                 mesh_data->gps_vert_list[i] = gps_coord;
                 core::vec3d pos_ws = gps_to_env_cnvt.lla_to_enu(gps_coord);
-                vertex_list[i] = pos_ws;
+                if (target_point_list.size() > 0) {
+                    vertex_list[i] = pos_ws;
+                }
+                else {
+                    //vertex_list[i] = core::vec3d(pos_gs);
+                }
             }
 
             mesh_data->bbox_ws.Reset();
             mesh_data->bbox_gps.Reset();
-            for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-            {
-                mesh_data->bbox_ws += vertex_list[i];
-                mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
+            if (target_point_list.size() > 0) {
+                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                {
+                    mesh_data->bbox_ws += vertex_list[i];
+                    mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
+                }
+
+                mesh_data->translation = mesh_data->bbox_ws.GetCentroid();
+
+                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                {
+                    vertex_list[i] -= mesh_data->translation;
+                }
             }
+            else {
+                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                {
+                    core::vec4d pos_gs = core::vec4d(vertex_list[i], 1.0) * local_world_matrix;
+                    mesh_data->bbox_ws += core::vec3d(pos_gs);
+                    mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
+                }
 
-            mesh_data->translation = mesh_data->bbox_ws.GetCentroid();
-
-            for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-            {
-                vertex_list[i] -= mesh_data->translation;
+                mesh_data->translation = mesh_data->dumpped_matrix.get_row(3);
             }
 
             group_mesh_data->bbox_ws += mesh_data->bbox_ws;
