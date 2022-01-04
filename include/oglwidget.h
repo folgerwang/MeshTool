@@ -81,6 +81,7 @@ protected:
     bool initShaders();
 
     GLuint LoadTexture(const core::Texture2DInfo* tex_info);
+    GLuint LoadTexture(const QImage* tex_info);
     void UploadTextures(BatchMeshData* batch_meshes);
     void DrawBatchMeshes(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes);
     void DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale);

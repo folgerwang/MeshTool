@@ -8,5 +8,7 @@
         <file>fbx_import.ico</file>
         <file>kml_import.ico</file>
     </qresource>
-    <qresource prefix="/"/>
+    <qresource prefix="/images">
+        <file>land_ocean_ice_8192.png</file>
+    </qresource>
 </RCC>

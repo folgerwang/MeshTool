@@ -146,6 +146,25 @@ GLuint OGLWidget::LoadTexture(const core::Texture2DInfo* tex_info)
     return tex_id;
 }
 
+GLuint OGLWidget::LoadTexture(const QImage* tex_info) {
+    GLuint tex_id;
+    glGenTextures(1, &tex_id);
+
+    glBindTexture(GL_TEXTURE_2D, tex_id);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+    //generate the texture
+    glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, tex_info->width(),
+                  tex_info->height(),
+                  0, GL_BGRA, GL_UNSIGNED_BYTE, tex_info->bits() );
+
+    return tex_id;
+}
+
 void OGLWidget::UploadTextures(BatchMeshData* batch_meshes)
 {
     for (uint32_t i_group = 0; i_group < batch_meshes->group_meshes.size(); i_group++)
