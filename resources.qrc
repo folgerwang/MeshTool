@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/new/icons">
+        <file>region-select.ico</file>
+        <file>mesh-export.ico</file>
+        <file>dump-import.ico</file>
+        <file>google-earth-dump.ico</file>
+        <file>gps_reference.ico</file>
+        <file>fbx_import.ico</file>
+        <file>kml_import.ico</file>
+    </qresource>
+    <qresource prefix="/"/>
+</RCC>

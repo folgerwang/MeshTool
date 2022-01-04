@@ -1,0 +1,15 @@
+#version 440
+
+uniform sampler2D srcTex;
+
+layout(binding = 0, rgba16f) uniform image2D destTex;
+layout (local_size_x = 16, local_size_y = 16) in;
+void main() 
+{
+	ivec2 storePos = ivec2(gl_GlobalInvocationID.xy);
+	vec2 texSize = vec2(textureSize(srcTex, 0));
+	vec2 vTexcoord = storePos / texSize;
+
+	vec4 diffuseColor = texture(srcTex, vTexcoord);
+	imageStore(destTex, storePos, diffuseColor);
+}
