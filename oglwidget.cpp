@@ -99,7 +99,7 @@ void LoadTextureFromFile(const string& file_name, core::Texture2DInfo* tex_info)
         tex_info->m_mips[0].m_imageData = make_unique<char[]>(uint32_t(memory_size));
         uint8_t* img_data = reinterpret_cast<uint8_t*>(tex_info->m_mips[0].m_imageData.get());
         dxt_cvt.CompressImageDXT1(src_tex.data, w, h, src_tex.channels(), true, memory_size, img_data);
-        tex_info->m_objectId = uint32_t(-1);
+        tex_info->m_objectId = INVALID_VALUE;
         tex_info->m_levelCount = 1;
         tex_info->m_internalFormat =
             tex_info->m_format =
@@ -178,7 +178,7 @@ void OGLWidget::UploadTextures(BatchMeshData* batch_meshes)
             tex_id_list.resize(group_meshes->loaded_textures.size());
             for (uint32_t i = 0; i < group_meshes->loaded_textures.size(); i++)
             {
-                tex_id_list[i] = uint32_t(-1);
+                tex_id_list[i] = INVALID_VALUE;
                 const core::Texture2DInfo* tex_info = group_meshes->loaded_textures[i];
                 if (tex_info)
                 {
@@ -190,7 +190,7 @@ void OGLWidget::UploadTextures(BatchMeshData* batch_meshes)
         for (uint32_t i_mesh = 0; i_mesh < group_meshes->meshes.size(); i_mesh++)
         {
             MeshData* mesh = group_meshes->meshes[i_mesh];
-            if (mesh && mesh->idx_in_texture_list != uint32_t(-1) && mesh->idx_in_texture_list < tex_id_list.size())
+            if (mesh && mesh->idx_in_texture_list != INVALID_VALUE && mesh->idx_in_texture_list < tex_id_list.size())
             {
                 mesh->tex_id = tex_id_list[mesh->idx_in_texture_list];
             }
@@ -531,7 +531,7 @@ void OGLWidget::paintGL()
         {
             setUniformMatrix4fv(program, "uViewProjMatrix", world_screen_mat._array, 1, GL_FALSE);
 
-            if (g_world.earth_tex_info && g_world.earth_mesh->tex_id == uint32_t(-1))
+            if (g_world.earth_tex_info && g_world.earth_mesh->tex_id == INVALID_VALUE)
             {
                 g_world.earth_mesh->tex_id = LoadTexture(g_world.earth_tex_info.get());
             }

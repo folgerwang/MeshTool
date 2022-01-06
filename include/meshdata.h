@@ -162,8 +162,8 @@ struct MeshData : public core::Primitive
     vector<DrawCallInfo> draw_call_list;
 
     MeshData() : num_vertex(0),
-                 idx_in_texture_list(uint32_t(-1)),
-                 tex_id(uint32_t(-1)),
+                 idx_in_texture_list(INVALID_VALUE),
+                 tex_id(INVALID_VALUE),
                  translation(core::vec3f(0, 0, 0)),
                  vertex_list(nullptr),
                  gps_vert_list(nullptr),

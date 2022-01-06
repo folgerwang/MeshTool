@@ -555,7 +555,7 @@ struct RenderingStates
 
 	RenderingStates() 
 	{ 
-        for (int i = 0; i < 256; i++) m_textureSlot[i].index_in_list = uint32_t(-1);
+        for (int i = 0; i < 256; i++) m_textureSlot[i].index_in_list = INVALID_VALUE;
         for (int i = 0; i < 16; i++) m_vertexStream[i].is_enabled = 0;
 		for (int i = 0; i < kGlNumBufferTypeIdx; i++) binding_buffer_list[i] = -1;
 	}
@@ -642,7 +642,7 @@ void CreateObjectFile(RenderingStates const& current_state,
 
 		if (current_state.m_vertexStream[3].is_enabled)
 		{
-            if (current_state.m_vertexStream[3].data_buffer_obj != uint32_t(-1))
+            if (current_state.m_vertexStream[3].data_buffer_obj != INVALID_VALUE)
 			{
 				BufferDataInfo data_info = buffer_data_list[current_state.m_vertexStream[3].data_buffer_obj];
 				char* start_address = data_info.byte_data_address + current_state.m_vertexStream[3].start_offset;
@@ -665,7 +665,7 @@ void CreateObjectFile(RenderingStates const& current_state,
 		{
 			char* start_address = nullptr;
 			char* end_address = nullptr;
-            if (current_state.m_vertexStream[2].data_buffer_obj != uint32_t(-1))
+            if (current_state.m_vertexStream[2].data_buffer_obj != INVALID_VALUE)
 			{
 				BufferDataInfo data_info = buffer_data_list[current_state.m_vertexStream[2].data_buffer_obj];
 				start_address = data_info.byte_data_address + current_state.m_vertexStream[2].start_offset;
@@ -699,7 +699,8 @@ void CreateObjectFile(RenderingStates const& current_state,
 			char* start_address = nullptr;
 			char* end_address = nullptr;
 
-            if (current_state.m_vertexStream[2].data_buffer_obj != uint32_t(-1))
+            if (current_state.m_vertexStream[2].data_buffer_obj != INVALID_VALUE &&
+                current_state.draw_call_params.element_buffer_obj != INVALID_VALUE)
 			{
 				BufferDataInfo data_info = buffer_data_list[current_state.draw_call_params.element_buffer_obj];
 				start_address = data_info.byte_data_address + current_state.draw_call_params.data_offset;
@@ -867,7 +868,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 		if (file_tag == 0xaabbccdd)
 		{
 			uint32_t version_number = read_uint(parse_ptr);
-            uint32_t counter = uint32_t(-1);
+            uint32_t counter = INVALID_VALUE;
 
             while (!mesh_dump_done)
 			{
@@ -1284,7 +1285,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 		memset(g_bind_buffer_list, 0xff, sizeof(g_bind_buffer_list));
 
 		RenderingStates current_render_states;
-        uint32_t currentTextureSlot = uint32_t(-1);
+        uint32_t currentTextureSlot = INVALID_VALUE;
         MaxtrixMode current_matrix_mode = MaxtrixMode(-1);
 
         for (uint32_t i_cmd = 0; i_cmd < command_zone_list.size(); i_cmd++)
@@ -1324,7 +1325,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 				}
 				else
 				{
-                    vertexAttrib.data_buffer_obj = uint32_t(-1);
+                    vertexAttrib.data_buffer_obj = INVALID_VALUE;
 				}
 			}
 			else if (block_tag == kGlEnableVertexAttribArray)
@@ -1376,7 +1377,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 			else if (block_tag == kGlBindBuffer/* || block_tag == kGlBindBufferBase || block_tag == kGlBindBuffersBase*/)
 			{
                 BufferType buffer_type = BufferType(check_uint(parse_ptr));
-                uint32_t buffer_index = uint32_t(-1);
+                uint32_t buffer_index = INVALID_VALUE;
 				int32_t buffer_object_id = -1;
 				if (block_tag == kGlBindBufferBase)
 				{
@@ -2113,7 +2114,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 				uint32_t op = check_uint(parse_ptr);
 				if (op == kGlTexture1D || op == kGlTexture2D)
 				{
-                    current_render_states.m_textureSlot[currentTextureSlot].index_in_list = uint32_t(-1);
+                    current_render_states.m_textureSlot[currentTextureSlot].index_in_list = INVALID_VALUE;
 				}
 			}
 			else if (block_tag == kGlIsEnabled)
