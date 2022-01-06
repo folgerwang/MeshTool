@@ -576,7 +576,7 @@ void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& bat
                         for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
                         {
                             const DrawCallInfo& draw_call_info = mesh_data->draw_call_list[i_draw];
-                            if (!draw_call_info.is_polygon())
+                            if (draw_call_info.is_ge_polygon())
                             {
                                 string curve_name = "smap_linear:curve" + to_string(item_index);
                                 string curve_shape_name = "smap_linear:curveShape" + to_string(item_index);

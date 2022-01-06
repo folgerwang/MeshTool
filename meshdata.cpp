@@ -53,7 +53,7 @@ void MeshData::draw(CoreGLSLProgram* program)
 }
 
 
-bool MeshData::culling(const core::matrix4f& world_proj_mat, float scale)
+bool MeshData::culling(const core::vec3d& reference_pos, const core::matrix4f& world_proj_mat, float scale)
 {
 /*    core::vec3f boundingsphere_center = bbox.GetCentroid();
     float boundingsphere_radius = bbox.GetRadius();
@@ -63,7 +63,11 @@ bool MeshData::culling(const core::matrix4f& world_proj_mat, float scale)
         return false;
     }*/
 
-    return CullingCore(bbox_ws, world_proj_mat, scale);
+    core::bounds3f local_bbox;
+    local_bbox += bbox_ws.bb_min - reference_pos;
+    local_bbox += bbox_ws.bb_max - reference_pos;
+
+    return CullingCore(local_bbox, world_proj_mat, scale);
 }
 
 void PatchCutting(const PatchInfo& patch_info,

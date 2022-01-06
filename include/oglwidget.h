@@ -83,11 +83,11 @@ protected:
     GLuint LoadTexture(const core::Texture2DInfo* tex_info);
     GLuint LoadTexture(const QImage* tex_info);
     void UploadTextures(BatchMeshData* batch_meshes);
-    void DrawBatchMeshes(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes);
-    void DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale);
-    void DrawWorldMeshes(WorldData* world, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes);
-    void DrawWorldMeshesSelectMask(WorldData* world, const core::matrix4f& world_screen_mat, GLuint program, float scale);
-    void Draw(const MeshData* mesh_data, uint32_t draw_call_index, GLuint program, float scale);
+    void DrawBatchMeshes(BatchMeshData* batch_meshes, const core::vec3d& reference_pos, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes);
+    void DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const core::vec3d& reference_pos, const core::matrix4f& world_screen_mat, GLuint program, float scale);
+    void DrawWorldMeshes(WorldData* world, const core::vec3d& reference_pos, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes);
+    void DrawWorldMeshesSelectMask(WorldData* world, const core::vec3d& reference_pos, const core::matrix4f& world_screen_mat, GLuint program, float scale);
+    void Draw(const MeshData* mesh_data, const core::vec3d& reference_pos, uint32_t draw_call_index, GLuint program, float scale);
     void DrawMask(const MeshData* mesh_data, uint32_t draw_call_index, GLuint program, float scale);
     void DrawQuad(const core::vec4f& quad_params, uint32_t tex_id);
     void DrawReferencePosition(const core::matrix4f& world_screen_mat, float scale);
@@ -96,7 +96,7 @@ protected:
 private:
     CameraController camera_ctrl;
 
-    core::bounds3f last_bbox_ws;
+    core::bounds3d last_bbox_ws;
 
     int bufferWidth, bufferHeight;
     int mousePressed = 0;

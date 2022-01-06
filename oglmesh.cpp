@@ -5,7 +5,11 @@
 #include "glfunctionlist.h"
 #include <QLoggingCategory>
 
-void OGLWidget::Draw(const MeshData* mesh_data, uint32_t draw_call_index, GLuint program, float scale)
+void OGLWidget::Draw(const MeshData* mesh_data,
+                     const core::vec3d& reference_pos,
+                     uint32_t draw_call_index,
+                     GLuint program,
+                     float scale)
 {
     if (mesh_data && draw_call_index < mesh_data->draw_call_list.size())
     {
@@ -47,13 +51,14 @@ void OGLWidget::Draw(const MeshData* mesh_data, uint32_t draw_call_index, GLuint
             //CHECK_GL_ERROR();
 
             bindTexture2D(program, "colorTex", 0, mesh_data->tex_id);
+            core::vec3f local_translation = mesh_data->translation - reference_pos;
 
             GLfloat local_mat[16] = {scale, 0.0f, 0.0f, 0.0f,
                                      0.0f, scale, 0.0f, 0.0f,
                                      0.0f, 0.0f, scale, 0.0f,
-                                     GLfloat(mesh_data->translation.x) * scale,
-                                     GLfloat(mesh_data->translation.y) * scale,
-                                     GLfloat(mesh_data->translation.z) * scale,
+                                     local_translation.x * scale,
+                                     local_translation.y * scale,
+                                     local_translation.z * scale,
                                      1.0f};
             setUniformMatrix4fv(program, "uModelMatrix", local_mat, 1, GL_FALSE);
             //CHECK_GL_ERROR();

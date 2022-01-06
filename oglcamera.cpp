@@ -19,12 +19,12 @@ void CameraController::Reset()
     last_camera_info = cur_camera_info;
 }
 
-void CameraController::InitPlanar(const core::bounds3f& bbox_ws, float tan_fov_y, float aspect_x)
+void CameraController::InitPlanar(const core::bounds3d& bbox_ws, float tan_fov_y, float aspect_x)
 {
     cur_input.Reset();
     last_input.Reset();
 
-    core::vec3f diagonal = bbox_ws.GetDiagonal() * 0.5f;
+    core::vec3d diagonal = bbox_ws.GetDiagonal() * 0.5;
     float width_y = max(diagonal.y, diagonal.x / aspect_x);
     start_dist_from_focus_point = width_y / tan_fov_y + diagonal.z;
     cur_camera_info.dist_to_focus_point = start_dist_from_focus_point;
@@ -63,18 +63,17 @@ void CameraController::UpdateOnSphere(float tan_fov_y, float aspect_x, int buffe
         float log_range_z = log2(1.0f + start_dist_from_focus_point - end_dist_beyond_focus_point);
         core::vec2f last_screen_uv = GetScreenPositionByCursor(last_input.cursor_pos, tan_fov_y, aspect_x, buffer_width, buffer_height);
         core::vec2f screen_uv = GetScreenPositionByCursor(cur_input.cursor_pos, tan_fov_y, aspect_x, buffer_width, buffer_height);
+        auto screen_uv_diff = last_screen_uv - screen_uv;
 
         if (cur_input.wheel_angle != last_input.wheel_angle)
         {
             cur_camera_info.dist_to_focus_point = (exp2((1.0f - max(min(cur_input.wheel_angle, 300), 0) / 300.0f) * log_range_z) - 1.0f) + end_dist_beyond_focus_point;
-            cur_camera_info.focus_point = core::vec3f(last_camera_info.focus_point - screen_uv * GetCameraDistanceDiff(),
-                                                      last_camera_info.focus_point.z);
+            cur_camera_info.focus_point = last_camera_info.focus_point - core::vec3d(screen_uv.x, screen_uv.y, 0.0) * GetCameraDistanceDiff();
             last_camera_info = cur_camera_info;
         }
         else if (cur_input.cursor_pos != last_input.cursor_pos)
         {
-            cur_camera_info.focus_point = core::vec3f(last_camera_info.focus_point + (last_screen_uv - screen_uv) * last_camera_info.dist_to_focus_point,
-                                                      last_camera_info.focus_point.z);
+            cur_camera_info.focus_point = last_camera_info.focus_point + core::vec3d(screen_uv_diff.x, screen_uv_diff.y, 0.0) * last_camera_info.dist_to_focus_point;
             last_camera_info = cur_camera_info;
         }
 
@@ -89,18 +88,17 @@ void CameraController::UpdateOnPlanar(float tan_fov_y, float aspect_x, int buffe
         float log_range_z = log2(1.0f + start_dist_from_focus_point - end_dist_beyond_focus_point);
         core::vec2f last_screen_uv = GetScreenPositionByCursor(last_input.cursor_pos, tan_fov_y, aspect_x, buffer_width, buffer_height);
         core::vec2f screen_uv = GetScreenPositionByCursor(cur_input.cursor_pos, tan_fov_y, aspect_x, buffer_width, buffer_height);
+        auto screen_uv_diff = last_screen_uv - screen_uv;
 
         if (cur_input.wheel_angle != last_input.wheel_angle)
         {
             cur_camera_info.dist_to_focus_point = (exp2((1.0f - max(min(cur_input.wheel_angle, 300), 0) / 300.0f) * log_range_z) - 1.0f) + end_dist_beyond_focus_point;
-            cur_camera_info.focus_point = core::vec3f(last_camera_info.focus_point - screen_uv * GetCameraDistanceDiff(),
-                                                      last_camera_info.focus_point.z);
+            cur_camera_info.focus_point = last_camera_info.focus_point - core::vec3d(screen_uv.x, screen_uv.y, 0.0) * GetCameraDistanceDiff();
             last_camera_info = cur_camera_info;
         }
         else if (cur_input.cursor_pos != last_input.cursor_pos)
         {
-            cur_camera_info.focus_point = core::vec3f(last_camera_info.focus_point + (last_screen_uv - screen_uv) * last_camera_info.dist_to_focus_point,
-                                                      last_camera_info.focus_point.z);
+            cur_camera_info.focus_point = last_camera_info.focus_point + core::vec3d(screen_uv_diff.x, screen_uv_diff.y, 0.0) * last_camera_info.dist_to_focus_point;
             last_camera_info = cur_camera_info;
         }
 

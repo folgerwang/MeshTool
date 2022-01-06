@@ -57,7 +57,7 @@ public:
         return drawable_patches_;
     }
 
-    bool is_polygon() const
+/*    bool is_polygon() const
     {
         return primitive_type_ == kGlTriangles ||
                primitive_type_ == kGlTriangleStrip ||
@@ -65,6 +65,14 @@ public:
                primitive_type_ == kGlQuads ||
                primitive_type_ == kGlQuadStrip ||
                primitive_type_ == kGlPolygon;
+    }*/
+
+    bool is_ge_mesh() const {
+        return primitive_type_ == kGlTriangles;
+    }
+
+    bool is_ge_polygon() const {
+        return primitive_type_ == kGlTriangleStrip;
     }
 
     void clear_index_buffer()
@@ -167,7 +175,7 @@ struct MeshData : public core::Primitive
     {
     }
 
-    bool culling(const core::matrix4f& world_proj_mat, float scale);
+    bool culling(const core::vec3d& reference_pos, const core::matrix4f& world_proj_mat, float scale);
 
     void draw(CoreGLSLProgram* program);
 
@@ -188,7 +196,7 @@ struct MeshData : public core::Primitive
 
 struct GroupMeshData
 {
-    core::bounds3f          bbox_ws;
+    core::bounds3d          bbox_ws;
     core::bounds3d          bbox_gps;
     vector<MeshData*>       meshes;
     vector<core::Texture2DInfo*> loaded_textures;
@@ -211,7 +219,7 @@ struct BatchMeshData
     bool                    is_google_dump;
     core::vec2d             reference_pos;
     core::bounds2d          scissor_bbox;
-    core::bounds3f          bbox_ws;
+    core::bounds3d          bbox_ws;
     core::bounds3d          bbox_gps;
     vector<GroupMeshData*>  group_meshes;
 

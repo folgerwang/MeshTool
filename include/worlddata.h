@@ -6,7 +6,7 @@ struct WorldData
 {
     core::vec2d         reference_pos; // tmp data.
     core::bounds2d      scissor_bbox; // tmp data.
-    core::bounds3f      bbox_ws;
+    core::bounds3d      bbox_ws;
     core::bounds3d      bbox_gps;
     vector<BatchMeshData*> mesh_data_batches;
     MeshData*           earth_mesh;

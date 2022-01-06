@@ -249,9 +249,9 @@ core::vec3d RotMatrixToEulerAngles(const cv::Mat& rot_mat)
     return rot_vector;
 }
 
-bool IsTwoBoundingBoxOverlapped(const core::bounds3f& bbox_0, const core::bounds3f& bbox_1, float vol_size[3])
+bool IsTwoBoundingBoxOverlapped(const core::bounds3d& bbox_0, const core::bounds3d& bbox_1, float vol_size[3])
 {
-    core::vec3f new_bbox[2];
+    core::vec3d new_bbox[2];
     new_bbox[0] = core::Max(bbox_0.bb_min, bbox_1.bb_min);
     new_bbox[1] = core::Min(bbox_0.bb_max, bbox_1.bb_max);
 
@@ -259,9 +259,9 @@ bool IsTwoBoundingBoxOverlapped(const core::bounds3f& bbox_0, const core::bounds
 
     if (has_overlap)
     {
-        core::vec3f edge_0 = bbox_0.GetDiagonal();
-        core::vec3f edge_1 = bbox_1.GetDiagonal();
-        core::vec3f edge_new = new_bbox[1] - new_bbox[0];
+        core::vec3d edge_0 = bbox_0.GetDiagonal();
+        core::vec3d edge_1 = bbox_1.GetDiagonal();
+        core::vec3d edge_new = new_bbox[1] - new_bbox[0];
 
         vol_size[0] = edge_0.x * edge_0.y * edge_0.z;
         vol_size[1] = edge_1.x * edge_1.y * edge_1.z;
@@ -341,21 +341,22 @@ bool DumpGeFilesWithReference(const string& kml_name,
         MeshData* data_mesh = group_mesh_data->meshes[i];
         if (data_mesh)
         {
-            bool has_lines = false;
+            bool has_ge_polygon = false;
             for (uint32_t i_draw = 0; i_draw < data_mesh->draw_call_list.size(); i_draw++)
             {
-                if (!data_mesh->draw_call_list[i_draw].is_polygon())
+                auto& draw_call_list = data_mesh->draw_call_list[i_draw];
+                if (draw_call_list.is_ge_polygon())
                 {
-                    has_lines = true;
+                    has_ge_polygon = true;
                 }
             }
 
-            if (has_lines)
+            if (has_ge_polygon)
             {
                 auto& vertex_list = data_mesh->vertex_list;
                 if (vertex_list)
                 {
-                    for (int j = 0; j < data_mesh->num_vertex - 3; j++)
+                    for (int j = 0; j < data_mesh->num_vertex - 1; j++)
                     {
                         core::vec3d transformed_position = ApplyMatrix(vertex_list[uint32_t(j + 1)], data_mesh->dumpped_matrix);
                         source_point_list.push_back(cv::Point3d(transformed_position.x, transformed_position.y, transformed_position.z));
@@ -377,54 +378,59 @@ bool DumpGeFilesWithReference(const string& kml_name,
 
         if (mesh_data)
         {
+            bool is_renderable_mesh = mesh_data->draw_call_list[0].is_ge_mesh();
             core::matrix4d local_world_matrix;
             MulMatrix(mesh_data->dumpped_matrix, rigid_transform_matrix, local_world_matrix);
 
-            auto& vertex_list = mesh_data->vertex_list;
-            mesh_data->gps_vert_list = make_unique<core::GpsCoord[]>(uint32_t(mesh_data->num_vertex));
-            for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-            {
-                core::vec4d pos_gs = core::vec4d(vertex_list[i], 1.0) * local_world_matrix;
-                core::GpsCoord gps_coord = FromCartesianToGpsSphereModel(core::vec3d(pos_gs));
-                mesh_data->gps_vert_list[i] = gps_coord;
-                core::vec3d pos_ws = gps_to_env_cnvt.lla_to_enu(gps_coord);
+            if (is_renderable_mesh) {
                 if (target_point_list.size() > 0) {
-                    vertex_list[i] = pos_ws;
+                    auto& vertex_list = mesh_data->vertex_list;
+                    std::vector<core::vec3d> tmp_vertex_list;
+                    tmp_vertex_list.resize(mesh_data->num_vertex);
+                    mesh_data->gps_vert_list = make_unique<core::GpsCoord[]>(uint32_t(mesh_data->num_vertex));
+                    for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                    {
+                        core::vec4d pos_gs = core::vec4d(vertex_list[i], 1.0) * local_world_matrix;
+                        core::GpsCoord gps_coord = FromCartesianToGpsSphereModel(core::vec3d(pos_gs));
+                        mesh_data->gps_vert_list[i] = gps_coord;
+                        tmp_vertex_list[i] = gps_to_env_cnvt.lla_to_enu(gps_coord);
+                    }
+
+                    mesh_data->bbox_ws.Reset();
+                    mesh_data->bbox_gps.Reset();
+                    for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                    {
+                        mesh_data->bbox_ws += tmp_vertex_list[i];
+                        mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
+                    }
+
+                    mesh_data->translation = mesh_data->bbox_ws.GetCentroid();
+
+                    for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                    {
+                        vertex_list[i] = tmp_vertex_list[i] - mesh_data->translation;
+                    }
+
+                    group_mesh_data->bbox_ws += mesh_data->bbox_ws;
+                    group_mesh_data->bbox_gps += mesh_data->bbox_gps;
                 }
                 else {
-                    //vertex_list[i] = core::vec3d(pos_gs);
+                    auto& vertex_list = mesh_data->vertex_list;
+
+                    mesh_data->bbox_ws.Reset();
+                    mesh_data->bbox_gps.Reset();
+                    for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
+                    {
+                        core::vec4d pos_gs = core::vec4d(vertex_list[i], 1.0) * local_world_matrix;
+                        mesh_data->bbox_ws += core::vec3d(pos_gs);
+                    }
+
+                    mesh_data->translation = mesh_data->dumpped_matrix.get_row(3);
+
+                    group_mesh_data->bbox_ws += mesh_data->bbox_ws;
+                    group_mesh_data->bbox_gps += mesh_data->bbox_gps;
                 }
             }
-
-            mesh_data->bbox_ws.Reset();
-            mesh_data->bbox_gps.Reset();
-            if (target_point_list.size() > 0) {
-                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-                {
-                    mesh_data->bbox_ws += vertex_list[i];
-                    mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
-                }
-
-                mesh_data->translation = mesh_data->bbox_ws.GetCentroid();
-
-                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-                {
-                    vertex_list[i] -= mesh_data->translation;
-                }
-            }
-            else {
-                for (uint32_t i = 0; i < uint32_t(mesh_data->num_vertex); i++)
-                {
-                    core::vec4d pos_gs = core::vec4d(vertex_list[i], 1.0) * local_world_matrix;
-                    mesh_data->bbox_ws += core::vec3d(pos_gs);
-                    mesh_data->bbox_gps += mesh_data->gps_vert_list[i];
-                }
-
-                mesh_data->translation = mesh_data->dumpped_matrix.get_row(3);
-            }
-
-            group_mesh_data->bbox_ws += mesh_data->bbox_ws;
-            group_mesh_data->bbox_gps += mesh_data->bbox_gps;
         }
     }
 
@@ -456,7 +462,7 @@ void DumpGoogleEarthMeshes(const vector<string>& file_name_list, BatchMeshData* 
                     bool is_polygon = false;
                     for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
                     {
-                        if (mesh_data->draw_call_list[i_draw].is_polygon())
+                        if (mesh_data->draw_call_list[i_draw].is_ge_mesh())
                             is_polygon = true;
                     }
 
@@ -687,7 +693,7 @@ void DumpKmlSplineMeshes(const vector<string>& file_name_list, BatchMeshData* ba
 
         GroupMeshData* group_mesh_data = new GroupMeshData;
 
-        for (uint32_t i_line = 0; i_line < lines.size(); i_line++)
+        for (auto i_line = 0; i_line < lines.size(); i_line++)
         {
             MeshData* mesh_data = new MeshData;
 

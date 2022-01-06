@@ -232,7 +232,13 @@ void OGLWidget::DrawQuad(const core::vec4f& quad_params, uint32_t tex_id)
     glUseProgram(0);
 }
 
-void OGLWidget::DrawBatchMeshes(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes)
+void OGLWidget::DrawBatchMeshes(
+        BatchMeshData* batch_meshes,
+        const core::vec3d& reference_pos,
+        const core::matrix4f& world_screen_mat,
+        GLuint program,
+        float scale,
+        bool draw_tri_meshes)
 {
     glUseProgram(program);
 
@@ -249,16 +255,16 @@ void OGLWidget::DrawBatchMeshes(BatchMeshData* batch_meshes, const core::matrix4
         for (uint32_t i_mesh = 0; i_mesh < mesh_group->meshes.size(); i_mesh++)
         {
            MeshData* mesh_data = mesh_group->meshes[i_mesh];
-           if (mesh_data->culling(world_screen_mat, scale))
+           if (mesh_data->culling(reference_pos, world_screen_mat, scale))
            {
                for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
                {
                    if (!mesh_data->draw_call_list[i_draw].is_drawable_patches())
                    {
-                       if ((draw_tri_meshes && mesh_data->draw_call_list[i_draw].is_polygon()) ||
-                           (!draw_tri_meshes && !mesh_data->draw_call_list[i_draw].is_polygon()))
+                       if ((draw_tri_meshes && mesh_data->draw_call_list[i_draw].is_ge_mesh()) ||
+                           (!draw_tri_meshes && mesh_data->draw_call_list[i_draw].is_ge_polygon()))
                        {
-                           Draw(mesh_group->meshes[i_mesh], i_draw, program, scale);
+                           Draw(mesh_group->meshes[i_mesh], reference_pos, i_draw, program, scale);
                        }
                    }
                }
@@ -269,7 +275,12 @@ void OGLWidget::DrawBatchMeshes(BatchMeshData* batch_meshes, const core::matrix4
     glUseProgram(0);
 }
 
-void OGLWidget::DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const core::matrix4f& world_screen_mat, GLuint program, float scale)
+void OGLWidget::DrawBatchMeshesSelectMask(
+        BatchMeshData* batch_meshes,
+        const core::vec3d& reference_pos,
+        const core::matrix4f& world_screen_mat,
+        GLuint program,
+        float scale)
 {
     glUseProgram(program);
 
@@ -281,7 +292,7 @@ void OGLWidget::DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const cor
         for (uint32_t i_mesh = 0; i_mesh < mesh_group->meshes.size(); i_mesh++)
         {
            MeshData* mesh_data = mesh_group->meshes[i_mesh];
-           if (mesh_data->culling(world_screen_mat, scale) && mesh_data->patch_list.size() > 0)
+           if (mesh_data->culling(reference_pos, world_screen_mat, scale) && mesh_data->patch_list.size() > 0)
            {
                for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
                {
@@ -298,7 +309,13 @@ void OGLWidget::DrawBatchMeshesSelectMask(BatchMeshData* batch_meshes, const cor
     glUseProgram(0);
 }
 
-void OGLWidget::DrawWorldMeshes(WorldData* world, const core::matrix4f& world_screen_mat, GLuint program, float scale, bool draw_tri_meshes)
+void OGLWidget::DrawWorldMeshes(
+        WorldData* world,
+        const core::vec3d& reference_pos,
+        const core::matrix4f& world_screen_mat,
+        GLuint program,
+        float scale,
+        bool draw_tri_meshes)
 {
     for (uint32_t i_batch = 0; i_batch < world->mesh_data_batches.size(); i_batch++)
     {
@@ -306,18 +323,23 @@ void OGLWidget::DrawWorldMeshes(WorldData* world, const core::matrix4f& world_sc
                             !world->mesh_data_batches[i_batch]->is_spline_mesh;
         if (draw_batches)
         {
-            DrawBatchMeshes(world->mesh_data_batches[i_batch], world_screen_mat, program, scale, draw_tri_meshes);
+            DrawBatchMeshes(world->mesh_data_batches[i_batch], reference_pos, world_screen_mat, program, scale, draw_tri_meshes);
         }
     }
 }
 
-void OGLWidget::DrawWorldMeshesSelectMask(WorldData* world, const core::matrix4f& world_screen_mat, GLuint program, float scale)
+void OGLWidget::DrawWorldMeshesSelectMask(
+        WorldData* world,
+        const core::vec3d& reference_pos,
+        const core::matrix4f& world_screen_mat,
+        GLuint program,
+        float scale)
 {
     for (uint32_t i_batch = 0; i_batch < world->mesh_data_batches.size(); i_batch++)
     {
         if (!world->mesh_data_batches[i_batch]->is_spline_mesh)
         {
-            DrawBatchMeshesSelectMask(world->mesh_data_batches[i_batch], world_screen_mat, program, scale);
+            DrawBatchMeshesSelectMask(world->mesh_data_batches[i_batch], reference_pos, world_screen_mat, program, scale);
         }
     }
 }
@@ -468,9 +490,9 @@ void OGLWidget::paintGL()
     float tan_fov_y = tan(fov_radians_y * 0.5f);
 
     bool no_real_meshes = g_world.mesh_data_batches.size() == 0 && g_world.earth_mesh;
-    core::bounds3f bbox_ws = no_real_meshes ? g_world.earth_mesh->bbox_ws : g_world.bbox_ws;
+    auto bbox_ws = no_real_meshes ? g_world.earth_mesh->bbox_ws : g_world.bbox_ws;
 
-    constexpr float far_clip_dist = 2000.0f;
+    constexpr float far_clip_dist = 8000.0f;
     if (no_real_meshes)
     {
         if (bbox_ws != last_bbox_ws)
@@ -487,13 +509,13 @@ void OGLWidget::paintGL()
 
         glUseProgram(program);
 
-        core::vec3f ref_pos_ws = core::GetCartesianPosition(g_world.reference_pos.y, g_world.reference_pos.x, 0, false);
+        core::vec3d ref_pos_ws = core::GetCartesianPosition(g_world.reference_pos.y, g_world.reference_pos.x, 0, false);
         core::vec3f up_vector = normalize(ref_pos_ws);
         core::vec3f north_vector = core::vec3f(0, 0, 1.0f);
         core::vec3f right_vector = normalize(cross(up_vector, north_vector));
         north_vector = normalize(cross(right_vector, up_vector));
 
-        core::vec3f eye_pos = camera_ctrl.cur_camera_info.focus_point + up_vector * camera_ctrl.cur_camera_info.dist_to_focus_point;
+        core::vec3d eye_pos = camera_ctrl.cur_camera_info.focus_point + core::vec3d(up_vector) * camera_ctrl.cur_camera_info.dist_to_focus_point;
 
         float scale = far_clip_dist / length(eye_pos - camera_ctrl.cur_camera_info.focus_point);
 
@@ -501,7 +523,9 @@ void OGLWidget::paintGL()
 //        qCInfo(category) << scale;
 
         core::perspective(m_proj_mat, fov_radians_y, aspect_x, 0.05f, far_clip_dist);
-        core::lookAt(m_view_mat, eye_pos * scale, camera_ctrl.cur_camera_info.focus_point * scale, north_vector);
+        auto eye_pos_local = eye_pos - ref_pos_ws;
+        auto look_at_local = camera_ctrl.cur_camera_info.focus_point - ref_pos_ws;
+        core::lookAt(m_view_mat, core::vec3f(eye_pos_local) * scale, core::vec3f(look_at_local) * scale, north_vector);
 
         core::matrix4f world_screen_mat = m_proj_mat * m_view_mat;
         {
@@ -512,7 +536,7 @@ void OGLWidget::paintGL()
                 g_world.earth_mesh->tex_id = LoadTexture(g_world.earth_tex_info.get());
             }
 
-            Draw(g_world.earth_mesh, 0, program, scale);
+            Draw(g_world.earth_mesh, ref_pos_ws, 0, program, scale);
         }
 
         glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
@@ -538,23 +562,26 @@ void OGLWidget::paintGL()
             }
         }
 
-        core::vec3f eye_pos = camera_ctrl.cur_camera_info.focus_point + core::vec3f(0, 0,  camera_ctrl.cur_camera_info.dist_to_focus_point);
-        float scale = min(far_clip_dist / length(eye_pos - camera_ctrl.cur_camera_info.focus_point) * 0.5f, 1.0f);
+        core::vec3d eye_pos = camera_ctrl.cur_camera_info.focus_point + core::vec3d(0, 0,  camera_ctrl.cur_camera_info.dist_to_focus_point);
+        auto ref_pos_ws = eye_pos;
+        float scale = min(far_clip_dist / float(length(eye_pos - camera_ctrl.cur_camera_info.focus_point)) * 0.5f, 1.0f);
 
 //        QLoggingCategory category("mesh scale");
 //        qCInfo(category) << scale;
 
         core::perspective(m_proj_mat, fov_radians_y, aspect_x, 0.05f, far_clip_dist);
-        core::lookAt(m_view_mat, eye_pos * scale, camera_ctrl.cur_camera_info.focus_point * scale, core::vec3f(0, 1.0f, 0));
+        auto eye_pos_local = eye_pos - ref_pos_ws;
+        auto look_at_local = camera_ctrl.cur_camera_info.focus_point - ref_pos_ws;
+        core::lookAt(m_view_mat, core::vec3f(eye_pos_local) * scale, core::vec3f(look_at_local) * scale, core::vec3f(0, 1.0f, 0));
 
         core::matrix4f world_screen_mat = m_proj_mat * m_view_mat;
 
         SelectPatches(world_screen_mat, scale);
 
         {
-            DrawWorldMeshes(&g_world, world_screen_mat, m_programs[kBasicLightProgram], scale, true);
-            DrawWorldMeshesSelectMask(&g_world, world_screen_mat, m_programs[kBasicNoLightProgram], scale);
-            DrawWorldMeshes(&g_world, world_screen_mat, m_programs[kBasicNoLightProgram], scale, false);
+            DrawWorldMeshes(&g_world, ref_pos_ws, world_screen_mat, m_programs[kBasicLightProgram], scale, true);
+            DrawWorldMeshesSelectMask(&g_world, ref_pos_ws, world_screen_mat, m_programs[kBasicNoLightProgram], scale);
+            DrawWorldMeshes(&g_world, ref_pos_ws, world_screen_mat, m_programs[kBasicNoLightProgram], scale, false);
         }
     }
 

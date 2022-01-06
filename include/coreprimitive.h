@@ -11,7 +11,7 @@ namespace core
 
 struct Primitive
 {
-    bounds3f			   bbox_ws;
+    bounds3d			   bbox_ws;
     bounds3d               bbox_gps;
 
     virtual void draw(CoreGLSLProgram* program) = 0;

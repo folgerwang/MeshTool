@@ -33,8 +33,8 @@ struct InputInfo
 
 struct CameraInfo
 {
-    core::vec3f focus_point;
-    float       dist_to_focus_point;
+    core::vec3d focus_point;
+    double      dist_to_focus_point;
 
     CameraInfo()
     {
@@ -43,7 +43,7 @@ struct CameraInfo
 
     void Reset()
     {
-        focus_point = core::vec3f(0, 0, 0);
+        focus_point = core::vec3d(0, 0, 0);
         dist_to_focus_point = 0;
     }
 };
@@ -63,16 +63,16 @@ struct CameraController
     CameraInfo  cur_camera_info;
     CameraInfo  last_camera_info;
 
-    float       start_dist_from_focus_point;
-    float       end_dist_beyond_focus_point;
+    double      start_dist_from_focus_point;
+    double      end_dist_beyond_focus_point;
 
     CameraController();
 
-    void InitPlanar(const core::bounds3f& bbox_ws, float tan_fov_y, float aspect_x);
+    void InitPlanar(const core::bounds3d& bbox_ws, float tan_fov_y, float aspect_x);
     void InitSphere(float tan_fov_y);
     void UpdateOnSphere(float tan_fov_y, float aspect_x, int buffer_width, int buffer_height, bool force = false);
     void UpdateOnPlanar(float tan_fov_y, float aspect_x, int buffer_width, int buffer_height, bool force = false);
-    float GetCameraDistanceDiff() { return cur_camera_info.dist_to_focus_point - last_camera_info.dist_to_focus_point; }
+    double GetCameraDistanceDiff() { return cur_camera_info.dist_to_focus_point - last_camera_info.dist_to_focus_point; }
     void UpdateCursorPos(int new_x, int new_y,  UpdateLastPostionType type)
     {
         if (type == kCopyBeforeUpdate)

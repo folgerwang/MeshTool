@@ -569,9 +569,9 @@ void CreateObjectFile(RenderingStates const& current_state,
                     string mtl_file_name,
 					MeshData*& mesh_data)
 {
-    if (mtl_file_name == string("material_triangles_303.mtl")) {
+/*    if (mtl_file_name == string("material_triangles_303.mtl")) {
         int hit = 1;
-    }
+    }*/
 
 	bool has_mesh_data_texture = current_state.m_vertexStream[0].is_enabled &&
 								 current_state.m_vertexStream[0].data_buffer_obj != (uint32_t)-1 &&
@@ -584,9 +584,10 @@ void CreateObjectFile(RenderingStates const& current_state,
 						 (current_state.m_vertexStream[0].data_buffer_obj != (uint32_t)-1 ||
 						  current_state.m_vertexStream[0].start_offset > 0);
 
-	bool is_line = current_state.draw_call_params.primitive_type == kGlLineStrip;
+    bool is_ge_polygon = current_state.draw_call_params.primitive_type == kGlTriangleStrip;
+    bool is_ge_mesh = current_state.draw_call_params.primitive_type == kGlTriangles;
 
-	if (has_mesh_data_texture || (has_draw_data && is_line))
+    if (has_mesh_data_texture || (has_draw_data && is_ge_polygon))
 	{
         int32_t pos_0 = int32_t(mtl_file_name.rfind('\\'));
         int32_t pos_1 = int32_t(mtl_file_name.rfind('/'));
@@ -660,7 +661,7 @@ void CreateObjectFile(RenderingStates const& current_state,
 			}
 		}
 
-		if (is_line && current_state.m_vertexStream[2].is_enabled) // color channel.
+        if (is_ge_polygon && current_state.m_vertexStream[2].is_enabled) // color channel.
 		{
 			char* start_address = nullptr;
 			char* end_address = nullptr;
@@ -727,6 +728,14 @@ void CreateObjectFile(RenderingStates const& current_state,
 					start_address += sizeof(uint16_t) * 3;
 				}
 			}
+            else if (current_state.draw_call_params.primitive_type == kGlTriangleStrip) {
+                for (uint32_t i = 0; i < current_state.draw_call_params.num_indexes; i ++)
+                {
+                    uint16_t idx0 = check_ushort(reinterpret_cast<uint8_t*>(start_address));
+                    index_data.push_back(idx0);
+                    start_address += sizeof(uint16_t);
+                }
+            }
 			else if (current_state.draw_call_params.primitive_type == kGlLineStrip)
 			{
 				for (uint32_t i = 0; i < current_state.draw_call_params.num_indexes; i ++)
@@ -798,9 +807,9 @@ void CreateObjectFile(RenderingStates const& current_state,
 
 			if (index_data.size() > 0)
 			{
-                if (is_line)
+                if (is_ge_polygon)
 				{
-                    mesh_data->add_draw_call_list(kGlLineStrip, int32_t(index_data.size()), int32_t(num_vertex));
+                    mesh_data->add_draw_call_list(kGlTriangleStrip, int32_t(index_data.size()), int32_t(num_vertex));
                     DrawCallInfo& last_draw_call_info = mesh_data->get_last_draw_call_info();
                     for (uint32_t i = 0; i < index_data.size(); i++)
 					{
@@ -810,7 +819,7 @@ void CreateObjectFile(RenderingStates const& current_state,
 						}
                     }
 				}
-				else
+                else if (is_ge_mesh)
                 {
                     mesh_data->add_draw_call_list(kGlTriangles, int32_t(index_data.size()), int32_t(num_vertex));
                     DrawCallInfo& last_draw_call_info = mesh_data->get_last_draw_call_info();
@@ -1698,7 +1707,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 
 				MeshData* mesh_data = nullptr;
 				CreateObjectFile(current_render_states, matrix_stack, buffer_data_list, data_zone_list, obj_name.str(), mtl_name.str(), mesh_data);
-                if (mesh_data && !mesh_dump_done)
+                if (mesh_data && (!mesh_dump_done || mesh_data->draw_call_list[0].is_ge_polygon()))
 				{
                     group_mesh_data->meshes.push_back(mesh_data);
 				}
@@ -1735,7 +1744,7 @@ void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_m
 
 				MeshData* mesh_data = nullptr;
 				CreateObjectFile(current_render_states, matrix_stack, buffer_data_list, data_zone_list, obj_name.str(), mtl_name.str(), mesh_data);
-                if (mesh_data && !mesh_dump_done)
+                if (mesh_data && (!mesh_dump_done || mesh_data->draw_call_list[0].is_ge_polygon()))
 				{
                     group_mesh_data->meshes.push_back(mesh_data);
 				}
