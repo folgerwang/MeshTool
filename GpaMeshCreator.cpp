@@ -107,6 +107,7 @@ bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::P
     {
         return false;
     }
+    num_points = 3;
 
     // Bring all the points to the centroid
     cv::Point3d src_centroid(0, 0, 0);
@@ -358,10 +359,15 @@ bool DumpGeFilesWithReference(const string& kml_name,
                 {
                     for (int j = 0; j < data_mesh->num_vertex - 1; j++)
                     {
-                        core::vec3d transformed_position = ApplyMatrix(vertex_list[uint32_t(j + 1)], data_mesh->dumpped_matrix);
+                        core::vec3d transformed_position = ApplyMatrix(vertex_list[j], data_mesh->dumpped_matrix);
                         source_point_list.push_back(cv::Point3d(transformed_position.x, transformed_position.y, transformed_position.z));
                     }
 
+                    // polygon (TriangleStrip index order is 1, 2, 0, 3)
+                    auto t_v = source_point_list[2];
+                    source_point_list[2] = source_point_list[1];
+                    source_point_list[1] = source_point_list[0];
+                    source_point_list[0] = t_v;
                     num_non_tri_meshes ++;
                 }
             }
