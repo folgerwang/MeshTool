@@ -2,6 +2,10 @@
 #include <windows.h>
 #undef NOGDI
 #include <cstring>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <string>
 #include "glhook_ipc_writer.h"
 #include "glhook_state.h"
 #include "glhook_overlay.h"
@@ -45,6 +49,10 @@ typedef void   (__stdcall *PFN_glUseProgram)(unsigned int);
 extern PFN_glBufferData              real_glBufferData;
 extern PFN_glBufferSubData           real_glBufferSubData;
 extern PFN_glGenBuffers              real_glGenBuffers;
+typedef void   (__stdcall *PFN_glDeleteBuffers)(int, const unsigned int*);
+extern PFN_glDeleteBuffers           real_glDeleteBuffers;
+typedef void (__stdcall *PFN_glDrawRangeElements)(unsigned int, unsigned int, unsigned int, int, unsigned int, const void*);
+static PFN_glDrawRangeElements real_glDrawRangeElements = nullptr;
 extern PFN_glBindBuffer              real_glBindBuffer;
 extern PFN_glVertexAttribPointer     real_glVertexAttribPointer;
 extern PFN_glVertexAttribIPointer    real_glVertexAttribIPointer;
@@ -57,16 +65,18 @@ extern PFN_glShaderSource           real_glShaderSource;
 extern PFN_glUseProgram             real_glUseProgram;
 
 // Defined in glhook_main.cpp
-extern void ResolveExtensions();
+extern void EnsureRealLoaded();
+extern void ProxyLog(const char* fmt, ...);
 extern HMODULE g_real_opengl32;
 
-static bool g_extensions_resolved = false;
 static bool g_capturing_frame = false;
 
 // Forward declarations for hooked extension functions (defined below extern "C" block)
 void __stdcall hooked_glBufferData(unsigned int, ptrdiff_t, const void*, unsigned int);
 void __stdcall hooked_glBufferSubData(unsigned int, ptrdiff_t, ptrdiff_t, const void*);
 void __stdcall hooked_glGenBuffers(int, unsigned int*);
+void __stdcall hooked_glDeleteBuffers(int, const unsigned int*);
+void __stdcall hooked_glDrawRangeElements(unsigned int, unsigned int, unsigned int, int, unsigned int, const void*);
 void __stdcall hooked_glBindBuffer(unsigned int, unsigned int);
 void __stdcall hooked_glVertexAttribPointer(unsigned int, int, unsigned int, unsigned char, int, const void*);
 void __stdcall hooked_glVertexAttribIPointer(unsigned int, int, unsigned int, int, const void*);
@@ -79,6 +89,201 @@ void __stdcall hooked_glShaderSource(unsigned int, int, const char**, const int*
 void __stdcall hooked_glUseProgram(unsigned int);
 
 // ============================================================================
+// Shadow copies of buffer contents
+// ============================================================================
+// Google Earth uploads a tile's vertex/index buffers once, when the tile loads,
+// long before anyone presses Capture. So every upload is mirrored here, and
+// during a capture each buffer a draw call uses is sent (once per capture)
+// right before that draw record.
+
+static std::unordered_map<uint32_t, std::vector<uint8_t>> g_shadow_buffers;
+static std::unordered_set<uint32_t> g_sent_buffers;   // sent in the current capture
+static SRWLOCK g_shadow_lock = SRWLOCK_INIT;           // uploads may come from a loader thread
+
+static void ShadowBufferData(uint32_t id, const void* data, size_t size)
+{
+    if (id == 0) return;
+    AcquireSRWLockExclusive(&g_shadow_lock);
+    std::vector<uint8_t>& buf = g_shadow_buffers[id];
+    if (data)
+        buf.assign((const uint8_t*)data, (const uint8_t*)data + size);
+    else
+        buf.assign(size, 0);
+    ReleaseSRWLockExclusive(&g_shadow_lock);
+}
+
+static void ShadowBufferSubData(uint32_t id, size_t offset, const void* data, size_t size)
+{
+    if (id == 0 || !data) return;
+    AcquireSRWLockExclusive(&g_shadow_lock);
+    std::vector<uint8_t>& buf = g_shadow_buffers[id];
+    if (buf.size() < offset + size)
+        buf.resize(offset + size, 0);
+    memcpy(buf.data() + offset, data, size);
+    ReleaseSRWLockExclusive(&g_shadow_lock);
+}
+
+static void ShadowDeleteBuffers(int n, const unsigned int* ids)
+{
+    if (!ids) return;
+    AcquireSRWLockExclusive(&g_shadow_lock);
+    for (int i = 0; i < n; i++)
+    {
+        g_shadow_buffers.erase(ids[i]);
+        g_sent_buffers.erase(ids[i]);
+    }
+    ReleaseSRWLockExclusive(&g_shadow_lock);
+}
+
+// Send the shadow copy of one buffer as a normal CMD_BUFFER_DATA record.
+static void EmitShadowBuffer(uint32_t id)
+{
+    if (id == 0 || id == 0xFFFFFFFFu || g_sent_buffers.count(id))
+        return;
+    AcquireSRWLockShared(&g_shadow_lock);
+    auto it = g_shadow_buffers.find(id);
+    if (it != g_shadow_buffers.end())
+    {
+        uint32_t size = (uint32_t)it->second.size();
+        void* payload = g_ipc_writer.BeginRecord(CMD_BUFFER_DATA, sizeof(CmdBufferData) + size);
+        if (payload)
+        {
+            CmdBufferData* cmd = (CmdBufferData*)payload;
+            cmd->target = 0;
+            cmd->size = size;
+            cmd->usage = 0;
+            cmd->buffer_id = id;
+            if (size)
+                memcpy(cmd + 1, it->second.data(), size);
+            g_ipc_writer.EndRecord();
+            g_sent_buffers.insert(id);
+        }
+    }
+    ReleaseSRWLockShared(&g_shadow_lock);
+}
+
+// Buffers referenced by the draw call about to be recorded.
+static void EmitDrawResources(bool indexed)
+{
+    if (indexed)
+        EmitShadowBuffer(g_hook_state.bound_element_buffer);
+    for (int i = 0; i < MAX_VERTEX_ATTRIBS; i++)
+    {
+        if (g_hook_state.vertex_attribs[i].is_enabled)
+            EmitShadowBuffer(g_hook_state.vertex_attribs[i].data_buffer_obj);
+    }
+}
+
+// Byte size of glTexImage2D client data, honouring GL_UNPACK_ALIGNMENT /
+// GL_UNPACK_ROW_LENGTH; 0 if unknown or if a pixel unpack buffer is bound
+// (then `data` is an offset, not a pointer).
+static uint32_t TexImageDataSize(int width, int height, unsigned int format, unsigned int type)
+{
+    typedef void (__stdcall *PFN_GetIntegerv)(unsigned int, int*);
+    static PFN_GetIntegerv getIntegerv = (PFN_GetIntegerv)GetProcAddress(g_real_opengl32, "glGetIntegerv");
+    if (!getIntegerv || width <= 0 || height <= 0)
+        return 0;
+
+    int unpack_buffer = 0;
+    getIntegerv(0x88EF, &unpack_buffer);   // GL_PIXEL_UNPACK_BUFFER_BINDING
+    if (unpack_buffer)
+        return 0;
+
+    int components = 0;
+    switch (format)
+    {
+    case 0x1903: case 0x1906: case 0x1909: case 0x1902: case 0x8D94: components = 1; break;  // RED, ALPHA, LUMINANCE, DEPTH, RED_INTEGER
+    case 0x190A: case 0x8227: components = 2; break;                                        // LUMINANCE_ALPHA, RG
+    case 0x1907: case 0x80E0: components = 3; break;                                        // RGB, BGR
+    case 0x1908: case 0x80E1: components = 4; break;                                        // RGBA, BGRA
+    }
+
+    int bytes_per_pixel = 0;
+    switch (type)
+    {
+    case 0x1400: case 0x1401: bytes_per_pixel = components; break;              // BYTE, UNSIGNED_BYTE
+    case 0x1402: case 0x1403: case 0x140B: bytes_per_pixel = components * 2; break;  // SHORT, UNSIGNED_SHORT, HALF_FLOAT
+    case 0x1404: case 0x1405: case 0x1406: bytes_per_pixel = components * 4; break;  // INT, UNSIGNED_INT, FLOAT
+    case 0x8363: case 0x8364: case 0x8033: case 0x8365: case 0x8034: case 0x8366: bytes_per_pixel = 2; break;  // packed 16-bit
+    case 0x8035: case 0x8367: case 0x8036: case 0x8368: bytes_per_pixel = 4; break;                            // packed 32-bit
+    }
+    if (bytes_per_pixel == 0)
+        return 0;
+
+    int alignment = 4, row_length = 0;
+    getIntegerv(0x0CF5, &alignment);    // GL_UNPACK_ALIGNMENT
+    getIntegerv(0x0CF2, &row_length);   // GL_UNPACK_ROW_LENGTH
+    if (alignment <= 0) alignment = 1;
+
+    uint64_t row = uint64_t(row_length > 0 ? row_length : width) * bytes_per_pixel;
+    uint64_t row_aligned = (row + alignment - 1) / alignment * alignment;
+    uint64_t total = row_aligned * uint64_t(height - 1) + uint64_t(width) * bytes_per_pixel;
+    return total > 0xFFFFFFFFull ? 0 : uint32_t(total);
+}
+
+// ============================================================================
+// Frames and capture boundaries
+// ============================================================================
+// One frame = everything between two wglSwapBuffers calls. (Stencil clears
+// were used before, but Google Earth clears the stencil several times a frame.)
+
+struct FrameCallCounts
+{
+    uint32_t draw_elements, draw_range_elements, draw_arrays, clears, stencil_clears;
+};
+static FrameCallCounts g_frame_calls = {};
+static uint32_t g_swap_count = 0;
+
+static void OnFrameBoundary()
+{
+    g_swap_count++;
+    if (g_swap_count <= 3 || g_swap_count % 1000 == 0 || g_capturing_frame)
+    {
+        ProxyLog("frame %u: glDrawElements=%u glDrawRangeElements=%u glDrawArrays=%u glClear=%u (stencil %u)%s\n",
+                 g_swap_count, g_frame_calls.draw_elements, g_frame_calls.draw_range_elements,
+                 g_frame_calls.draw_arrays, g_frame_calls.clears, g_frame_calls.stencil_clears,
+                 g_capturing_frame ? "  [captured]" : "");
+    }
+    g_frame_calls = {};
+
+    g_capture_stats.last_frame_draws = g_capture_stats.draws_this_frame;
+    g_capture_stats.draws_this_frame = 0;
+
+    GLCaptureHeader* hdr = g_ipc_writer.GetHeader();
+    if (g_capturing_frame)
+    {
+        g_ipc_writer.WriteRecord(CMD_FRAME_END, nullptr, 0);
+        g_ipc_writer.SetRecording(false);
+        g_ipc_writer.SignalReady();
+        g_capturing_frame = false;
+        g_ipc_writer.ClearStatus(GLCAPTURE_STATUS_CAPTURING);
+
+        uint32_t end = hdr ? hdr->write_offset : 0;
+        uint32_t start = g_capture_stats.capture_start_offset;
+        g_capture_stats.last_capture_bytes = end >= start ? end - start : GLCAPTURE_RING_SIZE - start + end;
+        g_capture_stats.last_capture_draws = g_capture_stats.captured_draws;
+        g_capture_stats.captures_done++;
+        ProxyLog("capture %u done: %u of %u draw calls recorded, %u buffers sent, %u bytes%s\n",
+                 g_capture_stats.captures_done, g_capture_stats.captured_draws, g_capture_stats.last_frame_draws,
+                 (unsigned)g_sent_buffers.size(), g_capture_stats.last_capture_bytes,
+                 (hdr && (hdr->status_flags & GLCAPTURE_STATUS_OVERFLOW)) ? "  (RING OVERFLOW - data dropped)" : "");
+    }
+
+    if (g_ipc_writer.IsFrameRequested())
+    {
+        g_capturing_frame = true;
+        g_ipc_writer.SetStatus(GLCAPTURE_STATUS_CAPTURING);
+        g_ipc_writer.ClearFrameRequest();
+        if (hdr) hdr->frame_count++;
+        g_capture_stats.captured_draws = 0;
+        g_capture_stats.capture_start_offset = hdr ? hdr->write_offset : 0;
+        g_sent_buffers.clear();
+        g_ipc_writer.SetRecording(true);
+        ProxyLog("capture started (%u shadowed buffers)\n", (unsigned)g_shadow_buffers.size());
+    }
+}
+
+// ============================================================================
 // GL 1.1 Intercepted Functions (exported via .def file)
 // ============================================================================
 
@@ -86,6 +291,7 @@ extern "C" {
 
 __declspec(dllexport) void __stdcall glBindTexture(unsigned int target, unsigned int texture)
 {
+    EnsureRealLoaded();
     // Update state
     uint32_t unit = g_hook_state.active_texture_unit;
     if (unit < MAX_TEXTURE_UNITS)
@@ -100,38 +306,20 @@ __declspec(dllexport) void __stdcall glBindTexture(unsigned int target, unsigned
 
 __declspec(dllexport) void __stdcall glClear(unsigned int mask)
 {
-    // glClear is used as frame boundary detection
+    EnsureRealLoaded();
+    g_frame_calls.clears++;
+    if (mask & 0x0400) // GL_STENCIL_BUFFER_BIT
+        g_frame_calls.stencil_clears++;
+
     CmdClear cmd = { mask };
     g_ipc_writer.WriteRecord(CMD_CLEAR, &cmd, sizeof(cmd));
-
-    // Frame boundary: if stencil clear, mark frame end
-    if (mask & 0x0400) // GL_STENCIL_BUFFER_BIT
-    {
-        if (g_capturing_frame)
-        {
-            g_ipc_writer.WriteRecord(CMD_FRAME_END, nullptr, 0);
-            g_ipc_writer.SignalReady();
-            g_capturing_frame = false;
-            g_ipc_writer.ClearStatus(GLCAPTURE_STATUS_CAPTURING);
-        }
-
-        // Check if new frame capture requested
-        if (g_ipc_writer.IsFrameRequested())
-        {
-            g_capturing_frame = true;
-            g_ipc_writer.SetStatus(GLCAPTURE_STATUS_CAPTURING);
-            g_ipc_writer.ClearFrameRequest();
-
-            GLCaptureHeader* hdr = g_ipc_writer.GetHeader();
-            if (hdr) hdr->frame_count++;
-        }
-    }
 
     real_glClear(mask);
 }
 
 __declspec(dllexport) void __stdcall glCullFace(unsigned int mode)
 {
+    EnsureRealLoaded();
     CmdCullFace cmd = { mode };
     g_ipc_writer.WriteRecord(CMD_CULL_FACE, &cmd, sizeof(cmd));
     real_glCullFace(mode);
@@ -139,6 +327,7 @@ __declspec(dllexport) void __stdcall glCullFace(unsigned int mode)
 
 __declspec(dllexport) void __stdcall glDepthFunc(unsigned int func)
 {
+    EnsureRealLoaded();
     CmdDepthFunc cmd = { func };
     g_ipc_writer.WriteRecord(CMD_DEPTH_FUNC, &cmd, sizeof(cmd));
     real_glDepthFunc(func);
@@ -146,12 +335,16 @@ __declspec(dllexport) void __stdcall glDepthFunc(unsigned int func)
 
 __declspec(dllexport) void __stdcall glDisable(unsigned int cap)
 {
+    EnsureRealLoaded();
     g_ipc_writer.WriteRecord(CMD_DISABLE, &cap, sizeof(cap));
     real_glDisable(cap);
 }
 
 __declspec(dllexport) void __stdcall glDrawArrays(unsigned int mode, int first, int count)
 {
+    EnsureRealLoaded();
+    g_frame_calls.draw_arrays++;
+    g_capture_stats.draws_this_frame++;
     if (g_capturing_frame)
     {
         // Write draw call with state snapshot
@@ -160,6 +353,7 @@ __declspec(dllexport) void __stdcall glDrawArrays(unsigned int mode, int first, 
                                   16 * sizeof(float) +  // transform matrix
                                   sizeof(uint32_t);      // texture slot
 
+        EmitDrawResources(false);
         void* payload = g_ipc_writer.BeginRecord(CMD_DRAW_ARRAYS, snapshot_size);
         if (payload)
         {
@@ -191,14 +385,19 @@ __declspec(dllexport) void __stdcall glDrawArrays(unsigned int mode, int first, 
             *tex_slot = g_hook_state.bound_texture[0];
 
             g_ipc_writer.EndRecord();
+            g_capture_stats.captured_draws++;
         }
     }
 
     real_glDrawArrays(mode, first, count);
 }
 
-__declspec(dllexport) void __stdcall glDrawElements(unsigned int mode, int count, unsigned int type, const void* indices)
+} // extern "C"
+
+// Records an indexed draw (glDrawElements / glDrawRangeElements) while capturing.
+static void RecordDrawElements(unsigned int mode, int count, unsigned int type, const void* indices)
 {
+    g_capture_stats.draws_this_frame++;
     if (g_capturing_frame)
     {
         uint32_t snapshot_size = sizeof(CmdDrawElements) +
@@ -206,6 +405,7 @@ __declspec(dllexport) void __stdcall glDrawElements(unsigned int mode, int count
                                   16 * sizeof(float) +
                                   sizeof(uint32_t);
 
+        EmitDrawResources(true);
         void* payload = g_ipc_writer.BeginRecord(CMD_DRAW_ELEMENTS, snapshot_size);
         if (payload)
         {
@@ -236,20 +436,32 @@ __declspec(dllexport) void __stdcall glDrawElements(unsigned int mode, int count
             *tex_slot = g_hook_state.bound_texture[0];
 
             g_ipc_writer.EndRecord();
+            g_capture_stats.captured_draws++;
         }
     }
 
+}
+
+extern "C" {
+
+__declspec(dllexport) void __stdcall glDrawElements(unsigned int mode, int count, unsigned int type, const void* indices)
+{
+    EnsureRealLoaded();
+    g_frame_calls.draw_elements++;
+    RecordDrawElements(mode, count, type, indices);
     real_glDrawElements(mode, count, type, indices);
 }
 
 __declspec(dllexport) void __stdcall glEnable(unsigned int cap)
 {
+    EnsureRealLoaded();
     g_ipc_writer.WriteRecord(CMD_ENABLE, &cap, sizeof(cap));
     real_glEnable(cap);
 }
 
 __declspec(dllexport) void __stdcall glFrontFace(unsigned int mode)
 {
+    EnsureRealLoaded();
     CmdFrontFace cmd = { mode };
     g_ipc_writer.WriteRecord(CMD_FRONT_FACE, &cmd, sizeof(cmd));
     real_glFrontFace(mode);
@@ -257,6 +469,7 @@ __declspec(dllexport) void __stdcall glFrontFace(unsigned int mode)
 
 __declspec(dllexport) void __stdcall glGenTextures(int n, unsigned int* textures)
 {
+    EnsureRealLoaded();
     real_glGenTextures(n, textures);
 
     // Write after real call so we capture the generated IDs
@@ -273,6 +486,7 @@ __declspec(dllexport) void __stdcall glGenTextures(int n, unsigned int* textures
 
 __declspec(dllexport) void __stdcall glLoadMatrixf(const float* m)
 {
+    EnsureRealLoaded();
     CmdLoadMatrixf cmd;
     cmd.mode = g_hook_state.matrix_mode;
     memcpy(cmd.matrix, m, 16 * sizeof(float));
@@ -283,6 +497,7 @@ __declspec(dllexport) void __stdcall glLoadMatrixf(const float* m)
 
 __declspec(dllexport) void __stdcall glMatrixMode(unsigned int mode)
 {
+    EnsureRealLoaded();
     g_hook_state.matrix_mode = mode;
     g_ipc_writer.WriteRecord(CMD_MATRIX_MODE, &mode, sizeof(mode));
     real_glMatrixMode(mode);
@@ -292,9 +507,9 @@ __declspec(dllexport) void __stdcall glTexImage2D(unsigned int target, int level
                                                     int width, int height, int border,
                                                     unsigned int format, unsigned int type, const void* data)
 {
-    // Calculate data size for IPC
-    uint32_t pixel_size = 4; // Approximate - RGBA8 most common
-    uint32_t data_size = data ? (width * height * pixel_size) : 0;
+    EnsureRealLoaded();
+    // Only computed while recording: it queries GL state.
+    uint32_t data_size = (data && g_ipc_writer.IsRecording()) ? TexImageDataSize(width, height, format, type) : 0;
 
     uint32_t payload_size = sizeof(CmdTexImage2D) + data_size;
     void* payload = g_ipc_writer.BeginRecord(CMD_TEX_IMAGE_2D, payload_size);
@@ -324,6 +539,7 @@ __declspec(dllexport) void __stdcall glTexImage2D(unsigned int target, int level
 
 __declspec(dllexport) void __stdcall glBlendFunc(unsigned int sfactor, unsigned int dfactor)
 {
+    EnsureRealLoaded();
     CmdBlendFunc cmd = { sfactor, dfactor };
     g_ipc_writer.WriteRecord(CMD_BLEND_FUNC, &cmd, sizeof(cmd));
     real_glBlendFunc(sfactor, dfactor);
@@ -331,6 +547,7 @@ __declspec(dllexport) void __stdcall glBlendFunc(unsigned int sfactor, unsigned 
 
 __declspec(dllexport) void __stdcall glViewport(int x, int y, int width, int height)
 {
+    EnsureRealLoaded();
     CmdViewport cmd = { (uint32_t)x, (uint32_t)y, (uint32_t)width, (uint32_t)height };
     g_ipc_writer.WriteRecord(CMD_VIEWPORT, &cmd, sizeof(cmd));
     real_glViewport(x, y, width, height);
@@ -342,54 +559,72 @@ __declspec(dllexport) void __stdcall glViewport(int x, int y, int width, int hei
 
 __declspec(dllexport) void* __stdcall wglGetProcAddress(const char* name)
 {
-    // Resolve real extension pointers on first call
-    if (!g_extensions_resolved)
+    EnsureRealLoaded();
+    if (!real_wglGetProcAddress || !name)
+        return nullptr;
+
+    // Ask the driver first. Without a current context (Google Earth probes at
+    // startup) or for an unsupported function this is null, and we must return
+    // null too -- handing out our wrapper would make the app call a wrapper
+    // whose real pointer is null.
+    void* real = real_wglGetProcAddress(name);
+
+    // Log each distinct name once (tells us which entry points GE really uses).
+    static std::unordered_set<std::string> logged_names;
+    if (logged_names.insert(name).second)
+        ProxyLog("wglGetProcAddress(%s) -> %p\n", name, real);
+
+    if (!real)
+        return nullptr;
+
+    // Functions we intercept: remember the driver pointer from this lookup and
+    // return our wrapper. ARB/EXT names share the core wrapper and slot.
+    struct Hook { const char* name; void** real_slot; void* wrapper; };
+    static const Hook hooks[] = {
+        { "glBufferData",               (void**)&real_glBufferData,               (void*)hooked_glBufferData },
+        { "glBufferDataARB",            (void**)&real_glBufferData,               (void*)hooked_glBufferData },
+        { "glBufferSubData",            (void**)&real_glBufferSubData,            (void*)hooked_glBufferSubData },
+        { "glBufferSubDataARB",         (void**)&real_glBufferSubData,            (void*)hooked_glBufferSubData },
+        { "glGenBuffers",               (void**)&real_glGenBuffers,               (void*)hooked_glGenBuffers },
+        { "glGenBuffersARB",            (void**)&real_glGenBuffers,               (void*)hooked_glGenBuffers },
+        { "glDeleteBuffers",            (void**)&real_glDeleteBuffers,            (void*)hooked_glDeleteBuffers },
+        { "glDrawRangeElements",        (void**)&real_glDrawRangeElements,        (void*)hooked_glDrawRangeElements },
+        { "glDrawRangeElementsEXT",     (void**)&real_glDrawRangeElements,        (void*)hooked_glDrawRangeElements },
+        { "glDeleteBuffersARB",         (void**)&real_glDeleteBuffers,            (void*)hooked_glDeleteBuffers },
+        { "glBindBuffer",               (void**)&real_glBindBuffer,               (void*)hooked_glBindBuffer },
+        { "glBindBufferARB",            (void**)&real_glBindBuffer,               (void*)hooked_glBindBuffer },
+        { "glVertexAttribPointer",      (void**)&real_glVertexAttribPointer,      (void*)hooked_glVertexAttribPointer },
+        { "glVertexAttribIPointer",     (void**)&real_glVertexAttribIPointer,     (void*)hooked_glVertexAttribIPointer },
+        { "glEnableVertexAttribArray",  (void**)&real_glEnableVertexAttribArray,  (void*)hooked_glEnableVertexAttribArray },
+        { "glDisableVertexAttribArray", (void**)&real_glDisableVertexAttribArray, (void*)hooked_glDisableVertexAttribArray },
+        { "glActiveTexture",            (void**)&real_glActiveTexture,            (void*)hooked_glActiveTexture },
+        { "glActiveTextureARB",         (void**)&real_glActiveTexture,            (void*)hooked_glActiveTexture },
+        { "glCompressedTexImage2D",     (void**)&real_glCompressedTexImage2D,     (void*)hooked_glCompressedTexImage2D },
+        { "glCompressedTexImage2DARB",  (void**)&real_glCompressedTexImage2D,     (void*)hooked_glCompressedTexImage2D },
+        { "glUniformMatrix4fv",         (void**)&real_glUniformMatrix4fv,         (void*)hooked_glUniformMatrix4fv },
+        { "glShaderSource",             (void**)&real_glShaderSource,             (void*)hooked_glShaderSource },
+        { "glUseProgram",               (void**)&real_glUseProgram,               (void*)hooked_glUseProgram },
+    };
+    for (const Hook& h : hooks)
     {
-        ResolveExtensions();
-        g_extensions_resolved = true;
+        if (strcmp(name, h.name) == 0)
+        {
+            *h.real_slot = real;
+            return h.wrapper;
+        }
     }
-
-    // Return our hooked version for functions we intercept
-    if (strcmp(name, "glBufferData") == 0)            return (void*)hooked_glBufferData;
-    if (strcmp(name, "glBufferSubData") == 0)          return (void*)hooked_glBufferSubData;
-    if (strcmp(name, "glGenBuffers") == 0)             return (void*)hooked_glGenBuffers;
-    if (strcmp(name, "glBindBuffer") == 0)             return (void*)hooked_glBindBuffer;
-    if (strcmp(name, "glVertexAttribPointer") == 0)    return (void*)hooked_glVertexAttribPointer;
-    if (strcmp(name, "glVertexAttribIPointer") == 0)   return (void*)hooked_glVertexAttribIPointer;
-    if (strcmp(name, "glEnableVertexAttribArray") == 0)  return (void*)hooked_glEnableVertexAttribArray;
-    if (strcmp(name, "glDisableVertexAttribArray") == 0) return (void*)hooked_glDisableVertexAttribArray;
-    if (strcmp(name, "glActiveTexture") == 0)          return (void*)hooked_glActiveTexture;
-    if (strcmp(name, "glCompressedTexImage2D") == 0)   return (void*)hooked_glCompressedTexImage2D;
-    if (strcmp(name, "glUniformMatrix4fv") == 0)       return (void*)hooked_glUniformMatrix4fv;
-    if (strcmp(name, "glShaderSource") == 0)           return (void*)hooked_glShaderSource;
-    if (strcmp(name, "glUseProgram") == 0)             return (void*)hooked_glUseProgram;
-
-    // Also handle ARB/EXT variants
-    if (strcmp(name, "glBufferDataARB") == 0)          return (void*)hooked_glBufferData;
-    if (strcmp(name, "glBufferSubDataARB") == 0)       return (void*)hooked_glBufferSubData;
-    if (strcmp(name, "glGenBuffersARB") == 0)          return (void*)hooked_glGenBuffers;
-    if (strcmp(name, "glBindBufferARB") == 0)          return (void*)hooked_glBindBuffer;
-    if (strcmp(name, "glActiveTextureARB") == 0)       return (void*)hooked_glActiveTexture;
-    if (strcmp(name, "glCompressedTexImage2DARB") == 0) return (void*)hooked_glCompressedTexImage2D;
-
-    // For everything else, return the real function
-    return real_wglGetProcAddress(name);
+    return real;
 }
 
 __declspec(dllexport) int __stdcall wglMakeCurrent(void* hdc, void* hglrc)
 {
+    EnsureRealLoaded();
     int result = real_wglMakeCurrent(hdc, hglrc);
 
-    if (result && hglrc && !g_extensions_resolved)
-    {
-        // GL context is now current - resolve extension functions
-        ResolveExtensions();
-        g_extensions_resolved = true;
-
-        // Try to connect IPC if not already connected
-        if (!g_ipc_writer.IsConnected())
-            g_ipc_writer.Init();
-    }
+    // Connect to MeshTool's shared memory; retried until it exists, so MeshTool
+    // may also be started after Google Earth.
+    if (result && hglrc && !g_ipc_writer.IsConnected())
+        g_ipc_writer.Init();
 
     return result;
 }
@@ -400,6 +635,12 @@ __declspec(dllexport) int __stdcall wglMakeCurrent(void* hdc, void* hglrc)
 
 __declspec(dllexport) int __stdcall wglSwapBuffers(void* hdc)
 {
+    EnsureRealLoaded();
+
+    // The frame is complete: finish a running capture, start a requested one.
+    // (The overlay below uses the real GL entry points, so it is not recorded.)
+    OnFrameBoundary();
+
     // Render MeshTool overlay on top of Google Earth's frame
     OverlayRender(hdc);
 
@@ -427,6 +668,8 @@ void __stdcall hooked_glBufferData(unsigned int target, ptrdiff_t size, const vo
     else if (target == 0x8893) // GL_ELEMENT_ARRAY_BUFFER
         buffer_id = g_hook_state.bound_element_buffer;
 
+    ShadowBufferData(buffer_id, data, (size_t)size);
+
     // Write buffer data to IPC
     uint32_t payload_size = sizeof(CmdBufferData) + (data ? (uint32_t)size : 0);
     void* payload = g_ipc_writer.BeginRecord(CMD_BUFFER_DATA, payload_size);
@@ -442,6 +685,7 @@ void __stdcall hooked_glBufferData(unsigned int target, ptrdiff_t size, const vo
             memcpy(cmd + 1, data, (size_t)size);
 
         g_ipc_writer.EndRecord();
+        g_sent_buffers.insert(buffer_id);   // the reader now has the latest contents
     }
 
     real_glBufferData(target, size, data, usage);
@@ -454,6 +698,8 @@ void __stdcall hooked_glBufferSubData(unsigned int target, ptrdiff_t offset, ptr
         buffer_id = g_hook_state.bound_array_buffer;
     else if (target == 0x8893)
         buffer_id = g_hook_state.bound_element_buffer;
+
+    ShadowBufferSubData(buffer_id, (size_t)offset, data, (size_t)size);
 
     uint32_t payload_size = sizeof(CmdBufferSubData) + (data ? (uint32_t)size : 0);
     void* payload = g_ipc_writer.BeginRecord(CMD_BUFFER_SUB_DATA, payload_size);
@@ -487,6 +733,19 @@ void __stdcall hooked_glGenBuffers(int n, unsigned int* buffers)
         memcpy(cmd + 1, buffers, n * sizeof(uint32_t));
         g_ipc_writer.EndRecord();
     }
+}
+
+void __stdcall hooked_glDrawRangeElements(unsigned int mode, unsigned int start, unsigned int end, int count, unsigned int type, const void* indices)
+{
+    g_frame_calls.draw_range_elements++;
+    RecordDrawElements(mode, count, type, indices);
+    real_glDrawRangeElements(mode, start, end, count, type, indices);
+}
+
+void __stdcall hooked_glDeleteBuffers(int n, const unsigned int* buffers)
+{
+    ShadowDeleteBuffers(n, buffers);
+    real_glDeleteBuffers(n, buffers);
 }
 
 void __stdcall hooked_glBindBuffer(unsigned int target, unsigned int buffer)

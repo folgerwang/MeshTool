@@ -87,7 +87,6 @@ private:
     void ActionImportGEDump();
     void ActionImportUSGS();
     void ActionImportKML();
-    void ActionImportFBX();
     void ActionExport();
     void ActionLiveCapture();
     void ActionNavCapture();  // Navigate to location & auto-capture

@@ -2,6 +2,7 @@
 #include <cstring>
 
 HookGLState g_hook_state;
+CaptureStats g_capture_stats = {};
 
 void HookGLState::Reset()
 {

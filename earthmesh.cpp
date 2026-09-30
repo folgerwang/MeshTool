@@ -4,7 +4,6 @@
 #include "meshdata.h"
 #include "worlddata.h"
 #include "texture_util.h"
-#include "opencv2/opencv.hpp"
 // Qt removed
 #include "debugout.h"
 

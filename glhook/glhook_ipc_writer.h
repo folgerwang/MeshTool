@@ -36,6 +36,11 @@ public:
 
     GLCaptureHeader* GetHeader() { return m_header; }
 
+    // Records are only written while recording (i.e. during a captured frame),
+    // so the ring does not fill up with GL traffic between captures.
+    void SetRecording(bool on) { m_recording = on; }
+    bool IsRecording() const { return m_recording; }
+
 private:
     HANDLE              m_mapping;
     void*               m_shared_mem;
@@ -47,6 +52,7 @@ private:
 
     uint32_t            m_current_record_offset;
     uint32_t            m_current_record_size;
+    bool                m_recording = false;
 
     uint32_t AvailableSpace() const;
 };

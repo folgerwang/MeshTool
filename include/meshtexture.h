@@ -1,7 +1,6 @@
 #pragma once
 #include "coremath.h"
 #include "coretexture.h"
-#include "opencv2/opencv.hpp"
 
 #define USE_USGS_MAP_TEXTURE 0
 
@@ -52,7 +51,8 @@ struct DumppedTextureInfo
     shared_ptr<string> file_name;
     core::bounds2d	bbox;
     uint32_t        tex_id;
-    cv::Mat         tex_body;
+    int32_t         tex_width = 0;
+    int32_t         tex_height = 0;
     TFWInfo         tfw_info;
     XMLInfo         xml_info;
 };

@@ -2,7 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "opencv2/opencv.hpp"
+#include <glm/glm.hpp>
 #include "debugout.h"
 
 // QMessageBox removed - using stderr for error reporting
@@ -13,7 +13,6 @@
 #include "meshdata.h"
 #include "worlddata.h"
 #include "kmlfileparser.h"
-#include <fbxsdk.h>
 
 using namespace std;
 namespace fs = experimental::filesystem::v1;
@@ -33,37 +32,32 @@ core::vec3d ApplyMatrix(const core::vec3f& src_point, const core::matrix4d& tran
     return result;
 }
 
-cv::Point3d ApplyRotMatrix(const cv::Point3d& a, const cv::Mat& m)
+// glm matrices are column-major: element (row, col) is m[col][row].
+// Points are row vectors multiplied from the left, as in the original code.
+glm::dvec3 ApplyRotMatrix(const glm::dvec3& a, const glm::dmat3& m)
 {
-    cv::Point3d r;
-    r.x = a.x * m.at<double>(0, 0) + a.y * m.at<double>(1, 0) + a.z * m.at<double>(2, 0);
-    r.y = a.x * m.at<double>(0, 1) + a.y * m.at<double>(1, 1) + a.z * m.at<double>(2, 1);
-    r.z = a.x * m.at<double>(0, 2) + a.y * m.at<double>(1, 2) + a.z * m.at<double>(2, 2);
-
-    return r;
+    return a * m;
 }
 
-core::vec3f ApplyRotMatrix(const core::vec3f& a, const cv::Mat& m)
+core::vec3f ApplyRotMatrix(const core::vec3f& a, const glm::dmat3& m)
 {
-    cv::Point3d r = ApplyRotMatrix(cv::Point3d(double(a.x), double(a.y), double(a.z)), m);
+    glm::dvec3 r = ApplyRotMatrix(glm::dvec3(double(a.x), double(a.y), double(a.z)), m);
     return core::vec3f(float(r.x), float(r.y), float(r.z));
 }
 
-void MulMatrix(const core::matrix4d& local_mat, const cv::Mat& global_trans_mat, core::matrix4d& final_trans_mat)
+void MulMatrix(const core::matrix4d& local_mat, const glm::dmat4& global_trans_mat, core::matrix4d& final_trans_mat)
 {
     for (int i_row = 0; i_row < 4; i_row++)
         for (int i_col = 0; i_col < 4; i_col++)
         {
             core::vec4d row = local_mat.get_row(i_row);
-            core::vec4d col(global_trans_mat.at<double>(0, i_col),
-                            global_trans_mat.at<double>(1, i_col),
-                            global_trans_mat.at<double>(2, i_col),
-                            global_trans_mat.at<double>(3, i_col));
+            const glm::dvec4& c = global_trans_mat[i_col];
+            core::vec4d col(c.x, c.y, c.z, c.w);
             final_trans_mat(i_row, i_col) = dot(row, col);
         }
 }
 
-void GenerateRotateMatrix(const cv::Point3d& axis, const double& angle, cv::Mat& rot_mat)
+void GenerateRotateMatrix(const glm::dvec3& axis, const double& angle, glm::dmat3& rot_mat)
 {
     double ca = cos(angle);
     double osca = (1.0 - ca);
@@ -78,29 +72,29 @@ void GenerateRotateMatrix(const cv::Point3d& axis, const double& angle, cv::Mat&
     double xz = x * z;
     double yz = y * z;
 
-    rot_mat.at<double>(0, 0) = ca + xx * osca;
-    rot_mat.at<double>(0, 1) = xy * osca - z * sa;
-    rot_mat.at<double>(0, 2) = xz * osca + y * sa;
-    rot_mat.at<double>(1, 0) = xy * osca + z * sa;
-    rot_mat.at<double>(1, 1) = ca + yy * osca;
-    rot_mat.at<double>(1, 2) = yz * osca - x * sa;
-    rot_mat.at<double>(2, 0) = xz * osca - y * sa;
-    rot_mat.at<double>(2, 1) = yz * osca + x * sa;
-    rot_mat.at<double>(2, 2) = ca + zz * osca;
+    rot_mat[0][0] = ca + xx * osca;         // (0, 0)
+    rot_mat[1][0] = xy * osca - z * sa;     // (0, 1)
+    rot_mat[2][0] = xz * osca + y * sa;     // (0, 2)
+    rot_mat[0][1] = xy * osca + z * sa;     // (1, 0)
+    rot_mat[1][1] = ca + yy * osca;         // (1, 1)
+    rot_mat[2][1] = yz * osca - x * sa;     // (1, 2)
+    rot_mat[0][2] = xz * osca - y * sa;     // (2, 0)
+    rot_mat[1][2] = yz * osca + x * sa;     // (2, 1)
+    rot_mat[2][2] = ca + zz * osca;         // (2, 2)
 }
 
-double GetDet(const cv::Point3d& vec)
+double GetDet(const glm::dvec3& vec)
 {
     return sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
 }
 
-cv::Point3d Normalize(const cv::Point3d& vec)
+glm::dvec3 Normalize(const glm::dvec3& vec)
 {
     double det = GetDet(vec);
     return vec / det;
 }
 
-bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::Point3d>& dst_points, cv::Mat& transform_mat)
+bool GetRigidTransform(const vector<glm::dvec3>& src_points, const vector<glm::dvec3>& dst_points, glm::dmat4& transform_mat)
 {
     uint64_t num_points = min(src_points.size(), dst_points.size());
     if (num_points < 3)
@@ -110,8 +104,8 @@ bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::P
     num_points = 3;
 
     // Bring all the points to the centroid
-    cv::Point3d src_centroid(0, 0, 0);
-    cv::Point3d dst_centroid(0, 0, 0);
+    glm::dvec3 src_centroid(0.0);
+    glm::dvec3 dst_centroid(0.0);
 
     for (uint32_t i = 0; i < num_points; i++)
     {
@@ -122,7 +116,7 @@ bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::P
     src_centroid /= double(num_points);
     dst_centroid /= double(num_points);
 
-    vector<cv::Point3d> adj_src_points, adj_dst_points;
+    vector<glm::dvec3> adj_src_points, adj_dst_points;
     adj_src_points.reserve(src_points.size());
     adj_dst_points.reserve(dst_points.size());
     for (uint32_t i = 0; i < num_points; i++)
@@ -134,51 +128,51 @@ bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::P
     double sum_src_dist = 0, sum_dst_dist = 0;
     for (uint32_t i = 0; i < num_points; i++)
     {
-        sum_src_dist += sqrt(adj_src_points[i].dot(adj_src_points[i]));
-        sum_dst_dist += sqrt(adj_dst_points[i].dot(adj_dst_points[i]));
+        sum_src_dist += sqrt(glm::dot(adj_src_points[i], adj_src_points[i]));
+        sum_dst_dist += sqrt(glm::dot(adj_dst_points[i], adj_dst_points[i]));
     }
 
     double src_scale = sum_src_dist / num_points;
     double dst_scale = sum_dst_dist / num_points;
 
-    cv::Point3d s_sum_normal(0, 0, 0), d_sum_normal(0, 0, 0);
+    glm::dvec3 s_sum_normal(0.0), d_sum_normal(0.0);
     for (uint32_t i = 0; i < num_points; i++)
     {
-        cv::Point3d s_vec_0 = Normalize(adj_src_points[i]);
-        cv::Point3d s_vec_1 = Normalize(adj_src_points[(i + 1) % num_points]);
-        cv::Point3d d_vec_0 = Normalize(adj_dst_points[i]);
-        cv::Point3d d_vec_1 = Normalize(adj_dst_points[(i + 1) % num_points]);
-        double s_weight = acos(abs(s_vec_0.dot(s_vec_1)));
-        s_sum_normal += Normalize(s_vec_0.cross(s_vec_1)) * s_weight;
-        double d_weight = acos(abs(d_vec_0.dot(d_vec_1)));
-        d_sum_normal += Normalize(d_vec_0.cross(d_vec_1)) * d_weight;
+        glm::dvec3 s_vec_0 = Normalize(adj_src_points[i]);
+        glm::dvec3 s_vec_1 = Normalize(adj_src_points[(i + 1) % num_points]);
+        glm::dvec3 d_vec_0 = Normalize(adj_dst_points[i]);
+        glm::dvec3 d_vec_1 = Normalize(adj_dst_points[(i + 1) % num_points]);
+        double s_weight = acos(abs(glm::dot(s_vec_0, s_vec_1)));
+        s_sum_normal += Normalize(glm::cross(s_vec_0, s_vec_1)) * s_weight;
+        double d_weight = acos(abs(glm::dot(d_vec_0, d_vec_1)));
+        d_sum_normal += Normalize(glm::cross(d_vec_0, d_vec_1)) * d_weight;
     }
 
-    cv::Point3d s_poly_normal = Normalize(s_sum_normal);
-    cv::Point3d d_poly_normal = Normalize(d_sum_normal);
+    glm::dvec3 s_poly_normal = Normalize(s_sum_normal);
+    glm::dvec3 d_poly_normal = Normalize(d_sum_normal);
 
-    cv::Point3d cross_vec = s_poly_normal.cross(d_poly_normal);
+    glm::dvec3 cross_vec = glm::cross(s_poly_normal, d_poly_normal);
     double sin_a = GetDet(cross_vec);
-    cv::Point3d rot_axis = cross_vec / sin_a;
+    glm::dvec3 rot_axis = cross_vec / sin_a;
 
-    cv::Mat rot_mat_0(3, 3, CV_64F);
+    glm::dmat3 rot_mat_0(1.0);
     GenerateRotateMatrix(rot_axis, -asin(sin_a), rot_mat_0);
 
-    cv::Point3d& rot_axis_1 = d_poly_normal;
+    glm::dvec3& rot_axis_1 = d_poly_normal;
 
     double sum_rot_angle = 0.0;
     for (uint32_t i = 0; i < num_points; i++)
     {
-        cv::Point3d n_s_vec_1 = Normalize(ApplyRotMatrix(adj_src_points[i], rot_mat_0));
-        cv::Point3d n_d_vec_1 = Normalize(adj_dst_points[i]);
+        glm::dvec3 n_s_vec_1 = Normalize(ApplyRotMatrix(adj_src_points[i], rot_mat_0));
+        glm::dvec3 n_d_vec_1 = Normalize(adj_dst_points[i]);
 
-        cv::Point3d n_s_norm_1 = Normalize(rot_axis_1.cross(n_s_vec_1));
-        cv::Point3d n_d_norm_1 = Normalize(rot_axis_1.cross(n_d_vec_1));
+        glm::dvec3 n_s_norm_1 = Normalize(glm::cross(rot_axis_1, n_s_vec_1));
+        glm::dvec3 n_d_norm_1 = Normalize(glm::cross(rot_axis_1, n_d_vec_1));
 
-        cv::Point3d cross_vec_1 = n_s_norm_1.cross(n_d_norm_1);
+        glm::dvec3 cross_vec_1 = glm::cross(n_s_norm_1, n_d_norm_1);
         double sin_a_1 = GetDet(cross_vec_1);
 
-        if (rot_axis_1.dot(cross_vec_1) < 0.0)
+        if (glm::dot(rot_axis_1, cross_vec_1) < 0.0)
         {
             sin_a_1 = -sin_a_1;
         }
@@ -186,64 +180,69 @@ bool GetRigidTransform(const vector<cv::Point3d>& src_points, const vector<cv::P
         sum_rot_angle += -asin(sin_a_1);
     }
 
-    cv::Mat rot_mat_1(3, 3, CV_64F);
+    glm::dmat3 rot_mat_1(1.0);
     GenerateRotateMatrix(rot_axis_1, sum_rot_angle / num_points, rot_mat_1);
 
     double scale_value = dst_scale / src_scale;
-    cv::Mat scale_mat = (cv::Mat_<double>(3, 3) << scale_value, 0, 0, 0, scale_value, 0, 0, 0, scale_value);
+    glm::dmat3 scale_mat(scale_value);
 
-    cv::Mat rot_scale_mat = rot_mat_0 * rot_mat_1 * scale_mat;
+    glm::dmat3 rot_scale_mat = rot_mat_0 * rot_mat_1 * scale_mat;
 
-    cv::Mat rot_scale_mat4x4 = (cv::Mat_<double>(4, 4) <<
-        rot_scale_mat.at<double>(0, 0), rot_scale_mat.at<double>(0, 1), rot_scale_mat.at<double>(0, 2), 0,
-        rot_scale_mat.at<double>(1, 0), rot_scale_mat.at<double>(1, 1), rot_scale_mat.at<double>(1, 2), 0,
-        rot_scale_mat.at<double>(2, 0), rot_scale_mat.at<double>(2, 1), rot_scale_mat.at<double>(2, 2), 0,
-        0, 0, 0, 1);
+    // 3x3 in the upper-left, identity elsewhere
+    glm::dmat4 rot_scale_mat4x4(rot_scale_mat);
 
-    cv::Mat pre_trans_mat4x4 = (cv::Mat_<double>(4, 4) << 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -src_centroid.x, -src_centroid.y, -src_centroid.z, 1);
-    cv::Mat post_trans_mat4x4 = (cv::Mat_<double>(4, 4) << 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, dst_centroid.x, dst_centroid.y, dst_centroid.z, 1);
+    // Row-vector convention: the translation sits in row 3, i.e. m[col][3].
+    glm::dmat4 pre_trans_mat4x4(1.0);
+    pre_trans_mat4x4[0][3] = -src_centroid.x;
+    pre_trans_mat4x4[1][3] = -src_centroid.y;
+    pre_trans_mat4x4[2][3] = -src_centroid.z;
+    glm::dmat4 post_trans_mat4x4(1.0);
+    post_trans_mat4x4[0][3] = dst_centroid.x;
+    post_trans_mat4x4[1][3] = dst_centroid.y;
+    post_trans_mat4x4[2][3] = dst_centroid.z;
     transform_mat = pre_trans_mat4x4 * rot_scale_mat4x4 * post_trans_mat4x4;
 
     return true;
 }
 
-cv::Mat EulerAnglesToRotationMatrix(core::vec3d &theta)
+glm::dmat3 EulerAnglesToRotationMatrix(core::vec3d &theta)
 {
+    // glm constructors take columns, so the row-major literals are transposed.
+
     // Calculate rotation about x axis
-    cv::Mat R_x = (cv::Mat_<double>(3, 3) <<
+    glm::dmat3 R_x = glm::transpose(glm::dmat3(
         1, 0, 0,
         0, cos(theta[0]), -sin(theta[0]),
         0, sin(theta[0]), cos(theta[0])
-        );
+        ));
 
     // Calculate rotation about y axis
-    cv::Mat R_y = (cv::Mat_<double>(3, 3) <<
+    glm::dmat3 R_y = glm::transpose(glm::dmat3(
         cos(theta[1]), 0, sin(theta[1]),
         0, 1, 0,
         -sin(theta[1]), 0, cos(theta[1])
-        );
+        ));
 
     // Calculate rotation about z axis
-    cv::Mat R_z = (cv::Mat_<double>(3, 3) <<
+    glm::dmat3 R_z = glm::transpose(glm::dmat3(
         cos(theta[2]), -sin(theta[2]), 0,
         sin(theta[2]), cos(theta[2]), 0,
-        0, 0, 1);
-
+        0, 0, 1));
 
     // Combined rotation matrix
-    cv::Mat R = R_z * R_y * R_x;
+    glm::dmat3 R = R_z * R_y * R_x;
 
     return R;
 }
 
-core::vec3d RotMatrixToEulerAngles(const cv::Mat& rot_mat)
+core::vec3d RotMatrixToEulerAngles(const glm::dmat3& rot_mat)
 {
     core::vec3d rot_vector;
-    double r32 = rot_mat.at<double>(2, 1);
-    double r33 = rot_mat.at<double>(2, 2);
-    double r31 = rot_mat.at<double>(2, 0);
-    double r21 = rot_mat.at<double>(1, 0);
-    double r11 = rot_mat.at<double>(0, 0);
+    double r32 = rot_mat[1][2];
+    double r33 = rot_mat[2][2];
+    double r31 = rot_mat[0][2];
+    double r21 = rot_mat[0][1];
+    double r11 = rot_mat[0][0];
     rot_vector.x = atan2(r32, r33);
     rot_vector.y = atan2(-r31, sqrt(r32 * r32 + r33 * r33));
     rot_vector.z = atan2(r21, r11);
@@ -325,17 +324,17 @@ bool DumpGeFilesWithReference(const string& kml_name,
         return false;
     }
 
-    vector<cv::Point3d> target_point_list;
+    vector<glm::dvec3> target_point_list;
     if (polys.size() > 0) {
         core::vec3d* poly_array = polys[0].second.get();
         for (uint32_t i = 0; i < polys[0].first - 1; i++)
         {
             core::vec4d pos_ls = core::vec4d(poly_array[i].x, poly_array[i].y, poly_array[i].z, 1.0);
-            target_point_list.push_back(cv::Point3d(pos_ls.x, pos_ls.y, pos_ls.z));
+            target_point_list.push_back(glm::dvec3(pos_ls.x, pos_ls.y, pos_ls.z));
         }
     }
 
-    vector<cv::Point3d> source_point_list;
+    vector<glm::dvec3> source_point_list;
     uint32_t num_non_tri_meshes = 0;
     for (uint32_t i = 0; i < group_mesh_data->meshes.size(); i++)
     {
@@ -360,7 +359,7 @@ bool DumpGeFilesWithReference(const string& kml_name,
                     for (int j = 0; j < data_mesh->num_vertex - 1; j++)
                     {
                         core::vec3d transformed_position = ApplyMatrix(vertex_list[j], data_mesh->dumpped_matrix);
-                        source_point_list.push_back(cv::Point3d(transformed_position.x, transformed_position.y, transformed_position.z));
+                        source_point_list.push_back(glm::dvec3(transformed_position.x, transformed_position.y, transformed_position.z));
                     }
 
                     // polygon (TriangleStrip index order is 1, 2, 0, 3)
@@ -374,8 +373,7 @@ bool DumpGeFilesWithReference(const string& kml_name,
         }
     }
 
-    double data[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-    cv::Mat rigid_transform_matrix =  cv::Mat(4, 4, CV_64F, data);
+    glm::dmat4 rigid_transform_matrix(1.0);
     GetRigidTransform(source_point_list, target_point_list, rigid_transform_matrix);
 
     for (uint32_t iMesh = 0; iMesh < group_mesh_data->meshes.size(); iMesh++)

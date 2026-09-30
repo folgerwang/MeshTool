@@ -2,7 +2,6 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "opencv2/opencv.hpp"
 
 // Qt removed
 #include "coremath.h"
@@ -13,7 +12,6 @@
 #include "meshdata.h"
 #include "worlddata.h"
 #include "kmlfileparser.h"
-#include <fbxsdk.h>
 #include "debugout.h"
 
 namespace fs = std::filesystem;
@@ -481,139 +479,4 @@ void SaveSmapToKmlFile(const std::string& file_name)
 
         outFile.close();
     }
-}
-
-void ImportAndTransformFbxMeshFile(const string& file_name)
-{
-    core::vec2d ref_utm_coord(582186.375, 4137432.25);
-    int zone_id = 10;
-    core::vec2d ref_gps_coord = ToGeographicCoord(ref_utm_coord, zone_id);
-    core::CoordinateTransformer gps_to_env_cnvt(ref_gps_coord.x, ref_gps_coord.y, 0);
-
-    //core::output_debug_info("Import Fbx File, position : ", to_string(ref_gps_coord.x) + " " + to_string(ref_gps_coord.y));
-
-    size_t pos_0 = file_name.rfind('.');
-    size_t pos_1 = file_name.rfind('/');
-    size_t pos_2 = file_name.rfind('\\');
-    bool found_pos_1 = pos_1 != string::npos;
-    bool found_pos_2 = pos_2 != string::npos;
-    bool found_path = found_pos_1 || found_pos_2;
-
-    pos_1 = (found_pos_1 && found_pos_2) ? max(pos_1, pos_2) : (found_pos_2 ? pos_2 : pos_1);
-    string folder_name = file_name.substr(pos_1 + 1, pos_0 - pos_1 - 1);
-    string root_path_name = found_path ? file_name.substr(0, pos_1) : "";
-
-    if (pos_0 == string::npos)
-    {
-        return;
-    }
-
-    string dump_folder_name = root_path_name == "" ? folder_name : (root_path_name + "/" + folder_name);
-    if (!fs::exists(dump_folder_name))
-    {
-        fs::create_directory(dump_folder_name);
-    }
-
-    string textures_folder_name = dump_folder_name + "/textures";
-    if (!fs::exists(textures_folder_name))
-    {
-        fs::create_directory(textures_folder_name);
-    }
-
-    // Initialize the SDK manager. This object handles all our memory management.
-    fbxsdk::FbxManager* lSdkManager = fbxsdk::FbxManager::Create();
-
-    // Create the IO settings object.
-    fbxsdk::FbxIOSettings *ios = fbxsdk::FbxIOSettings::Create(lSdkManager, IOSROOT);
-    lSdkManager->SetIOSettings(ios);
-
-    // set some IOSettings options
-    ios->SetBoolProp(EXP_FBX_MATERIAL, true);
-    ios->SetBoolProp(EXP_FBX_TEXTURE, true);
-
-    // Create an importer using the SDK manager.
-    fbxsdk::FbxImporter* lImporter = fbxsdk::FbxImporter::Create(lSdkManager, "");
-
-    // Use the first argument as the filename for the importer.
-    if (!lImporter->Initialize(file_name.c_str(), -1, lSdkManager->GetIOSettings())) {
-        printf("Call to FbxExporter::Initialize() failed.\n");
-        printf("Error returned: %s\n\n", lImporter->GetStatus().GetErrorString());
-        exit(-1);
-    }
-
-    // Create a new scene so it can be populated by the imported file.
-    fbxsdk::FbxScene* pScene = fbxsdk::FbxScene::Create(lSdkManager, "");
-
-    // export the scene.
-    lImporter->Import(pScene);
-
-    // The file is imported; so get rid of the importer.
-    lImporter->Destroy();
-
-    // Create an importer using the SDK manager.
-    fbxsdk::FbxExporter* lExporter = fbxsdk::FbxExporter::Create(lSdkManager, "");
-
-    string export_file_name = file_name.substr(0, file_name.rfind(".")) + "_modi.fbx";
-
-    // Use the first argument as the filename for the importer.
-    if (!lExporter->Initialize(export_file_name.c_str(), -1, lSdkManager->GetIOSettings())) {
-        printf("Call to FbxExporter::Initialize() failed.\n");
-        printf("Error returned: %s\n\n", lImporter->GetStatus().GetErrorString());
-        exit(-1);
-    }
-
-    core::vec2d max_error(0.0, 0.0);
-    for (int32_t i_node = 0; i_node < pScene->GetNodeCount(); i_node++)
-    {
-        fbxsdk::FbxNode* lMeshNode = pScene->GetNode(i_node);
-
-        // leaf node
-        if (lMeshNode->GetChildCount() == 0)
-        {
-            fbxsdk::FbxMesh* mesh = lMeshNode->GetMesh();
-            FbxVector4* vertices = mesh->GetControlPoints();
-            for (int32_t i_cp = 0; i_cp < mesh->GetControlPointsCount(); i_cp++)
-            {
-                FbxVector4 v = FbxVector4(vertices[i_cp][0], -vertices[i_cp][2], vertices[i_cp][1], vertices[i_cp][3]);
-                v += FbxVector4(ref_utm_coord.x, ref_utm_coord.y, 0.0, 0.0);
-                core::vec2d gps_coord_2d = ToGeographicCoord(core::vec2d(v[0], v[1]), zone_id);
-                core::vec2d utm_coord_2d = FromGeographicCoord(gps_coord_2d, zone_id);
-
-                //core::output_debug_info("Import Fbx File, position : ", to_string(gps_coord_2d.x) + " " + to_string(gps_coord_2d.y));
-
-                core::GpsCoord gps_coord(gps_coord_2d.y, gps_coord_2d.x, v[2]);
-                core::vec3d pos_ws = gps_to_env_cnvt.lla_to_enu(gps_coord);
-                core::GpsCoord pos_gps = gps_to_env_cnvt.enu_to_lla(pos_ws);
-                core::vec3d pos_ws_1 = gps_to_env_cnvt.lla_to_enu(pos_gps);
-
-                mesh->SetControlPointAt(FbxVector4(pos_ws.x, pos_ws.z, -pos_ws.y, v[3]), i_cp);
-                max_error.x = max(max_error.x, abs(v[0] - utm_coord_2d.x));
-                max_error.y = max(max_error.y, abs(v[1] - utm_coord_2d.y));
-
-                //core::output_debug_info("Import Fbx File, position : ", to_string(v[0]) + " " + to_string(v[1]) + " " + to_string(v[2]) + " " + to_string(v[3]));
-            }
-        }
-        else
-        {
-            //core::output_debug_info("Import Fbx File, num_node", to_string(lMeshNode->GetChildCount()));
-        }
-    }
-
-    //core::output_debug_info("Import Fbx File, position(*1e10) : ", to_string(max_error.x * 1e10) + " " + to_string(max_error.y * 1e10));
-
-    //core::GpsCoord pos_gps = gps_to_env_cnvt.enu_to_lla(core::vec3d(95082.773/100.0, 87578.219/100.0, 3930.404/100.0));
-    //core::output_debug_info("Import Fbx File, position : ", to_string(pos_gps.x) + " " + to_string(pos_gps.y));
-
-    // export the scene.
-    lExporter->Export(pScene);
-
-    // The file is imported; so get rid of the importer.
-    lExporter->Destroy();
-
-    // Destroy the SDK manager and all the other objects it was handling.
-    lSdkManager->Destroy();
-
-    string export_kml_file_name = file_name.substr(0, file_name.rfind(".")) + "_modi.kml";
-
-    SaveSmapToKmlFile(export_kml_file_name);
 }

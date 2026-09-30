@@ -14,9 +14,8 @@ void earth_mesh_init();
 void CreateMeshFromDumpFile(const string& dump_file_name, GroupMeshData* group_mesh_data);
 void DumpGoogleEarthMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, IProgressCallback* progress);
 void DumpKmlSplineMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, IProgressCallback* progress);
-void ExportFbxMeshFile(const string& fbx_file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress);
-void ExportMaMeshFile(const string& fbx_file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress);
-void ImportAndTransformFbxMeshFile(const string& file_name);
+bool ExportGltfMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress);
+void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress);
 void DumpUSGSTexture(const vector<shared_ptr<string>>& file_name_list,
                      vector<DumppedTextureInfo>& dumpped_texture_info_list);
 void DumpUSGSData(const vector<unique_ptr<string>>& file_name_list,

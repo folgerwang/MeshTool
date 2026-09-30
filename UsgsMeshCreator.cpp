@@ -2,7 +2,8 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "opencv2/opencv.hpp"
+#include "stb_image.h"
+#include "stb_image_write.h"
 
 // Qt removed - using std::string for URL construction
 #include "coremath.h"
@@ -15,7 +16,6 @@
 #include "worlddata.h"
 #include "kmlfileparser.h"
 #include "file_downloader.h"
-#include <fbxsdk.h>
 #include "hfa/hfa_p.h"
 #include "hfa/hfa.h"
 
@@ -481,18 +481,22 @@ void DumpUSGSData(const vector<unique_ptr<string>>& file_name_list,
                         {
                             ScissorMeshInfo& info = scissor_mesh_info_list[i];
 
-                            cv::Mat src_tex;
+                            int w = 0;
+                            int h = 0;
+                            unique_ptr<uint8_t, void(*)(void*)> src_tex(nullptr, stbi_image_free);
                             if (split_texture)
                             {
-                                src_tex = cv::imread(dumpped_texture_info_list[uint32_t(info.tex_id)].file_name.get()->c_str());
+                                int file_channels = 0;
+                                src_tex.reset(stbi_load(dumpped_texture_info_list[uint32_t(info.tex_id)].file_name.get()->c_str(), &w, &h, &file_channels, 3));
+                                if (!src_tex)
+                                {
+                                    w = h = 0;
+                                }
                             }
 
                             const DumppedTextureInfo* p_tex_info = &dumpped_texture_info_list[uint32_t(info.tex_id)];
                             string sub_img_name = *dumpped_texture_info_list[uint32_t(info.tex_id)].file_name.get();
                             sub_img_name = sub_img_name.substr(0, sub_img_name.rfind("."));
-
-                            int w = src_tex.cols;
-                            int h = src_tex.rows;
 
                             core::vec2d min_idx = (info.bbox.bb_min - img_ul_center) / s_pixel_size;
                             core::vec2d max_idx = (info.bbox.bb_max - img_ul_center) / s_pixel_size;
@@ -556,13 +560,17 @@ void DumpUSGSData(const vector<unique_ptr<string>>& file_name_list,
                                             int32_t s_w = min(bbox_i.bb_max.x - bbox_i.bb_min.x + 1, w - bbox_i.bb_min.x);
                                             int32_t s_h = min(bbox_i.bb_max.y - bbox_i.bb_min.y + 1, h - bbox_i.bb_min.y);
 
-                                            cv::Mat sub_img = cv::Mat(src_tex, cv::Rect(int(bbox_i.bb_min.x), int(h - bbox_i.bb_min.y - s_h), int(s_w), int(s_h)));
+                                            int32_t crop_x = bbox_i.bb_min.x;
+                                            int32_t crop_y = h - bbox_i.bb_min.y - s_h;
 
                                             string tex_file_name = sub_img_name + "_" + to_string(mesh_index) + ".png";
                                             render_block->tex_file_name = make_unique<string>(tex_file_name);
 
-                                            cv::imwrite(tex_file_name, sub_img);
-                                            sub_img.release();
+                                            if (src_tex && s_w > 0 && s_h > 0 && crop_x >= 0 && crop_y >= 0 && crop_x + s_w <= w && crop_y + s_h <= h)
+                                            {
+                                                const uint8_t* crop_start = src_tex.get() + (size_t(crop_y) * size_t(w) + size_t(crop_x)) * 3;
+                                                stbi_write_png(tex_file_name.c_str(), s_w, s_h, 3, crop_start, w * 3);
+                                            }
                                         }
                                         else
                                         {
@@ -605,7 +613,7 @@ void DumpUSGSData(const vector<unique_ptr<string>>& file_name_list,
     #if USE_USGS_MAP_TEXTURE
                                                     core::vec2d utm_loc = FromGeographicCoord(core::vec2d(g_y, g_x), p_dumpped_tex->xml_info.zone);
                                                     utm_loc *= 1000.0; // convert km to m.
-                                                    render_block->uv_list[idx] = p_dumpped_tex->tfw_info.FromUTMLocation(utm_loc, core::vec2f(1.0f / p_dumpped_tex->tex_body.cols, 1.0f / p_dumpped_tex->tex_body.rows));
+                                                    render_block->uv_list[idx] = p_dumpped_tex->tfw_info.FromUTMLocation(utm_loc, core::vec2f(1.0f / p_dumpped_tex->tex_width, 1.0f / p_dumpped_tex->tex_height));
     #else
                                                     double u = (g_x - bbox.bb_min.x) / (bbox.bb_max.x - bbox.bb_min.x);
                                                     double v = (g_y - bbox.bb_min.y) / (bbox.bb_max.y - bbox.bb_min.y);

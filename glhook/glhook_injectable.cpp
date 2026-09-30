@@ -13,6 +13,8 @@
 #include <cstring>
 #include <cmath>
 
+#include "glhook_panel.h"
+
 // ============================================================================
 // Trampoline hook: overwrite first bytes of target function with a JMP to ours
 // ============================================================================
@@ -136,152 +138,123 @@ static void ResolveGLFuncs()
     pDepthMask  = (PFN_DepthMask)GetProcAddress(g_opengl32, "glDepthMask");
 }
 
-// 5x7 bitmap font for text
-static const unsigned char g_font[][7] = {
-    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},{0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
-    {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},{0x0E,0x11,0x01,0x06,0x01,0x11,0x0E},
-    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},{0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
-    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},{0x1F,0x01,0x02,0x04,0x04,0x04,0x04},
-    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
-    {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
-    {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},{0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
-    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},{0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},
-    {0x0E,0x11,0x10,0x17,0x11,0x11,0x0F},{0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
-    {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},{0x01,0x01,0x01,0x01,0x01,0x11,0x0E},
-    {0x11,0x12,0x14,0x18,0x14,0x12,0x11},{0x10,0x10,0x10,0x10,0x10,0x10,0x1F},
-    {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},{0x11,0x19,0x15,0x13,0x11,0x11,0x11},
-    {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},{0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},
-    {0x0E,0x11,0x11,0x11,0x15,0x12,0x0D},{0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},
-    {0x0E,0x11,0x10,0x0E,0x01,0x11,0x0E},{0x1F,0x04,0x04,0x04,0x04,0x04,0x04},
-    {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},{0x11,0x11,0x11,0x11,0x0A,0x0A,0x04},
-    {0x11,0x11,0x11,0x15,0x15,0x1B,0x11},{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},
-    {0x11,0x11,0x0A,0x04,0x04,0x04,0x04},{0x1F,0x01,0x02,0x04,0x08,0x10,0x1F},
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x04,0x04,0x00,0x04,0x04,0x00},
-    {0x00,0x00,0x00,0x00,0x00,0x0C,0x0C},{0x00,0x00,0x00,0x1F,0x00,0x00,0x00},
-};
-
-static int CharIdx(char c) {
-    if (c>='0'&&c<='9') return c-'0';
-    if (c>='A'&&c<='Z') return c-'A'+10;
-    if (c>='a'&&c<='z') return c-'a'+10;
-    if (c==' ') return 36; if (c==':') return 37; if (c=='.') return 38; if (c=='-') return 39;
-    return 36;
-}
-
-static void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a)
-{
-    pColor4f(r, g, b, a);
-    pVertex2f(x, y); pVertex2f(x+w, y); pVertex2f(x+w, y+h); pVertex2f(x, y+h);
-}
-
-static void DrawText(float x, float y, float scale, const char* text, float r, float g, float b)
-{
-    while (*text) {
-        int idx = CharIdx(*text);
-        if (idx >= 0 && idx < 40) {
-            for (int row = 0; row < 7; row++) {
-                unsigned char bits = g_font[idx][row];
-                for (int col = 0; col < 5; col++) {
-                    if (bits & (0x10 >> col)) {
-                        float px = x + col * scale;
-                        float py = y + row * scale;
-                        pColor4f(r, g, b, 1.0f);
-                        pVertex2f(px, py); pVertex2f(px+scale, py);
-                        pVertex2f(px+scale, py+scale); pVertex2f(px, py+scale);
-                    }
-                }
-            }
-        }
-        x += 6.0f * scale;
-        text++;
-    }
-}
-
 // ============================================================================
 // Our hooked wglSwapBuffers
 // ============================================================================
+
+// Debug: draw a solid red block with a scissored clear instead of the panel.
+// A clear ignores shaders, matrices, blending and the context profile, so if
+// this is not visible the hook is not being called (or not on the window's FBO).
+#define OVERLAY_DEBUG_RED_BLOCK 0
+
+typedef void(__stdcall*PFN_Scissor)(int,int,int,int);
+typedef void(__stdcall*PFN_ClearColor)(float,float,float,float);
+typedef void(__stdcall*PFN_Clear)(unsigned int);
+typedef void(__stdcall*PFN_ColorMask)(unsigned char,unsigned char,unsigned char,unsigned char);
+typedef void(__stdcall*PFN_GetFloatv)(unsigned int,float*);
+typedef unsigned char(__stdcall*PFN_IsEnabled)(unsigned int);
+typedef const unsigned char*(__stdcall*PFN_GetString)(unsigned int);
+typedef void(__stdcall*PFN_BindFramebuffer)(unsigned int,unsigned int);
+typedef void(__stdcall*PFN_UseProgram)(unsigned int);
+typedef void*(__stdcall*PFN_wglGetProcAddress)(const char*);
+typedef void*(__stdcall*PFN_wglGetCurrentContext)();
+
+static void DrawDebugRedBlock(void* hdc)
+{
+    static PFN_Scissor         pScissor;
+    static PFN_ClearColor      pClearColor;
+    static PFN_Clear           pClear;
+    static PFN_ColorMask       pColorMask;
+    static PFN_GetFloatv       pGetFloatv;
+    static PFN_IsEnabled       pIsEnabled;
+    static PFN_GetString       pGetString;
+    static PFN_BindFramebuffer pBindFramebuffer;
+    static PFN_wglGetCurrentContext pWglGetCurrentContext;
+    if (!pClear)
+    {
+        pScissor    = (PFN_Scissor)GetProcAddress(g_opengl32, "glScissor");
+        pClearColor = (PFN_ClearColor)GetProcAddress(g_opengl32, "glClearColor");
+        pClear      = (PFN_Clear)GetProcAddress(g_opengl32, "glClear");
+        pColorMask  = (PFN_ColorMask)GetProcAddress(g_opengl32, "glColorMask");
+        pGetFloatv  = (PFN_GetFloatv)GetProcAddress(g_opengl32, "glGetFloatv");
+        pIsEnabled  = (PFN_IsEnabled)GetProcAddress(g_opengl32, "glIsEnabled");
+        pGetString  = (PFN_GetString)GetProcAddress(g_opengl32, "glGetString");
+        pWglGetCurrentContext = (PFN_wglGetCurrentContext)GetProcAddress(g_opengl32, "wglGetCurrentContext");
+        // Extension entry points need a current context, which we have inside SwapBuffers.
+        PFN_wglGetProcAddress pWglGPA = (PFN_wglGetProcAddress)GetProcAddress(g_opengl32, "wglGetProcAddress");
+        if (pWglGPA) pBindFramebuffer = (PFN_BindFramebuffer)pWglGPA("glBindFramebuffer");
+    }
+    if (!pClear || !pScissor || !pGetIV) return;
+
+    // Log GL state for the first few frames
+    if (g_frameCount <= 3 || g_frameCount == 100)
+    {
+        int vp[4] = {}, sc[4] = {}, drawFbo = -1, readFbo = -1, program = -1, drawBuffer = -1;
+        pGetIV(0x0BA2, vp);           // GL_VIEWPORT
+        pGetIV(0x0C10, sc);           // GL_SCISSOR_BOX
+        pGetIV(0x8CA6, &drawFbo);     // GL_DRAW_FRAMEBUFFER_BINDING
+        pGetIV(0x8CAA, &readFbo);     // GL_READ_FRAMEBUFFER_BINDING
+        pGetIV(0x8B8D, &program);     // GL_CURRENT_PROGRAM
+        pGetIV(0x0C01, &drawBuffer);  // GL_DRAW_BUFFER
+        RECT rc = {};
+        HWND wnd = WindowFromDC((HDC)hdc);
+        if (wnd) GetClientRect(wnd, &rc);
+        FILE* f = fopen("C:\\Users\\Public\\meshtool_hook.log", "a");
+        if (f)
+        {
+            fprintf(f, "frame %d: tid=%lu hdc=%p hwnd=%p client=%ldx%ld ctx=%p\n", g_frameCount, GetCurrentThreadId(), hdc, wnd,
+                    rc.right - rc.left, rc.bottom - rc.top, pWglGetCurrentContext ? pWglGetCurrentContext() : nullptr);
+            fprintf(f, "  GL_VERSION=%s  RENDERER=%s\n", pGetString ? (const char*)pGetString(0x1F02) : "?", pGetString ? (const char*)pGetString(0x1F01) : "?");
+            fprintf(f, "  viewport=%d,%d %dx%d  scissor=%d,%d %dx%d enabled=%d  drawFBO=%d readFBO=%d program=%d drawBuffer=0x%X\n",
+                    vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3], pIsEnabled ? pIsEnabled(0x0C11) : -1,
+                    drawFbo, readFbo, program, drawBuffer);
+            fclose(f);
+        }
+    }
+
+    // Save the state we touch
+    int prevDrawFbo = 0, prevScissor[4] = {};
+    float prevClear[4] = {};
+    unsigned char prevScissorOn = pIsEnabled ? pIsEnabled(0x0C11) : 0;
+    pGetIV(0x8CA6, &prevDrawFbo);
+    pGetIV(0x0C10, prevScissor);
+    if (pGetFloatv) pGetFloatv(0x0C22, prevClear);  // GL_COLOR_CLEAR_VALUE
+
+    // Draw into the window's default framebuffer, top-left corner
+    if (pBindFramebuffer) pBindFramebuffer(0x8CA9, 0);  // GL_DRAW_FRAMEBUFFER
+    RECT rc = {};
+    HWND wnd = WindowFromDC((HDC)hdc);
+    if (wnd) GetClientRect(wnd, &rc);
+    int winH = rc.bottom > 0 ? rc.bottom : 600;
+    const int size = 300;
+
+    pEnable(0x0C11);  // GL_SCISSOR_TEST
+    pScissor(40, winH - 40 - size, size, size);
+    if (pColorMask) pColorMask(1, 1, 1, 1);
+    pClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    pClear(0x00004000);  // GL_COLOR_BUFFER_BIT
+
+    // Restore
+    pClearColor(prevClear[0], prevClear[1], prevClear[2], prevClear[3]);
+    pScissor(prevScissor[0], prevScissor[1], prevScissor[2], prevScissor[3]);
+    if (!prevScissorOn) pDisable(0x0C11);
+    if (pBindFramebuffer) pBindFramebuffer(0x8CA9, (unsigned int)prevDrawFbo);
+}
 
 static int __stdcall Hooked_wglSwapBuffers(void* hdc)
 {
     g_frameCount++;
     ResolveGLFuncs();
 
-    // Draw overlay
-    if (pPushAttrib && pBegin)
-    {
-        int vp[4]; pGetIV(0x0BA2, vp);
-        float w = (float)vp[2], h = (float)vp[3];
-
-        pPushAttrib(0x000FFFFF); // ALL_ATTRIB_BITS
-
-        // Setup clean 2D state - disable EVERYTHING that could interfere
-        pDisable(0x0B71);  // GL_DEPTH_TEST
-        pDisable(0x0DE1);  // GL_TEXTURE_2D
-        pDisable(0x0B50);  // GL_LIGHTING
-        pDisable(0x0B44);  // GL_CULL_FACE
-        pDisable(0x0C11);  // GL_SCISSOR_TEST
-        pDisable(0x0B90);  // GL_STENCIL_TEST
-        pDisable(0x0BC0);  // GL_ALPHA_TEST
-        pDisable(0x0BE0);  // GL_FOG
-        pDepthMask(0);
-        pEnable(0x0BE2);   // GL_BLEND
-        pBlendFunc(0x0302, 0x0303); // SRC_ALPHA, ONE_MINUS_SRC_ALPHA
-
-        // Use bottom-left origin (standard OpenGL)
-        pMatMode(0x1701); pPushMat(); pLoadId(); pOrtho(0, w, 0, h, -1, 1);
-        pMatMode(0x1700); pPushMat(); pLoadId();
-
-        // Panel position (top-left of viewport, LARGE so it's unmistakable)
-        float px = 20.0f;
-        float py = h - 20.0f;
-        float pw = w * 0.35f;  // 35% of viewport width
-        if (pw < 500) pw = 500;
-        float ph = 180.0f;
-        float sc = 5.0f;  // large font
-
-        pBegin(0x0007); // GL_QUADS
-
-        // Panel background
-        DrawRect(px, py - ph, pw, ph, 0.0f, 0.0f, 0.0f, 0.82f);
-
-        // Blue accent bar
-        DrawRect(px, py - ph, 6, ph, 0.25f, 0.6f, 1.0f, 0.95f);
-
-        // Title: MESHTOOL
-        DrawText(px + 20, py - 50, sc, "MESHTOOL", 0.3f, 0.75f, 1.0f);
-
-        // Connection status
-        DrawRect(px + 20, py - 90, 18, 18, 0.2f, 0.95f, 0.3f, 1.0f); // green dot
-        DrawText(px + 46, py - 90, sc*0.7f, "CONNECTED", 0.7f, 0.9f, 0.7f);
-
-        // Frame counter
-        char frameBuf[32];
-        sprintf(frameBuf, "FRAME %d", g_frameCount);
-        DrawText(px + 20, py - 130, sc*0.7f, frameBuf, 0.6f, 0.6f, 0.7f);
-
-        // F12 hotkey
-        DrawText(px + 20, py - 165, sc*0.65f, "F12: CAPTURE", 0.45f, 0.45f, 0.55f);
-
-        // Animated activity dots
-        int dots = (g_frameCount / 20) % 4;
-        for (int i = 0; i < dots; i++)
-            DrawRect(px + pw - 100 + i*20, py - 128, 12, 12, 0.3f, 0.7f, 1.0f, 0.9f);
-
-        // F12 flash
-        bool f12 = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
-        if (f12) {
-            DrawRect(0, 0, w, 6, 0.3f, 0.8f, 1.0f, 0.95f);
-            DrawRect(0, h-6, w, 6, 0.3f, 0.8f, 1.0f, 0.95f);
-            DrawRect(0, 0, 6, h, 0.3f, 0.8f, 1.0f, 0.95f);
-            DrawRect(w-6, 0, 6, h, 0.3f, 0.8f, 1.0f, 0.95f);
-        }
-
-        pEnd();
-
-        pMatMode(0x1701); pPopMat();
-        pMatMode(0x1700); pPopMat();
-        pPopAttrib();
-    }
+#if OVERLAY_DEBUG_RED_BLOCK
+    DrawDebugRedBlock(hdc);
+#else
+    // This DLL has no capture link, so the panel says so.
+    PanelStatus status = {};
+    status.link = PANEL_OVERLAY_ONLY;
+    status.frame = g_frameCount;
+    PanelDraw(hdc, g_opengl32, (PFN_PanelGetProcAddress)GetProcAddress(g_opengl32, "wglGetProcAddress"), status);
+#endif
 
     // Call original wglSwapBuffers
     int result;
@@ -329,6 +302,16 @@ static DWORD WINAPI HookThread(LPVOID param)
 
     f = fopen("C:\\Users\\Public\\meshtool_hook.log", "a");
     if (f) { fprintf(f, "wglSwapBuffers hooked successfully!\n"); fclose(f); }
+
+    // Google Earth only renders on demand: repaint its windows so the overlay
+    // shows up now instead of on the next camera move.
+    EnumWindows([](HWND wnd, LPARAM) -> BOOL {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(wnd, &pid);
+        if (pid == GetCurrentProcessId())
+            RedrawWindow(wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+        return TRUE;
+    }, 0);
 
     return 0;
 }

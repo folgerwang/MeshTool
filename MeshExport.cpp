@@ -2,7 +2,10 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "opencv2/opencv.hpp"
+#include <map>
+#include <cfloat>
+#include <cctype>
+#include "stb_image_write.h"
 
 // Qt removed - using progress.h interface
 #include "coremath.h"
@@ -13,7 +16,6 @@
 #include "meshdata.h"
 #include "worlddata.h"
 #include "kmlfileparser.h"
-#include <fbxsdk.h>
 #include "debugout.h"
 
 #include <windows.h>
@@ -31,61 +33,6 @@ string GetUUID()
 
 namespace fs = std::filesystem;
 
-void AddMaterial(fbxsdk::FbxScene* pScene, fbxsdk::FbxNode* pMeshNode, size_t group_idx, size_t material_idx, const string& tex_name, const string& relative_tex_name)
-{
-    FbxString lMaterialName = "material_";
-    FbxString lShadingName = "lambert";
-    lMaterialName += int(group_idx);
-    lMaterialName += "_";
-    lMaterialName += int(material_idx);
-    FbxDouble3 lBlack(0.0, 0.0, 0.0);
-    FbxDouble3 lGrey(0.1, 0.1, 0.1);
-    FbxDouble3 lDiffuseColor(0.8, 0.8, 0.8);
-    fbxsdk::FbxSurfaceLambert *lMaterial = fbxsdk::FbxSurfaceLambert::Create(pScene, lMaterialName.Buffer());
-
-    // Generate primary and secondary colors.
-    lMaterial->Emissive.Set(lBlack);
-    lMaterial->Ambient.Set(lGrey);
-    lMaterial->Diffuse.Set(lDiffuseColor);
-    lMaterial->TransparencyFactor.Set(0.0);
-    lMaterial->ShadingModel.Set(lShadingName);
-
-    fbxsdk::FbxFileTexture* lTexture = fbxsdk::FbxFileTexture::Create(pScene, "Diffuse Texture");
-
-    // Set texture properties.
-    lTexture->SetFileName(tex_name.c_str()); // Resource file is in current directory.
-    lTexture->SetRelativeFileName(relative_tex_name.c_str());
-    lTexture->SetTextureUse(fbxsdk::FbxTexture::eStandard);
-    lTexture->SetMappingType(fbxsdk::FbxTexture::eUV);
-    lTexture->SetMaterialUse(fbxsdk::FbxFileTexture::eModelMaterial);
-    lTexture->SetSwapUV(false);
-    lTexture->SetTranslation(0.0, 0.0);
-    lTexture->SetScale(1.0, 1.0);
-    lTexture->SetRotation(0.0, 0.0);
-
-    // don't forget to connect the texture to the corresponding property of the material
-    if (lMaterial)
-    {
-        lMaterial->Diffuse.ConnectSrcObject(lTexture);
-    }
-
-    auto mesh = pMeshNode->GetMesh();
-    auto geo_element_material = mesh->GetElementMaterial(0);
-
-    if (!geo_element_material) {
-        geo_element_material = mesh->CreateElementMaterial();
-    }
-
-    // The material is mapped to the whole Nurbs
-    geo_element_material->SetMappingMode(fbxsdk::FbxGeometryElement::eAllSame);
-
-    // And the material is avalible in the Direct array
-    geo_element_material->SetReferenceMode(fbxsdk::FbxGeometryElement::eDirect);
-
-    //get the node of mesh, add material for it.
-    pMeshNode->AddMaterial(lMaterial);
-}
-
 void ExportTextureFile(const string& file_name, const core::TextureFileInfo* tex_file_info)
 {
     ofstream outFile;
@@ -94,23 +41,26 @@ void ExportTextureFile(const string& file_name, const core::TextureFileInfo* tex
     outFile.close();
 }
 
+// src_data is bottom-up (GL order); RGB(A) when switch_channels, BGR(A) otherwise.
 void ExportJpgFile(const string& file_name, uint32_t w, uint32_t h, uint32_t channel_count, bool switch_channels, uint8_t* src_data)
 {
-    cv::Mat src_image(int32_t(h), int32_t(w), channel_count == 3 ? CV_8UC3 : CV_8UC4, src_data);
-    vector<cv::Mat> src_channels;
-    cv::split(src_image, src_channels);
-    vector<cv::Mat> dst_channels;
-    dst_channels.push_back(move(src_channels[switch_channels ? 2 : 0]));
-    dst_channels.push_back(move(src_channels[1]));
-    dst_channels.push_back(move(src_channels[switch_channels ? 0 : 2]));
-    src_image.release();
-    cv::Mat tmp_image;
-    cv::merge(dst_channels, tmp_image);
-    cv::Mat out_image;
-    cv::flip(tmp_image, out_image, 0);
-    tmp_image.release();
+    uint32_t r_ofs = switch_channels ? 0 : 2;
+    uint32_t b_ofs = switch_channels ? 2 : 0;
+    vector<uint8_t> rgb(size_t(w) * h * 3);
+    for (uint32_t y = 0; y < h; y++)
+    {
+        const uint8_t* src_row = src_data + size_t(h - 1 - y) * w * channel_count;
+        uint8_t* dst_row = rgb.data() + size_t(y) * w * 3;
+        for (uint32_t x = 0; x < w; x++)
+        {
+            const uint8_t* src = src_row + x * channel_count;
+            dst_row[x * 3 + 0] = src[r_ofs];
+            dst_row[x * 3 + 1] = src[1];
+            dst_row[x * 3 + 2] = src[b_ofs];
+        }
+    }
 
-    cv::imwrite(file_name, out_image);
+    stbi_write_jpg(file_name.c_str(), int(w), int(h), 3, rgb.data(), 95);
 }
 
 void ExportTextureList(const GroupMeshData* group_mesh_data,
@@ -131,8 +81,11 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
         {
             string tex_idx_string = to_string(group_idx) + "_" + to_string(i);
             bool decode_dxt1 = tex_info->m_format == kGLCmpsdRgbS3tcDxt1Ext || tex_info->m_format == kGLCmpsdRgbaS3tcDxt1Ext;
+            bool decode_dxt3 = tex_info->m_format == kGLCmpsdRgbaS3tcDxt3Ext;
+            bool decode_dxt5 = tex_info->m_format == kGLCmpsdRgbaS3tcDxt5Ext;
+            bool decode_dxt  = decode_dxt1 || decode_dxt3 || decode_dxt5;
 
-            if (decode_dxt1 || tex_info->m_format == kGlRgb || tex_info->m_format == kGlRgba)
+            if (decode_dxt || tex_info->m_format == kGlRgb || tex_info->m_format == kGlRgba)
             {
                 uint8_t* src_tex_data = nullptr;
                 unique_ptr<uint32_t[]> tmp_tex_data;
@@ -141,11 +94,13 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
                 uint32_t channel_count = tex_info->m_format == kGlRgb ? 3 : 4;
 
                 uint8_t* src_img_data = reinterpret_cast<uint8_t*>(tex_info->m_mips[0].m_imageData.get());
-                if (decode_dxt1)
+                if (decode_dxt)
                 {
                     tmp_tex_data = make_unique<uint32_t[]>(w * h);
                     src_tex_data = reinterpret_cast<uint8_t*>(tmp_tex_data.get());
-                    core::Dxt1Convertor::DecodeDxt1Texture(tmp_tex_data.get(), w, h, src_img_data);
+                    if (decode_dxt1)      core::Dxt1Convertor::DecodeDxt1Texture(tmp_tex_data.get(), w, h, src_img_data);
+                    else if (decode_dxt3) core::DecodeDxt3Texture(tmp_tex_data.get(), w, h, src_img_data);
+                    else                  core::DecodeDxt5Texture(tmp_tex_data.get(), w, h, src_img_data);
                 }
                 else
                 {
@@ -155,22 +110,11 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
                 string texture_name = tex_idx_string + ".jpg";
                 tex_name_list[i] = texture_root_path + "texture_" + texture_name;
 
-                ExportJpgFile(tex_name_list[i], w, h, channel_count, !decode_dxt1, src_tex_data);
+                ExportJpgFile(tex_name_list[i], w, h, channel_count, !decode_dxt, src_tex_data);
             }
             else
             {
-                core::TextureFileInfo tex_file_info;
-                if (tex_info->m_format == kGLCmpsdRgbaS3tcDxt3Ext || tex_info->m_format == kGLCmpsdRgbaS3tcDxt5Ext)
-                {
-                    core::ExportDdsImageFile(tex_info, &tex_file_info);
-                    tex_name_list[i] = texture_root_path + "texture_" + tex_idx_string + ".dds";
-
-                    ExportTextureFile(tex_name_list[i], &tex_file_info);
-                }
-                else
-                {
-                    core::output_debug_info("error", "wrong texture format : " + to_string(tex_info->m_format));
-                }
+                core::output_debug_info("error", "wrong texture format : " + to_string(tex_info->m_format));
             }
 
             progress->SetValue(int32_t(float(num_items + i) / float(num_total_items) * 100.0f));
@@ -178,80 +122,279 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
     }
 }
 
-void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress)
+// ---------------------------------------------------------------------------
+// glTF 2.0 export (.gltf = JSON + .bin + texture files, .glb = single binary)
+// ---------------------------------------------------------------------------
+
+static string JsonEscape(const string& s)
 {
-    const char* lFilename = file_name.c_str();
-
-    size_t pos_0 = file_name.rfind('.');
-    size_t pos_1 = file_name.rfind('/');
-    size_t pos_2 = file_name.rfind('\\');
-    bool found_pos_1 = pos_1 != string::npos;
-    bool found_pos_2 = pos_2 != string::npos;
-    bool found_path = found_pos_1 || found_pos_2;
-
-    pos_1 = (found_pos_1 && found_pos_2) ? max(pos_1, pos_2) : (found_pos_2 ? pos_2 : pos_1);
-    string folder_name = file_name.substr(pos_1 + 1, pos_0 - pos_1 - 1);
-    string root_path_name = found_path ? file_name.substr(0, pos_1) : "";
-
-    if (pos_0 == string::npos)
+    string out;
+    out.reserve(s.size() + 2);
+    for (unsigned char c : s)
     {
-        return;
+        switch (c)
+        {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (c < 0x20)
+            {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            }
+            else
+            {
+                out += char(c);
+            }
+        }
     }
+    return out;
+}
 
-    string dump_folder_name = root_path_name == "" ? folder_name : (root_path_name + "/" + folder_name);
-    if (!fs::exists(dump_folder_name))
+// Percent-encode a relative path for use as a glTF uri ('/' kept as separator).
+static string UriEscape(const string& s)
+{
+    static const char* hex = "0123456789ABCDEF";
+    string out;
+    for (unsigned char c : s)
     {
-        fs::create_directory(dump_folder_name);
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~' || c == '/')
+        {
+            out += char(c);
+        }
+        else
+        {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0x0f];
+        }
     }
+    return out;
+}
 
-    string textures_folder_name = dump_folder_name + "/textures";
-    if (!fs::exists(textures_folder_name))
+static string JsonNumber(double v)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.17g", v);
+    return buf;
+}
+
+static bool ReadWholeFile(const string& file_name, vector<uint8_t>& data)
+{
+    ifstream in(file_name, ifstream::binary);
+    if (!in)
     {
-        fs::create_directory(textures_folder_name);
+        return false;
+    }
+    in.seekg(0, ios::end);
+    data.resize(size_t(in.tellg()));
+    in.seekg(0, ios::beg);
+    in.read(reinterpret_cast<char*>(data.data()), streamsize(data.size()));
+    return bool(in);
+}
+
+struct GltfBuilder
+{
+    vector<uint8_t> bin;
+    vector<string>  buffer_views;
+    vector<string>  accessors;
+    vector<string>  images;
+    vector<string>  textures;
+    vector<string>  materials;
+    vector<string>  meshes;
+    vector<string>  nodes;
+    map<string, int32_t> material_of_image;   // texture file -> material index (-1 = unusable)
+
+    int32_t AddBufferView(const void* data, size_t size, int32_t target)
+    {
+        while (bin.size() % 4) bin.push_back(0);
+        size_t offset = bin.size();
+        bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(data), reinterpret_cast<const uint8_t*>(data) + size);
+        string v = "{\"buffer\":0,\"byteOffset\":" + to_string(offset) + ",\"byteLength\":" + to_string(size);
+        if (target)
+        {
+            v += ",\"target\":" + to_string(target);
+        }
+        buffer_views.push_back(v + "}");
+        return int32_t(buffer_views.size() - 1);
     }
 
-    // Initialize the SDK manager. This object handles all our memory management.
-    fbxsdk::FbxManager* lSdkManager = fbxsdk::FbxManager::Create();
-
-    // Create the IO settings object.
-    fbxsdk::FbxIOSettings *ios = fbxsdk::FbxIOSettings::Create(lSdkManager, IOSROOT);
-    lSdkManager->SetIOSettings(ios);
-
-    // set some IOSettings options
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(IOSN_ASCIIFBX,           true);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_MATERIAL,        true);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_TEXTURE,         true);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_EMBEDDED,        true);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_SHAPE,           false);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_GOBO,            false);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_ANIMATION,       false);
-    (*(lSdkManager->GetIOSettings())).SetBoolProp(EXP_FBX_GLOBAL_SETTINGS, true);
-
-    // create an empty scene
-    fbxsdk::FbxScene* pScene = fbxsdk::FbxScene::Create(lSdkManager, "");
-    FbxAxisSystem axis_system(FbxAxisSystem::EPreDefinedAxisSystem::eMayaZUp);
-    pScene->GetGlobalSettings().SetAxisSystem(axis_system);
-    pScene->GetGlobalSettings().SetSystemUnit(fbxsdk::FbxSystemUnit::m);
-
-    // Create an importer using the SDK manager.
-    fbxsdk::FbxExporter* lExporter = fbxsdk::FbxExporter::Create(lSdkManager, "");
-
-    // Use the first argument as the filename for the importer.
-    if (!lExporter->Initialize(lFilename, -1, lSdkManager->GetIOSettings())) {
-        printf("Call to FbxExporter::Initialize() failed.\n");
-        printf("Error returned: %s\n\n", lExporter->GetStatus().GetErrorString());
-        exit(-1);
+    int32_t AddAccessor(int32_t view, int32_t component_type, size_t count, const char* type, const string& min_max = "")
+    {
+        accessors.push_back("{\"bufferView\":" + to_string(view) + ",\"componentType\":" + to_string(component_type) +
+                            ",\"count\":" + to_string(count) + ",\"type\":\"" + type + "\"" + min_max + "}");
+        return int32_t(accessors.size() - 1);
     }
 
-    // Add the mesh node to the root node in the scene.
-    fbxsdk::FbxNode *lRootNode = pScene->GetRootNode();
+    // Material for a texture file; creates image/texture/material on first use.
+    int32_t GetMaterial(const string& tex_file_name, bool embed, const string& gltf_dir, const string& textures_rel_dir)
+    {
+        auto it = material_of_image.find(tex_file_name);
+        if (it != material_of_image.end())
+        {
+            return it->second;
+        }
+
+        int32_t material_idx = -1;
+        string ext = fs::path(tex_file_name).extension().string();
+        transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(tolower(c)); });
+        const char* mime = (ext == ".png") ? "image/png" : ((ext == ".jpg" || ext == ".jpeg") ? "image/jpeg" : nullptr);
+
+        if (mime && fs::exists(tex_file_name))
+        {
+            string image;
+            if (embed)
+            {
+                vector<uint8_t> data;
+                if (ReadWholeFile(tex_file_name, data))
+                {
+                    int32_t view = AddBufferView(data.data(), data.size(), 0);
+                    image = "{\"bufferView\":" + to_string(view) + ",\"mimeType\":\"" + mime + "\"}";
+                }
+            }
+            else
+            {
+                // .gltf: every texture lives in <name>/textures next to the .gltf
+                std::error_code ec;
+                fs::path src = fs::absolute(tex_file_name, ec);
+                fs::path dst = fs::absolute(fs::path(gltf_dir) / textures_rel_dir / src.filename(), ec);
+                if (!fs::equivalent(src, dst, ec))
+                {
+                    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+                }
+                image = "{\"uri\":\"" + JsonEscape(UriEscape(textures_rel_dir + "/" + src.filename().string())) + "\"}";
+            }
+
+            if (!image.empty())
+            {
+                images.push_back(image);
+                textures.push_back("{\"sampler\":0,\"source\":" + to_string(images.size() - 1) + "}");
+                materials.push_back("{\"name\":\"" + JsonEscape(fs::path(tex_file_name).stem().string()) + "\","
+                                    "\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":" + to_string(textures.size() - 1) + "},"
+                                    "\"metallicFactor\":0,\"roughnessFactor\":1},"
+                                    "\"doubleSided\":true,\"extensions\":{\"KHR_materials_unlit\":{}}}");
+                material_idx = int32_t(materials.size() - 1);
+            }
+        }
+        else
+        {
+            core::output_debug_info("gltf export", "skipping texture (missing or not png/jpg) : " + tex_file_name);
+        }
+
+        material_of_image[tex_file_name] = material_idx;
+        return material_idx;
+    }
+
+    string BuildJson(const string& buffer_uri) const
+    {
+        auto join = [](const vector<string>& items)
+        {
+            string s = "[";
+            for (size_t i = 0; i < items.size(); i++)
+            {
+                if (i) s += ",";
+                s += items[i];
+            }
+            return s + "]";
+        };
+
+        // Root node: source data is Z-up, glTF is Y-up -> rotate -90 degrees around X.
+        vector<string> all_nodes = nodes;
+        string children;
+        for (size_t i = 0; i < nodes.size(); i++)
+        {
+            children += (i ? "," : "") + to_string(i);
+        }
+        all_nodes.push_back("{\"name\":\"root\",\"rotation\":[-0.70710678118654757,0,0,0.70710678118654757],\"children\":[" + children + "]}");
+
+        string json = "{\"asset\":{\"version\":\"2.0\",\"generator\":\"MeshTool\"},";
+        if (!materials.empty()) json += "\"extensionsUsed\":[\"KHR_materials_unlit\"],";
+        json += "\"scene\":0,\"scenes\":[{\"nodes\":[" + to_string(all_nodes.size() - 1) + "]}],";
+        json += "\"nodes\":" + join(all_nodes) + ",";
+        if (!meshes.empty())    json += "\"meshes\":" + join(meshes) + ",";
+        if (!materials.empty()) json += "\"materials\":" + join(materials) + ",";
+        if (!textures.empty())
+        {
+            json += "\"textures\":" + join(textures) + ",";
+            json += "\"images\":" + join(images) + ",";
+            json += "\"samplers\":[{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":33071,\"wrapT\":33071}],";
+        }
+        if (!accessors.empty())
+        {
+            json += "\"accessors\":" + join(accessors) + ",";
+            json += "\"bufferViews\":" + join(buffer_views) + ",";
+            json += "\"buffers\":[{\"byteLength\":" + to_string(bin.size());
+            if (!buffer_uri.empty())
+            {
+                json += ",\"uri\":\"" + JsonEscape(UriEscape(buffer_uri)) + "\"";
+            }
+            json += "}],";
+        }
+        json.back() = '}';
+        return json;
+    }
+};
+
+static bool WriteGlb(const string& file_name, string json, vector<uint8_t> bin)
+{
+    while (json.size() % 4) json += ' ';
+    while (bin.size() % 4) bin.push_back(0);
+
+    uint32_t json_len = uint32_t(json.size());
+    uint32_t bin_len  = uint32_t(bin.size());
+    uint32_t total    = 12 + 8 + json_len + (bin_len ? 8 + bin_len : 0);
+    uint32_t header[3]     = { 0x46546C67u, 2u, total };      // "glTF", version 2
+    uint32_t json_chunk[2] = { json_len, 0x4E4F534Au };       // "JSON"
+    uint32_t bin_chunk[2]  = { bin_len,  0x004E4942u };       // "BIN\0"
+
+    ofstream out(file_name, ofstream::binary);
+    if (!out)
+    {
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(header), sizeof(header));
+    out.write(reinterpret_cast<const char*>(json_chunk), sizeof(json_chunk));
+    out.write(json.data(), json_len);
+    if (bin_len)
+    {
+        out.write(reinterpret_cast<const char*>(bin_chunk), sizeof(bin_chunk));
+        out.write(reinterpret_cast<const char*>(bin.data()), bin_len);
+    }
+    return bool(out);
+}
+
+bool ExportGltfMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress)
+{
+    fs::path out_path(file_name);
+    string ext = out_path.extension().string();
+    transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(tolower(c)); });
+    bool embed = ext == ".glb";
+
+    string folder_name = out_path.stem().string();
+    string gltf_dir = out_path.has_parent_path() ? out_path.parent_path().string() : ".";
+    string textures_rel_dir = folder_name + "/textures";
+
+    // Google dump textures are decoded to image files first: next to the .gltf,
+    // or into a temp folder that is embedded and then deleted for .glb.
+    std::error_code ec;
+    fs::path textures_dir = embed ? fs::temp_directory_path(ec) / ("meshtool_glb_" + GetUUID())
+                                  : fs::path(gltf_dir) / textures_rel_dir;
+    fs::create_directories(textures_dir, ec);
+    if (ec)
+    {
+        core::output_debug_info("gltf export", "cannot create folder : " + textures_dir.string());
+        return false;
+    }
 
     uint32_t num_total_items = 0;
     for (uint32_t iMeshBatch = 0; iMeshBatch < batch_mesh_data.size(); iMeshBatch++)
     {
         for (uint32_t iMeshGroup = 0; iMeshGroup < batch_mesh_data[iMeshBatch]->group_meshes.size(); iMeshGroup++)
         {
-            vector<string> tex_name_list;
             if (batch_mesh_data[iMeshBatch]->is_google_dump)
             {
                 num_total_items += uint32_t(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->loaded_textures.size());
@@ -261,152 +404,169 @@ void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& ba
         }
     }
 
+    GltfBuilder gltf;
     uint32_t num_items = 0;
     for (uint32_t iMeshBatch = 0; iMeshBatch < batch_mesh_data.size(); iMeshBatch++)
     {
-        if (!batch_mesh_data[iMeshBatch]->is_spline_mesh)
+        if (batch_mesh_data[iMeshBatch]->is_spline_mesh)
         {
-            for (uint32_t iMeshGroup = 0; iMeshGroup < batch_mesh_data[iMeshBatch]->group_meshes.size(); iMeshGroup++)
-            {
-                vector<string> tex_name_list;
-                if (batch_mesh_data[iMeshBatch]->is_google_dump)
-                {
-                    ExportTextureList(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup],
-                                      textures_folder_name + "/" + folder_name + "_",
-                                      iMeshGroup,
-                                      tex_name_list,
-                                      num_total_items,
-                                      num_items,
-                                      progress);
+            continue;
+        }
 
-                    num_items += uint32_t(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->loaded_textures.size());
+        for (uint32_t iMeshGroup = 0; iMeshGroup < batch_mesh_data[iMeshBatch]->group_meshes.size(); iMeshGroup++)
+        {
+            vector<string> tex_name_list;
+            if (batch_mesh_data[iMeshBatch]->is_google_dump)
+            {
+                ExportTextureList(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup],
+                                  (textures_dir / (folder_name + "_" + to_string(iMeshBatch) + "_")).string(),
+                                  iMeshGroup,
+                                  tex_name_list,
+                                  num_total_items,
+                                  num_items,
+                                  progress);
+
+                num_items += uint32_t(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->loaded_textures.size());
+            }
+
+            for (uint32_t iMesh = 0; iMesh < batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes.size(); iMesh++)
+            {
+                const MeshData* mesh_data = batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes[iMesh];
+                if (!mesh_data || mesh_data->num_vertex <= 0 || !mesh_data->vertex_list)
+                {
+                    continue;
                 }
 
-                for (uint32_t iMesh = 0; iMesh < batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes.size(); iMesh++)
+                std::vector<uint32_t> dst_index_list;
+                for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
                 {
-                    const MeshData* mesh_data = batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes[iMesh];
-                    if (mesh_data)
+                    const DrawCallInfo& draw_call_info = mesh_data->draw_call_list[i_draw];
+                    if (draw_call_info.get_primitive_type() == kGlTriangleStrip)
                     {
-                        string mesh_idx_string = to_string(iMeshGroup) + "_" + to_string(iMesh);
-                        string mesh_node_name = folder_name + string("_meshNode_") + mesh_idx_string;
-                        string mesh_name = folder_name + string("_mesh_") + mesh_idx_string;
-                        // Create a node for our mesh in the scene.
-                        fbxsdk::FbxNode* lMeshNode = fbxsdk::FbxNode::Create(pScene, mesh_node_name.c_str());
-
-                        //lMeshNode->LclTranslation.Set(FbxDouble3(mesh_data->translation.x, mesh_data->translation.y, mesh_data->translation.z));
-                        //lMeshNode->LclTranslation.Set(FbxDouble3(mesh_data->dumpped_matrix._41, mesh_data->dumpped_matrix._42, mesh_data->dumpped_matrix._43));
-                        lMeshNode->LclTranslation.Set(FbxDouble3(0, 0, 0));
-
-                        // Create a mesh.
-                        fbxsdk::FbxMesh* lMesh = fbxsdk::FbxMesh::Create(pScene, mesh_name.c_str());
-                        lMesh->InitControlPoints(mesh_data->num_vertex);
-                        FbxVector4* lControlPoints = lMesh->GetControlPoints();
-                        auto& vertex_list = mesh_data->vertex_list;
-                        for (int i = 0; i < mesh_data->num_vertex; i++)
+                        bool flip = false;
+                        for (int i = 2; i < draw_call_info.get_index_count(); i++)
                         {
-                            const core::vec3f& v = vertex_list[uint32_t(i)];
-                            core::vec4d v1 = core::vec4d(v[0], v[1], v[2], 1.0f) + core::vec4d(mesh_data->translation, 0.0);
-
-                            lControlPoints[i] = FbxVector4(double(v1[0]), double(v1[1]), double(v1[2]));
-                        }
-
-                        // Create layer 0 for the mesh if it does not already exist.
-                        // This is where we will define our normals.
-                        fbxsdk::FbxLayer* lLayer = lMesh->GetLayer(0);
-                        if (lLayer == nullptr) {
-                            lMesh->CreateLayer();
-                            lLayer = lMesh->GetLayer(0);
-                        }
-
-                        // Create a uv layer.
-                        fbxsdk::FbxLayerElementUV* lLayerElementUv = fbxsdk::FbxLayerElementUV::Create(lMesh, "diffuseUV");
-                        lLayerElementUv->SetMappingMode(fbxsdk::FbxLayerElementUV::eByPolygonVertex);
-                        lLayerElementUv->SetReferenceMode(fbxsdk::FbxLayerElementUV::eIndexToDirect);
-
-                        for (int i = 0; i < mesh_data->num_vertex; i++)
-                        {
-                            core::vec2f v = mesh_data->uv_list[uint32_t(i)];
-                            lLayerElementUv->GetDirectArray().Add(FbxVector2(double(v.x), double(v.y)));
-                        }
-
-                        std::vector<uint32_t> dst_index_list;
-                        for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)
-                        {
-                            const DrawCallInfo& draw_call_info = mesh_data->draw_call_list[i_draw];
-                            if (draw_call_info.get_primitive_type() == kGlTriangleStrip)
+                            const uint32_t& i0 = draw_call_info.get_index(i-2);
+                            const uint32_t& i1 = draw_call_info.get_index(i-1);
+                            const uint32_t& i2 = draw_call_info.get_index(i);
+                            if (i0 != i1 && i1 != i2 && i2 != i0)
                             {
-                                bool flip = false;
-                                for (int i = 2; i < draw_call_info.get_index_count(); i++)
-                                {
-                                    const uint32_t& i0 = draw_call_info.get_index(i-2);
-                                    const uint32_t& i1 = draw_call_info.get_index(i-1);
-                                    const uint32_t& i2 = draw_call_info.get_index(i);
-                                    if (i0 != i1 && i1 != i2 && i2 != i0)
-                                    {
-                                        dst_index_list.push_back(flip ? i1 : i0);
-                                        dst_index_list.push_back(flip ? i0 : i1);
-                                        dst_index_list.push_back(i2);
-                                    }
-
-                                    flip = !flip;
-                                }
-
+                                dst_index_list.push_back(flip ? i1 : i0);
+                                dst_index_list.push_back(flip ? i0 : i1);
+                                dst_index_list.push_back(i2);
                             }
-                            else if (draw_call_info.get_primitive_type() == kGlTriangles)
-                            {
-                                for (int i_vert = 0; i_vert < draw_call_info.get_index_count(); i_vert++)
-                                {
-                                    dst_index_list.push_back(draw_call_info.get_index(i_vert));
-                                }
-                            }
+
+                            flip = !flip;
                         }
-
-                        int32_t num_index = int32_t(dst_index_list.size());
-                        lMesh->ReservePolygonVertexCount(num_index);
-                        lLayerElementUv->GetIndexArray().SetCount(num_index);
-                        for (int32_t i = 0; i < num_index; i += 3)
+                    }
+                    else if (draw_call_info.get_primitive_type() == kGlTriangles)
+                    {
+                        for (int i_vert = 0; i_vert + 2 < draw_call_info.get_index_count(); i_vert += 3)
                         {
-                            int idx0 = int(dst_index_list[uint32_t(i + 0)]);
-                            int idx1 = int(dst_index_list[uint32_t(i + 1)]);
-                            int idx2 = int(dst_index_list[uint32_t(i + 2)]);
-                            lMesh->BeginPolygon(-1, -1, -1, false);
-                            lMesh->AddPolygon(idx0);
-                            lMesh->AddPolygon(idx1);
-                            lMesh->AddPolygon(idx2);
-                            lLayerElementUv->GetIndexArray().SetAt(int32_t(i + 0), idx0);
-                            lLayerElementUv->GetIndexArray().SetAt(int32_t(i + 1), idx1);
-                            lLayerElementUv->GetIndexArray().SetAt(int32_t(i + 2), idx2);
-                            lMesh->EndPolygon();
+                            dst_index_list.push_back(draw_call_info.get_index(i_vert + 0));
+                            dst_index_list.push_back(draw_call_info.get_index(i_vert + 1));
+                            dst_index_list.push_back(draw_call_info.get_index(i_vert + 2));
                         }
-
-                        lLayer->SetUVs(lLayerElementUv);
-
-                        // Set the node attribute of the mesh node.
-                        lMeshNode->SetNodeAttribute(lMesh);
-
-                        lMeshNode->SetShadingMode(fbxsdk::FbxNode::eTextureShading);
-
-                        string tex_file_name = batch_mesh_data[iMeshBatch]->is_google_dump ? tex_name_list[mesh_data->idx_in_texture_list] : *mesh_data->tex_file_name.get();
-                        auto relative_tex_name = tex_file_name.substr(tex_file_name.rfind('/')+1);
-                        AddMaterial(pScene, lMeshNode, iMeshGroup, iMesh, tex_file_name, relative_tex_name);
-
-                        lRootNode->AddChild(lMeshNode);
                     }
                 }
-                num_items++;
-                progress->SetValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
+
+                if (dst_index_list.empty())
+                {
+                    continue;
+                }
+
+                // Positions stay float and mesh-local; the double-precision offset goes on the node.
+                uint32_t num_vertex = uint32_t(mesh_data->num_vertex);
+                const core::vec3f* positions = mesh_data->vertex_list.get();
+                float min_p[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
+                float max_p[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+                vector<float> pos_data(num_vertex * 3);
+                for (uint32_t i = 0; i < num_vertex; i++)
+                {
+                    for (int c = 0; c < 3; c++)
+                    {
+                        float v = positions[i][c];
+                        pos_data[i * 3 + c] = v;
+                        min_p[c] = min(min_p[c], v);
+                        max_p[c] = max(max_p[c], v);
+                    }
+                }
+                string pos_min_max = ",\"min\":[" + JsonNumber(min_p[0]) + "," + JsonNumber(min_p[1]) + "," + JsonNumber(min_p[2]) + "]"
+                                     ",\"max\":[" + JsonNumber(max_p[0]) + "," + JsonNumber(max_p[1]) + "," + JsonNumber(max_p[2]) + "]";
+
+                int32_t pos_view = gltf.AddBufferView(pos_data.data(), pos_data.size() * sizeof(float), 34962);
+                int32_t pos_acc  = gltf.AddAccessor(pos_view, 5126, num_vertex, "VEC3", pos_min_max);
+                string attributes = "\"POSITION\":" + to_string(pos_acc);
+
+                if (mesh_data->uv_list)
+                {
+                    // GL / FBX uv origin is bottom-left, glTF is top-left.
+                    vector<float> uvs(num_vertex * 2);
+                    for (uint32_t i = 0; i < num_vertex; i++)
+                    {
+                        uvs[i * 2 + 0] = mesh_data->uv_list[i].x;
+                        uvs[i * 2 + 1] = 1.0f - mesh_data->uv_list[i].y;
+                    }
+                    int32_t uv_view = gltf.AddBufferView(uvs.data(), uvs.size() * sizeof(float), 34962);
+                    attributes += ",\"TEXCOORD_0\":" + to_string(gltf.AddAccessor(uv_view, 5126, num_vertex, "VEC2"));
+                }
+
+                int32_t idx_view = gltf.AddBufferView(dst_index_list.data(), dst_index_list.size() * sizeof(uint32_t), 34963);
+                int32_t idx_acc  = gltf.AddAccessor(idx_view, 5125, dst_index_list.size(), "SCALAR");
+
+                string tex_file_name;
+                if (batch_mesh_data[iMeshBatch]->is_google_dump)
+                {
+                    if (mesh_data->idx_in_texture_list < tex_name_list.size())
+                    {
+                        tex_file_name = tex_name_list[mesh_data->idx_in_texture_list];
+                    }
+                }
+                else if (mesh_data->tex_file_name)
+                {
+                    tex_file_name = *mesh_data->tex_file_name;
+                }
+                int32_t material_idx = tex_file_name.empty() ? -1 : gltf.GetMaterial(tex_file_name, embed, gltf_dir, textures_rel_dir);
+
+                string mesh_idx_string = to_string(iMeshBatch) + "_" + to_string(iMeshGroup) + "_" + to_string(iMesh);
+                string primitive = "{\"attributes\":{" + attributes + "},\"indices\":" + to_string(idx_acc) + ",\"mode\":4";
+                if (material_idx >= 0)
+                {
+                    primitive += ",\"material\":" + to_string(material_idx);
+                }
+                primitive += "}";
+                gltf.meshes.push_back("{\"name\":\"" + JsonEscape(folder_name + "_mesh_" + mesh_idx_string) + "\",\"primitives\":[" + primitive + "]}");
+
+                const core::vec3d& t = mesh_data->translation;
+                gltf.nodes.push_back("{\"name\":\"" + JsonEscape(folder_name + "_meshNode_" + mesh_idx_string) + "\",\"mesh\":" + to_string(gltf.meshes.size() - 1) +
+                                     ",\"translation\":[" + JsonNumber(t.x) + "," + JsonNumber(t.y) + "," + JsonNumber(t.z) + "]}");
             }
+            num_items++;
+            progress->SetValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
         }
     }
 
-    // export the scene.
-    lExporter->Export(pScene);
+    bool ok;
+    if (embed)
+    {
+        ok = WriteGlb(file_name, gltf.BuildJson(""), gltf.bin);
+        fs::remove_all(textures_dir, ec);
+    }
+    else
+    {
+        string bin_name = folder_name + ".bin";
+        ofstream bin_out((fs::path(gltf_dir) / bin_name).string(), ofstream::binary);
+        bin_out.write(reinterpret_cast<const char*>(gltf.bin.data()), streamsize(gltf.bin.size()));
+        ofstream json_out(file_name, ofstream::binary);
+        json_out << gltf.BuildJson(bin_name);
+        ok = bool(bin_out) && bool(json_out);
+    }
 
-    // The file is imported; so get rid of the importer.
-    lExporter->Destroy();
-
-    // Destroy the SDK manager and all the other objects it was handling.
-    lSdkManager->Destroy();
+    if (!ok)
+    {
+        core::output_debug_info("gltf export", "failed to write : " + file_name);
+    }
+    return ok;
 }
 
 string InsertRename()

@@ -3,6 +3,12 @@
 #include <fstream>
 #include <stdexcept>
 #include <cassert>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Public
@@ -81,11 +87,41 @@ void VulkanPipelineManager::Shutdown()
 // Private
 // ---------------------------------------------------------------------------
 
-std::vector<char> VulkanPipelineManager::ReadSPIRV(const std::string& filename)
+// .spv files are generated into <build>/shaders and copied next to the exe.
+// Look there first, then fall back to paths relative to the working directory
+// (run.bat starts MeshTool from the repo root).
+static std::string ResolveSPIRVPath(const std::string& filename)
 {
+    std::vector<std::string> candidates;
+#ifdef _WIN32
+    char exePath[MAX_PATH] = {};
+    if (GetModuleFileNameA(nullptr, exePath, MAX_PATH))
+    {
+        std::string dir(exePath);
+        size_t slash = dir.find_last_of("\\/");
+        if (slash != std::string::npos)
+            candidates.push_back(dir.substr(0, slash + 1) + filename);
+    }
+#endif
+    candidates.push_back(filename);
+    candidates.push_back("build/" + filename);
+
+    for (const auto& c : candidates)
+    {
+        std::ifstream probe(c, std::ios::binary);
+        if (probe.is_open())
+            return c;
+    }
+    return filename;
+}
+
+std::vector<char> VulkanPipelineManager::ReadSPIRV(const std::string& requested)
+{
+    const std::string filename = ResolveSPIRVPath(requested);
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     if (!file.is_open())
-        throw std::runtime_error("Failed to open SPIR-V file: " + filename);
+        throw std::runtime_error("Failed to open SPIR-V file: " + requested +
+                                 " (looked next to the exe, in the working dir and in build/)");
 
     size_t fileSize = static_cast<size_t>(file.tellg());
     std::vector<char> buffer(fileSize);

@@ -33,6 +33,9 @@ private:
     CameraController*      m_camera       = nullptr;
     ProcessManager*        m_processManager = nullptr;
 
+    bool                   m_capturePending = false;     // Capture Frame requested, result not in yet
+    double                 m_captureRequestTime = 0.0;   // glfwGetTime() of the request
+
     void ProcessPendingActions();
     void LoadConfig();
     void SaveConfig();

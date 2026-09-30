@@ -2,7 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include "opencv2/opencv.hpp"
+#include "stb_image.h"
 
 // Qt removed
 #include "coremath.h"
@@ -14,7 +14,6 @@
 #include "meshtexture.h"
 #include "worlddata.h"
 #include "kmlfileparser.h"
-#include <fbxsdk.h>
 #include "hfa/hfa_p.h"
 #include "hfa/hfa.h"
 
@@ -123,8 +122,12 @@ void DumpUSGSTexture(const vector<shared_ptr<string>>& file_name_list,
         const string& base_name = file_name_list[i].get()->substr(0, file_name_list[i].get()->rfind("."));
 
     #if		USE_USGS_MAP_TEXTURE
-        dumpped_tex_info.tex_body = cv::imread(base_name + ".jpg");
-        dumpped_tex_info.tex_id = LoadMapTexture(dumpped_tex_info.tex_body.cols, dumpped_tex_info.tex_body.rows, dumpped_tex_info.tex_body.data);
+        {
+            int file_channels = 0;
+            uint8_t* tex_body = stbi_load((base_name + ".jpg").c_str(), &dumpped_tex_info.tex_width, &dumpped_tex_info.tex_height, &file_channels, 3);
+            dumpped_tex_info.tex_id = LoadMapTexture(dumpped_tex_info.tex_width, dumpped_tex_info.tex_height, tex_body);
+            stbi_image_free(tex_body);
+        }
     #else
         // load dds file.
         {

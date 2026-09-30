@@ -373,5 +373,96 @@ void ExportDdsImageFile(const core::Texture2DInfo* texture_info, core::TextureFi
         mem_ofs += texture_info->m_mips[i].m_size;
     }
 }
+// Colour half of a DXT3/DXT5 block: always the 4-colour mode.
+static void DecodeDxtColorBlock(const uint8_t* block, uint32_t colors[4])
+{
+    uint32_t c[2] = { uint32_t(block[0]) | (uint32_t(block[1]) << 8),
+                      uint32_t(block[2]) | (uint32_t(block[3]) << 8) };
+    uint32_t r[4], g[4], b[4];
+    for (int i = 0; i < 2; i++)
+    {
+        r[i] = ((c[i] >> 11) & 0x1f) * 255 / 31;
+        g[i] = ((c[i] >> 5)  & 0x3f) * 255 / 63;
+        b[i] = ( c[i]        & 0x1f) * 255 / 31;
+    }
+    r[2] = (2 * r[0] + r[1]) / 3;  g[2] = (2 * g[0] + g[1]) / 3;  b[2] = (2 * b[0] + b[1]) / 3;
+    r[3] = (r[0] + 2 * r[1]) / 3;  g[3] = (g[0] + 2 * g[1]) / 3;  b[3] = (b[0] + 2 * b[1]) / 3;
+    for (int i = 0; i < 4; i++)
+    {
+        colors[i] = (r[i] << 16) | (g[i] << 8) | b[i];
+    }
+}
+
+// alpha_mode 3: 4-bit explicit alpha (DXT3), 5: interpolated alpha (DXT5)
+static void DecodeDxt35Texture(uint32_t* dst_image_buffer, uint32_t w, uint32_t h, const uint8_t* dxt_src, int alpha_mode)
+{
+    uint32_t block_w = (w + 3) / 4;
+    uint32_t block_h = (h + 3) / 4;
+
+    for (uint32_t b_y = 0; b_y < block_h; b_y++)
+    {
+        for (uint32_t b_x = 0; b_x < block_w; b_x++)
+        {
+            const uint8_t* block = dxt_src + (b_y * block_w + b_x) * 16;
+
+            uint32_t alpha[16];
+            if (alpha_mode == 3)
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    alpha[i] = ((block[i / 2] >> ((i & 1) * 4)) & 0x0f) * 17;
+                }
+            }
+            else
+            {
+                uint32_t a[8];
+                a[0] = block[0];
+                a[1] = block[1];
+                if (a[0] > a[1])
+                {
+                    for (int i = 1; i < 7; i++) a[i + 1] = ((7 - i) * a[0] + i * a[1]) / 7;
+                }
+                else
+                {
+                    for (int i = 1; i < 5; i++) a[i + 1] = ((5 - i) * a[0] + i * a[1]) / 5;
+                    a[6] = 0;
+                    a[7] = 255;
+                }
+                uint64_t bits = 0;
+                for (int i = 0; i < 6; i++) bits |= uint64_t(block[2 + i]) << (8 * i);
+                for (int i = 0; i < 16; i++) alpha[i] = a[(bits >> (3 * i)) & 0x07];
+            }
+
+            uint32_t colors[4];
+            DecodeDxtColorBlock(block + 8, colors);
+            uint32_t index_list = uint32_t(block[12]) | (uint32_t(block[13]) << 8) | (uint32_t(block[14]) << 16) | (uint32_t(block[15]) << 24);
+
+            for (uint32_t p_y = 0; p_y < 4; p_y++)
+            {
+                for (uint32_t p_x = 0; p_x < 4; p_x++)
+                {
+                    uint32_t i = p_y * 4 + p_x;
+                    uint32_t x = b_x * 4 + p_x;
+                    uint32_t y = b_y * 4 + p_y;
+                    if (x < w && y < h)
+                    {
+                        dst_image_buffer[y * w + x] = (alpha[i] << 24) | colors[(index_list >> (2 * i)) & 0x03];
+                    }
+                }
+            }
+        }
+    }
+}
+
+void DecodeDxt3Texture(uint32_t* dst_image_buffer, uint32_t w, uint32_t h, const uint8_t* dxt_src)
+{
+    DecodeDxt35Texture(dst_image_buffer, w, h, dxt_src, 3);
+}
+
+void DecodeDxt5Texture(uint32_t* dst_image_buffer, uint32_t w, uint32_t h, const uint8_t* dxt_src)
+{
+    DecodeDxt35Texture(dst_image_buffer, w, h, dxt_src, 5);
+}
+
 }
 

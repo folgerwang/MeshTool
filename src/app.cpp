@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <algorithm>
 
 #include <vulkan/vulkan.h>
 #include "imgui.h"
@@ -261,23 +262,47 @@ void MeshToolApp::ProcessPendingActions()
         m_ui->wantCaptureFrame = false;
         if (m_processManager && m_processManager->IsRunning())
         {
+            // Non-blocking: the result is picked up below when the hook signals it.
             m_processManager->RequestFrameCapture();
-            HANDLE readyEvent = m_processManager->GetReadyEvent();
-            if (readyEvent)
-            {
-                DWORD result = WaitForSingleObject(readyEvent, 10000);
-                if (result == WAIT_OBJECT_0)
-                {
-                    if (m_ui->captureProcessor)
-                        m_ui->captureProcessor->processFrame();
-                }
-                else
-                {
-                    m_ui->statusMessage = "Timed out waiting for frame capture.";
-                    m_ui->statusTimeout = 5.0f;
-                }
-            }
+            m_capturePending = true;
+            m_captureRequestTime = glfwGetTime();
+            m_ui->statusMessage = "Capturing frame...";
+            m_ui->statusTimeout = 10.0f;
         }
+    }
+
+    // A finished capture, requested here or with F12 inside Google Earth.
+    HANDLE readyEvent = m_processManager ? m_processManager->GetReadyEvent() : nullptr;
+    if (readyEvent && m_ui->captureProcessor && WaitForSingleObject(readyEvent, 0) == WAIT_OBJECT_0)
+    {
+        m_capturePending = false;
+
+        BatchMeshData* batch = m_ui->liveBatch;
+        size_t groups_before = batch ? batch->group_meshes.size() : 0;
+
+        m_ui->captureProcessor->processFrame();
+
+        // Show the new capture right away, centred in the viewport.
+        if (batch && batch->group_meshes.size() > groups_before)
+        {
+            auto& batches = g_world.mesh_data_batches;
+            if (std::find(batches.begin(), batches.end(), batch) == batches.end())
+                batches.push_back(batch);
+
+            const core::bounds3d& captured = batch->group_meshes.back()->bbox_ws;
+            g_world.bbox_ws += captured;
+            g_world.bbox_gps += batch->group_meshes.back()->bbox_gps;
+
+            const VkExtent2D& extent = m_renderer->GetContext().swapchainExtent;
+            float aspectX = float(extent.width) / float(std::max(extent.height, 1u));
+            m_camera->InitPlanar(captured, tanf(3.14159265f / 8.0f), aspectX);
+        }
+    }
+    else if (m_capturePending && glfwGetTime() - m_captureRequestTime > 10.0)
+    {
+        m_capturePending = false;
+        m_ui->statusMessage = "Timed out waiting for frame capture.";
+        m_ui->statusTimeout = 5.0f;
     }
 
     if (m_ui->wantStopCapture)
@@ -287,9 +312,15 @@ void MeshToolApp::ProcessPendingActions()
         {
             m_processManager->StopGoogleEarth();
             BatchMeshData* batch = m_ui->liveBatch;
-            if (batch && !batch->group_meshes.empty())
+            auto& batches = g_world.mesh_data_batches;
+            if (batch && std::find(batches.begin(), batches.end(), batch) != batches.end())
             {
-                g_world.mesh_data_batches.push_back(batch);
+                // Already in the scene since its first capture; g_world owns it now.
+                m_ui->liveBatch = nullptr;
+            }
+            else if (batch && !batch->group_meshes.empty())
+            {
+                batches.push_back(batch);
                 g_world.bbox_ws += batch->bbox_ws;
                 g_world.bbox_gps += batch->bbox_gps;
                 m_ui->liveBatch = nullptr;

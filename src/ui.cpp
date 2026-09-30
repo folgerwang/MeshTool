@@ -4,6 +4,7 @@
 
 #include "ui.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -234,7 +235,6 @@ void MeshToolUI::DrawMenuBar()
             if (ImGui::MenuItem("Import GE Dump...",  "Ctrl+G"))   ActionImportGEDump();
             if (ImGui::MenuItem("Import USGS...",     "Ctrl+U"))   ActionImportUSGS();
             if (ImGui::MenuItem("Import KML...",      "Ctrl+K"))   ActionImportKML();
-            if (ImGui::MenuItem("Import FBX...",      "Ctrl+I"))   ActionImportFBX();
             ImGui::Separator();
             if (ImGui::MenuItem("Export Mesh...",      "Ctrl+E"))   ActionExport();
             ImGui::EndMenu();
@@ -349,7 +349,6 @@ void MeshToolUI::DrawToolbar()
     if (IconBtn(icons::ICON_GLOBE,   "Import GE Dump",     white)) ActionImportGEDump();
     if (IconBtn(icons::ICON_TERRAIN, "Import USGS",        white)) ActionImportUSGS();
     if (IconBtn(icons::ICON_SPLINE,  "Import KML",         white)) ActionImportKML();
-    if (IconBtn(icons::ICON_IMPORT,  "Import FBX",         white)) ActionImportFBX();
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -1009,17 +1008,6 @@ void MeshToolUI::ActionImportKML()
     }
 }
 
-void MeshToolUI::ActionImportFBX()
-{
-    nfdchar_t* outPath = nullptr;
-    if (NFD_OpenDialog("fbx", nullptr, &outPath) == NFD_OKAY && outPath)
-    {
-        ImportAndTransformFbxMeshFile(std::string(outPath));
-        free(outPath);
-        SetStatus("FBX file imported.");
-    }
-}
-
 void MeshToolUI::ActionExport()
 {
     if (g_world.mesh_data_batches.empty())
@@ -1029,19 +1017,34 @@ void MeshToolUI::ActionExport()
     }
 
     nfdchar_t* outPath = nullptr;
-    if (NFD_SaveDialog("fbx;ma", nullptr, &outPath) == NFD_OKAY && outPath)
+    if (NFD_SaveDialog("glb;gltf;ma", nullptr, &outPath) == NFD_OKAY && outPath)
     {
         std::string fileName(outPath);
         free(outPath);
 
-        progress.Reset();
+        // nfd does not append the extension -- default to .glb
+        size_t dot = fileName.rfind('.');
+        size_t slash = fileName.find_last_of("/\\");
+        if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+            fileName += ".glb";
+
         std::string ext = fileName.substr(fileName.rfind('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+
+        progress.Reset();
+        bool ok = true;
         if (ext == ".ma")
             ExportMaMeshFile(fileName, g_world.mesh_data_batches, &progress);
+        else if (ext == ".glb" || ext == ".gltf")
+            ok = ExportGltfMeshFile(fileName, g_world.mesh_data_batches, &progress);
         else
-            ExportFbxMeshFile(fileName, g_world.mesh_data_batches, &progress);
+        {
+            ShowMessage("Export", "Unsupported file type '" + ext + "'. Use .glb, .gltf or .ma.");
+            ok = false;
+        }
         progress.Reset();
-        SetStatus("Exported to " + fileName);
+        if (ok) SetStatus("Exported to " + fileName);
+        else if (ext == ".glb" || ext == ".gltf") ShowMessage("Export", "Failed to write " + fileName);
     }
 }
 

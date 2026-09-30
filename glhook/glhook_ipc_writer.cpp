@@ -121,7 +121,7 @@ uint32_t IPCWriter::AvailableSpace() const
 
 void* IPCWriter::BeginRecord(GLCaptureCmd cmd, uint32_t payload_size)
 {
-    if (!m_shared_mem || !IsCaptureRequested()) return nullptr;
+    if (!m_shared_mem || !m_recording) return nullptr;
 
     uint32_t total_size = sizeof(GLCaptureRecord) + payload_size;
     // Align to 4 bytes

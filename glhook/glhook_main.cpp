@@ -6,6 +6,7 @@
 #undef NOGDI
 #include <cstdio>
 #include <cstring>
+#include <cstdarg>
 
 #include "glhook_ipc_writer.h"
 #include "glhook_state.h"
@@ -84,12 +85,31 @@ PFN_glShaderSource            real_glShaderSource = nullptr;
 PFN_glUseProgram              real_glUseProgram = nullptr;
 
 // ============================================================================
+void ProxyLog(const char* fmt, ...)
+{
+    FILE* f = fopen("C:\\Users\\Public\\meshtool_proxy.log", "a");
+    if (!f) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fclose(f);
+}
+
 static bool LoadRealOpenGL()
 {
     char path[MAX_PATH];
     GetSystemDirectoryA(path, MAX_PATH);
     strcat(path, "\\opengl32.dll");
     g_real_opengl32 = LoadLibraryA(path);
+
+    HMODULE self = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCSTR>(&LoadRealOpenGL), &self);
+    ProxyLog("LoadRealOpenGL: %s -> %p (proxy module %p)%s\n", path, (void*)g_real_opengl32, (void*)self,
+             g_real_opengl32 == self ? "  ERROR: loaded ourselves" : "");
+    if (g_real_opengl32 == self)
+        g_real_opengl32 = nullptr;
     if (!g_real_opengl32) return false;
 
     real_glBindTexture    = (PFN_glBindTexture_t)GetProcAddress(g_real_opengl32, "glBindTexture");
@@ -139,6 +159,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r)
         DisableThreadLibraryCalls(h);
         // Real DLL is loaded lazily on first GL call.
         HookStateInit();
+        ProxyLog("proxy opengl32.dll attached, PID=%lu\n", GetCurrentProcessId());
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
@@ -151,7 +172,8 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r)
 // ============================================================================
 // Pure forwarding for all non-hooked functions
 // ============================================================================
-static void EnsureRealLoaded()
+// Called by every export (forwarded or intercepted) before touching real_* pointers.
+void EnsureRealLoaded()
 {
     if (g_real_opengl32) return;
     LoadRealOpenGL();

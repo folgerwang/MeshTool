@@ -278,4 +278,8 @@ void ExportBmpImageFile(const string& file_name, const char* src_buffer, uint32_
 void ExportBmpImageFile(const core::Texture2DInfo* texture_info, core::TextureFileInfo* tex_file_info);
 void ExportDdsImageFile(const core::Texture2DInfo* texture_info, core::TextureFileInfo* tex_file_info);
 
+// Decode DXT3 / DXT5 (BC2 / BC3) to 32-bit pixels, same packing as DecodeDxt1Texture (0xAARRGGBB).
+void DecodeDxt3Texture(uint32_t* dst_image_buffer, uint32_t w, uint32_t h, const uint8_t* dxt_src);
+void DecodeDxt5Texture(uint32_t* dst_image_buffer, uint32_t w, uint32_t h, const uint8_t* dxt_src);
+
 };

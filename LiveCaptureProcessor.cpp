@@ -5,11 +5,87 @@
 #include <string>
 #include "glhook_injector.h"
 #include "livecaptureprocessor.h"
+#include <array>
+#include <cstdarg>
+#include <cstdio>
 #include "meshdata.h"
 #include "worlddata.h"
 #include "debugout.h"
 
 using namespace std;
+
+// ---------------------------------------------------------------------------
+// Capture diagnostics: C:\Users\Public\meshtool_capture.log
+// ---------------------------------------------------------------------------
+static void CapLog(const char* fmt, ...)
+{
+    FILE* f = fopen("C:\\Users\\Public\\meshtool_capture.log", "a");
+    if (!f) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fclose(f);
+}
+
+static int g_logged_draws = 0;          // draw calls logged in the current frame
+static const int kMaxLoggedDraws = 40;
+static int g_meshes_from_frame = 0;
+
+// Size in bytes of one component of a GL vertex attribute / index type; 0 if unsupported.
+static uint32_t GLTypeSize(uint32_t type)
+{
+    switch (type)
+    {
+    case 0x1400: case 0x1401: return 1;   // BYTE, UNSIGNED_BYTE
+    case 0x1402: case 0x1403: return 2;   // SHORT, UNSIGNED_SHORT
+    case 0x1404: case 0x1405: case 0x1406: return 4;   // INT, UNSIGNED_INT, FLOAT
+    case 0x140A: return 8;                // DOUBLE
+    }
+    return 0;
+}
+
+// One component converted to float the way GL feeds it to the shader.
+static float ReadGLComponent(const char* p, uint32_t type, bool normalized)
+{
+    switch (type)
+    {
+    case 0x1400: { int8_t   v = *(const int8_t*)p;   return normalized ? (v / 127.0f < -1.0f ? -1.0f : v / 127.0f) : float(v); }
+    case 0x1401: { uint8_t  v = *(const uint8_t*)p;  return normalized ? v / 255.0f : float(v); }
+    case 0x1402: { int16_t  v = *(const int16_t*)p;  return normalized ? (v / 32767.0f < -1.0f ? -1.0f : v / 32767.0f) : float(v); }
+    case 0x1403: { uint16_t v = *(const uint16_t*)p; return normalized ? v / 65535.0f : float(v); }
+    case 0x1404: { int32_t  v = *(const int32_t*)p;  return normalized ? float(v / 2147483647.0) : float(v); }
+    case 0x1405: { uint32_t v = *(const uint32_t*)p; return normalized ? float(v / 4294967295.0) : float(v); }
+    case 0x1406: return *(const float*)p;
+    case 0x140A: return float(*(const double*)p);
+    }
+    return 0.0f;
+}
+
+// Reads every vertex of an attribute stream from its buffer into `out`
+// (up to 4 components each, missing ones = 0). Stride 0 means tightly packed.
+static size_t ReadAttributeStream(const std::vector<char>& buf, const VertexAttrib& a, std::vector<std::array<float, 4>>& out)
+{
+    uint32_t comp_size = GLTypeSize(uint32_t(a.data_type));
+    uint32_t comps = a.num_elements < 1 ? 1 : (a.num_elements > 4 ? 4 : a.num_elements);
+    if (comp_size == 0)
+        return 0;
+    uint32_t elem_size = comp_size * comps;
+    uint32_t stride = a.stride ? a.stride : elem_size;
+
+    const char* p = buf.data() + a.start_offset;
+    const char* end = buf.data() + buf.size();
+    if (a.start_offset >= buf.size())
+        return 0;
+    for (; p + elem_size <= end; p += stride)
+    {
+        std::array<float, 4> v = { 0.0f, 0.0f, 0.0f, 0.0f };
+        for (uint32_t c = 0; c < comps; c++)
+            v[c] = ReadGLComponent(p + c * comp_size, uint32_t(a.data_type), a.is_normalized != 0);
+        out.push_back(v);
+    }
+    return out.size();
+}
 
 // ============================================================================
 // Helper: convert matrix4f to matrix4d (same as in GpaDumpAnalyzeTool)
@@ -49,9 +125,10 @@ LiveCaptureProcessor::~LiveCaptureProcessor()
     if (m_mapping) CloseHandle(m_mapping);
     if (m_event_ready) CloseHandle(m_event_ready);
 
-    // Clean up texture store
+    // Clean up texture store (except textures now owned by captured groups)
     for (auto& pair : m_texture_store)
-        delete pair.second;
+        if (!m_textures_handed_out.count(pair.second))
+            delete pair.second;
 }
 
 void LiveCaptureProcessor::processFrame()
@@ -92,6 +169,11 @@ void LiveCaptureProcessor::processFrame()
 
     // Create a new group for this frame's meshes
     m_current_group = new GroupMeshData;
+    g_logged_draws = 0;
+    g_meshes_from_frame = 0;
+    std::map<uint32_t, uint32_t> record_counts;
+    CapLog("=== processFrame: read=%u write=%u status=0x%X\n",
+           m_header->read_offset, m_header->write_offset, m_header->status_flags);
     m_has_first_matrix = false;
     m_matrix_stack.clear();
 
@@ -127,6 +209,7 @@ void LiveCaptureProcessor::processFrame()
         }
 
         const char* payload = m_ring_base + read_pos + sizeof(GLCaptureRecord);
+        record_counts[record->cmd_id]++;
         ProcessRecord(record, payload);
 
         read_pos += record->total_size;
@@ -137,6 +220,13 @@ void LiveCaptureProcessor::processFrame()
     // Update read position
     m_header->read_offset = read_pos;
 
+    CapLog("  records:");
+    for (auto& rc : record_counts)
+        CapLog(" 0x%04X x%u", rc.first, rc.second);
+    CapLog("\n  buffers known=%u textures known=%u meshes built=%d%s\n",
+           unsigned(m_buffer_store.size()), unsigned(m_texture_store.size()), g_meshes_from_frame,
+           (m_header->status_flags & GLCAPTURE_STATUS_OVERFLOW) ? "  (hook reported RING OVERFLOW)" : "");
+
     // Add captured meshes to output
     int mesh_count = (int)m_current_group->meshes.size();
     if (mesh_count > 0 && m_output_batch)
@@ -145,10 +235,13 @@ void LiveCaptureProcessor::processFrame()
         for (auto& pair : m_texture_store)
         {
             m_current_group->loaded_textures.push_back(pair.second);
+            m_textures_handed_out.insert(pair.second);
         }
         // Don't clear texture_store - the pointers are now owned by the group
 
         m_output_batch->group_meshes.push_back(m_current_group);
+        m_output_batch->bbox_ws += m_current_group->bbox_ws;
+        m_output_batch->bbox_gps += m_current_group->bbox_gps;
         m_current_group = nullptr;
 
         if (m_on_frame_captured) m_on_frame_captured(mesh_count);
@@ -519,6 +612,7 @@ static float read_float(const char* ptr)
     return *(const float*)ptr;
 }
 
+
 void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
 {
     bool has_mesh_data_texture = state.m_vertexStream[0].is_enabled &&
@@ -535,16 +629,46 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
     bool is_ge_mesh = state.draw_call_params.primitive_type == kGlTriangles;
 
     if (!has_mesh_data_texture && !(has_draw_data && is_ge_polygon))
+    {
+        if (g_logged_draws < kMaxLoggedDraws)
+        {
+            g_logged_draws++;
+            CapLog("  draw mode=0x%X count=%u skipped: needs attrib 0 + attrib 3 + index buffer (triangles), or attrib 0 (strip); enabled:",
+                   state.draw_call_params.primitive_type, state.draw_call_params.num_indexes);
+            for (int i = 0; i < 16; i++)
+                if (state.m_vertexStream[i].is_enabled) CapLog(" %d", i);
+            CapLog("\n");
+        }
         return;
+    }
 
     // Extract vertex positions from buffer store
     vector<core::vec3f> position_data;
     vector<core::vec2f> texture_coord_data;
     vector<uint32_t> color_data;
-    vector<uint16_t> index_data;
-    position_data.reserve(10240);
-    texture_coord_data.reserve(10240);
-    index_data.reserve(10240);
+    vector<uint32_t> index_data;
+
+    bool log_this = g_logged_draws < kMaxLoggedDraws;
+    if (log_this)
+    {
+        g_logged_draws++;
+        CapLog("  draw mode=0x%X count=%u index_type=0x%X element_buf=%u offset=%u\n",
+               state.draw_call_params.primitive_type, state.draw_call_params.num_indexes,
+               uint32_t(state.draw_call_params.data_type), state.draw_call_params.element_buffer_obj,
+               state.draw_call_params.data_offset);
+        for (int i = 0; i < 16; i++)
+        {
+            const VertexAttrib& va = state.m_vertexStream[i];
+            if (!va.is_enabled) continue;
+            auto bit = m_buffer_store.find(va.data_buffer_obj);
+            CapLog("    attrib %d: buf=%u (%s, %u bytes) comps=%u type=0x%X norm=%u stride=%u offset=%u\n",
+                   i, va.data_buffer_obj, bit != m_buffer_store.end() ? "have data" : "NO DATA",
+                   bit != m_buffer_store.end() ? unsigned(bit->second.size()) : 0u,
+                   va.num_elements, uint32_t(va.data_type), va.is_normalized, va.stride, va.start_offset);
+        }
+    }
+
+    std::vector<std::array<float, 4>> stream;
 
     // Stream 0: positions
     if (state.m_vertexStream[0].is_enabled && state.m_vertexStream[0].data_buffer_obj != INVALID_VALUE)
@@ -552,18 +676,11 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
         auto it = m_buffer_store.find(state.m_vertexStream[0].data_buffer_obj);
         if (it != m_buffer_store.end())
         {
-            const char* start = it->second.data() + state.m_vertexStream[0].start_offset;
-            const char* end = it->second.data() + it->second.size();
-            uint32_t stride = state.m_vertexStream[0].stride;
-
-            while (start + 12 <= end) // need at least 3 floats
-            {
-                float x = read_float(start + 0);
-                float y = read_float(start + 4);
-                float z = read_float(start + 8);
-                position_data.push_back(core::vec3f(x, y, z));
-                start += stride;
-            }
+            stream.clear();
+            ReadAttributeStream(it->second, state.m_vertexStream[0], stream);
+            position_data.reserve(stream.size());
+            for (const auto& v : stream)
+                position_data.push_back(core::vec3f(v[0], v[1], v[2]));
         }
     }
 
@@ -573,34 +690,26 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
         auto it = m_buffer_store.find(state.m_vertexStream[3].data_buffer_obj);
         if (it != m_buffer_store.end())
         {
-            const char* start = it->second.data() + state.m_vertexStream[3].start_offset;
-            const char* end = it->second.data() + it->second.size();
-            uint32_t stride = state.m_vertexStream[3].stride;
-            uint32_t num_el = state.m_vertexStream[3].num_elements;
-
-            while (start + num_el * 4 <= end)
-            {
-                core::vec2f uv(0, 0);
-                for (uint32_t i = 0; i < num_el && i < 2; i++)
-                    uv[i] = read_float(start + 4 * i);
-                texture_coord_data.push_back(uv);
-                start += stride;
-            }
+            stream.clear();
+            ReadAttributeStream(it->second, state.m_vertexStream[3], stream);
+            texture_coord_data.reserve(stream.size());
+            for (const auto& v : stream)
+                texture_coord_data.push_back(core::vec2f(v[0], v[1]));
         }
     }
 
-    // Stream 2: colors (for polygon/triangle strip)
+    // Stream 2: colors (for polygon/triangle strip), raw bytes packed into RGBA
     if (is_ge_polygon && state.m_vertexStream[2].is_enabled && state.m_vertexStream[2].data_buffer_obj != INVALID_VALUE)
     {
         auto it = m_buffer_store.find(state.m_vertexStream[2].data_buffer_obj);
-        if (it != m_buffer_store.end())
+        if (it != m_buffer_store.end() && state.m_vertexStream[2].start_offset < it->second.size())
         {
             const char* start = it->second.data() + state.m_vertexStream[2].start_offset;
             const char* end = it->second.data() + it->second.size();
-            uint32_t stride = state.m_vertexStream[2].stride;
-            uint32_t num_el = state.m_vertexStream[2].num_elements;
+            uint32_t num_el = state.m_vertexStream[2].num_elements > 4 ? 4 : state.m_vertexStream[2].num_elements;
+            uint32_t stride = state.m_vertexStream[2].stride ? state.m_vertexStream[2].stride : num_el;
 
-            while (start + num_el <= end)
+            while (num_el > 0 && start + num_el <= end)
             {
                 uint32_t color = 0;
                 for (uint32_t i = 0; i < num_el; i++)
@@ -611,35 +720,34 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
         }
     }
 
-    // Index data
-    if (state.draw_call_params.data_type != DataType(-1) &&
-        state.draw_call_params.element_buffer_obj != INVALID_VALUE)
+    // Index data, in the draw call's index type
+    uint32_t index_size = GLTypeSize(uint32_t(state.draw_call_params.data_type));
+    bool supported_index = state.draw_call_params.data_type == DataType(0x1401) ||
+                           state.draw_call_params.data_type == DataType(0x1403) ||
+                           state.draw_call_params.data_type == DataType(0x1405);
+    if (supported_index && state.draw_call_params.element_buffer_obj != INVALID_VALUE &&
+        (state.draw_call_params.primitive_type == kGlTriangles ||
+         state.draw_call_params.primitive_type == kGlTriangleStrip ||
+         state.draw_call_params.primitive_type == kGlLineStrip))
     {
         auto it = m_buffer_store.find(state.draw_call_params.element_buffer_obj);
-        if (it != m_buffer_store.end())
+        if (it != m_buffer_store.end() && state.draw_call_params.data_offset < it->second.size())
         {
             const char* start = it->second.data() + state.draw_call_params.data_offset;
             const char* end = it->second.data() + it->second.size();
-
-            if (state.draw_call_params.primitive_type == kGlTriangles)
+            index_data.reserve(state.draw_call_params.num_indexes);
+            for (uint32_t i = 0; i < state.draw_call_params.num_indexes && start + index_size <= end; i++, start += index_size)
             {
-                for (uint32_t i = 0; i < state.draw_call_params.num_indexes && start + 2 <= end; i++)
-                {
-                    index_data.push_back(read_ushort(start));
-                    start += sizeof(uint16_t);
-                }
-            }
-            else if (state.draw_call_params.primitive_type == kGlTriangleStrip ||
-                     state.draw_call_params.primitive_type == kGlLineStrip)
-            {
-                for (uint32_t i = 0; i < state.draw_call_params.num_indexes && start + 2 <= end; i++)
-                {
-                    index_data.push_back(read_ushort(start));
-                    start += sizeof(uint16_t);
-                }
+                if (index_size == 1)      index_data.push_back(*(const uint8_t*)start);
+                else if (index_size == 2) index_data.push_back(read_ushort(start));
+                else                      index_data.push_back(*(const uint32_t*)start);
             }
         }
     }
+
+    if (log_this)
+        CapLog("    -> %u positions, %u uvs, %u indices\n",
+               unsigned(position_data.size()), unsigned(texture_coord_data.size()), unsigned(index_data.size()));
 
     // Deduplicate vertices (same as CreateObjectFile)
     vector<int32_t> index_match_table(position_data.size(), -1);
@@ -656,7 +764,12 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
     }
 
     if (new_index_match_table.size() == 0)
+    {
+        if (g_logged_draws <= kMaxLoggedDraws)
+            CapLog("    -> no mesh (no usable indices/positions)\n");
         return;
+    }
+    g_meshes_from_frame++;
 
     // Create MeshData
     MeshData* mesh_data = new MeshData;
@@ -732,6 +845,21 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
 
     // Texture reference
     mesh_data->idx_in_texture_list = state.m_textureSlot[0].index_in_list;
+
+    // World bounds and translation, as the GPA dump import does without a KML
+    // reference: vertices are row vectors transformed by dumpped_matrix (the
+    // same matrix the renderer uses as model matrix).
+    mesh_data->bbox_ws.Reset();
+    if (mesh_data->vertex_list)
+    {
+        for (uint32_t i = 0; i < num_vertex; i++)
+        {
+            core::vec4d pos_ws = core::vec4d(mesh_data->vertex_list[i], 1.0) * mesh_data->dumpped_matrix;
+            mesh_data->bbox_ws += core::vec3d(pos_ws);
+        }
+    }
+    mesh_data->translation = mesh_data->dumpped_matrix.get_row(3);
+    m_current_group->bbox_ws += mesh_data->bbox_ws;
 
     // Add to current group
     m_current_group->meshes.push_back(mesh_data);
@@ -835,6 +963,16 @@ bool ProcessManager::StartGoogleEarth(const std::string& ge_path)
     m_process = pi.hProcess;
     DWORD pid = pi.dwProcessId;
     CloseHandle(pi.hThread);
+
+    // With the proxy opengl32.dll deployed next to googleearth.exe, the proxy
+    // does the capture and draws its own overlay; injecting the overlay hook as
+    // well would patch the proxy's wglSwapBuffers and draw a second overlay.
+    std::string proxyPath = m_ge_path.substr(0, m_ge_path.find_last_of("\\/") + 1) + "opengl32.dll";
+    if (GetFileAttributesA(proxyPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+        if (m_on_process_started) m_on_process_started();
+        return true;
+    }
 
     // Wait for GE to initialize OpenGL, then inject our hook DLL
     Sleep(5000);

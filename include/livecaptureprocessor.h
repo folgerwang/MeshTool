@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <functional>
@@ -48,6 +49,9 @@ private:
 
     std::map<uint32_t, std::vector<char>>    m_buffer_store;
     std::map<uint32_t, core::Texture2DInfo*> m_texture_store;
+    // Textures handed to captured groups. Those groups end up in g_world, which
+    // keeps using them after this processor is gone, so they must not be freed here.
+    std::set<core::Texture2DInfo*>           m_textures_handed_out;
 
     GroupMeshData*      m_current_group;
     BatchMeshData*      m_output_batch;
