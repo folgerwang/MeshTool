@@ -4,8 +4,7 @@
 #include <filesystem>
 #include "opencv2/opencv.hpp"
 
-#include <QMessageBox>
-#include <QProgressBar>
+// Qt removed - using progress.h interface
 #include "coremath.h"
 #include "corefile.h"
 #include "coregeographic.h"
@@ -120,7 +119,7 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
                        vector<string>& tex_name_list,
                        uint32_t num_total_items,
                        uint32_t num_items,
-                       QProgressBar* progress_bar)
+                       IProgressCallback* progress)
 {
     tex_name_list.reserve(group_mesh_data->loaded_textures.size());
     tex_name_list.resize(group_mesh_data->loaded_textures.size());
@@ -174,12 +173,12 @@ void ExportTextureList(const GroupMeshData* group_mesh_data,
                 }
             }
 
-            progress_bar->setValue(int32_t(float(num_items + i) / float(num_total_items) * 100.0f));
+            progress->SetValue(int32_t(float(num_items + i) / float(num_total_items) * 100.0f));
         }
     }
 }
 
-void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, QProgressBar* progress_bar)
+void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress)
 {
     const char* lFilename = file_name.c_str();
 
@@ -278,7 +277,7 @@ void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& ba
                                       tex_name_list,
                                       num_total_items,
                                       num_items,
-                                      progress_bar);
+                                      progress);
 
                     num_items += uint32_t(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->loaded_textures.size());
                 }
@@ -395,7 +394,7 @@ void ExportFbxMeshFile(const string& file_name, const vector<BatchMeshData*>& ba
                     }
                 }
                 num_items++;
-                progress_bar->setValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
+                progress->SetValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
             }
         }
     }
@@ -479,7 +478,7 @@ void AddCameraToMa(const string transform_type, bool is_perspective, int64_t rnd
     body += "\tsetAttr \".ai_translator\" -type \"string\" "; body += is_perspective ? "\"perspective\";\n" : "\"orthographic\";\n";
 }
 
-void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, QProgressBar* progress_bar)
+void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& batch_mesh_data, IProgressCallback* progress)
 {
     const char* lFilename = file_name.c_str();
 
@@ -615,7 +614,7 @@ void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& bat
                     }
                 }
                 num_items++;
-                progress_bar->setValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
+                progress->SetValue(int32_t(float(num_items) / float(num_total_items) * 100.0f));
             }
         }
     }

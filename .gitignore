@@ -1,0 +1,16 @@
+build/
+*.png
+*.jpg
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.db
+*.opendb
+.vs/
+.claude/
+thirdparty/
+*.spv
+meshtool_flyto.kml
+meshtool_search.kml
+*.ini

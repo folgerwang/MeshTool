@@ -4,7 +4,7 @@
 #include <filesystem>
 #include "opencv2/opencv.hpp"
 
-#include <QMessageBox>
+// Qt removed
 #include "coremath.h"
 #include "corefile.h"
 #include "coregeographic.h"

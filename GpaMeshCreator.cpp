@@ -5,7 +5,7 @@
 #include "opencv2/opencv.hpp"
 #include "debugout.h"
 
-#include <QMessageBox>
+// QMessageBox removed - using stderr for error reporting
 #include "coremath.h"
 #include "corefile.h"
 #include "coregeographic.h"
@@ -443,7 +443,7 @@ bool DumpGeFilesWithReference(const string& kml_name,
     return true;
 }
 
-void DumpGoogleEarthMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, QProgressBar* progress_bar)
+void DumpGoogleEarthMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, IProgressCallback* progress)
 {
     core::CoordinateTransformer gps_to_env_cnvt(batch_mesh_data->reference_pos.y, batch_mesh_data->reference_pos.x, 0.0);
 
@@ -542,7 +542,7 @@ void DumpGoogleEarthMeshes(const vector<string>& file_name_list, BatchMeshData* 
             batch_mesh_data->bbox_gps += group_mesh_data->bbox_gps;
         }
 
-        progress_bar->setValue(int32_t(float(i_dump + 1) / float(file_name_list.size()) * 100.0f));
+        progress->SetValue(int32_t(float(i_dump + 1) / float(file_name_list.size()) * 100.0f));
     }
 }
 
@@ -686,7 +686,7 @@ void FoundIntersectMeshesList(core::bounds3d ipt_bbox, vector<MeshData*>& mesh_l
     }
 }
 
-void DumpKmlSplineMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, QProgressBar* progress_bar)
+void DumpKmlSplineMeshes(const vector<string>& file_name_list, BatchMeshData* batch_mesh_data, IProgressCallback* progress)
 {
     core::CoordinateTransformer gps_to_env_cnvt(batch_mesh_data->reference_pos.y, batch_mesh_data->reference_pos.x, 0.0);
 

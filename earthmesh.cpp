@@ -3,9 +3,9 @@
 #include "coretexture.h"
 #include "meshdata.h"
 #include "worlddata.h"
-#include "oglwidget.h"
+#include "texture_util.h"
 #include "opencv2/opencv.hpp"
-#include <QLoggingCategory>
+// Qt removed
 #include "debugout.h"
 
 uint32_t get_index(int lon, int lat)
@@ -89,13 +89,8 @@ void earth_mesh_init()
             last_draw_call_info.add_index(get_index(lon + 1, 89));
         }
 
-//        QLoggingCategory category("bbox");
-//        qCInfo(category) << g_world.earth_mesh->bbox_ws.bb_min.x << g_world.earth_mesh->bbox_ws.bb_min.y << g_world.earth_mesh->bbox_ws.bb_min.z <<
-//                            g_world.earth_mesh->bbox_ws.bb_max.x << g_world.earth_mesh->bbox_ws.bb_max.y << g_world.earth_mesh->bbox_ws.bb_max.z;
-
-//        g_world.earth_tex_info = make_unique<core::Texture2DInfo>();
-//        LoadTextureFromFile("land_ocean_ice_8192.png", g_world.earth_tex_info.get());
-        g_world.earth_tex_info = make_unique<QImage>(":/images/land_ocean_ice_8192.png");
+        g_world.earth_tex_info = make_unique<core::Texture2DInfo>();
+        LoadTextureFromFile("land_ocean_ice_8192.png", g_world.earth_tex_info.get());
     }
 }
 

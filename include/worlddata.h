@@ -1,6 +1,6 @@
 #pragma once
 #include "meshdata.h"
-#include <QImage>
+#include "coretexture.h"
 
 struct WorldData
 {
@@ -10,8 +10,7 @@ struct WorldData
     core::bounds3d      bbox_gps;
     vector<BatchMeshData*> mesh_data_batches;
     MeshData*           earth_mesh;
-    //unique_ptr<core::Texture2DInfo> earth_tex_info;
-    unique_ptr<QImage>  earth_tex_info;
+    unique_ptr<core::Texture2DInfo> earth_tex_info;
 
     WorldData() : reference_pos(core::vec2d(0.0, 0.0)),
                   earth_mesh(nullptr),

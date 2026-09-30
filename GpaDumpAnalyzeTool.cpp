@@ -7,8 +7,7 @@
 #include "coretexture.h"
 #include "glfunctionlist.h"
 #include "GpaDumpAnalyzeTool.h"
-#include <QMessageBox>
-#include <QString>
+// Qt removed
 #include "meshdata.h"
 #include "debugout.h"
 

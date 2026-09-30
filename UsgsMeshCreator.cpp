@@ -4,8 +4,7 @@
 #include <filesystem>
 #include "opencv2/opencv.hpp"
 
-#include <QLoggingCategory>
-#include <QUrlQuery>
+// Qt removed - using std::string for URL construction
 #include "coremath.h"
 #include "corefile.h"
 #include "coregeographic.h"
@@ -15,7 +14,7 @@
 #include "meshtexture.h"
 #include "worlddata.h"
 #include "kmlfileparser.h"
-#include "imagedownload.h"
+#include "file_downloader.h"
 #include <fbxsdk.h>
 #include "hfa/hfa_p.h"
 #include "hfa/hfa.h"
@@ -27,22 +26,22 @@ constexpr int TILE_SIZE = 512;
 constexpr int MARGIN_SIZE = 22;
 void loadMapTexture(FileDownloader *download, double lon_, double lat_, int width_, int height_, int zoom_level_)
 {
-    QString long_str = QString::number(lon_);
-    QString lat_str = QString::number(lat_);
-    QString zoom_str = QString::number(zoom_level_);
-    QString width_str = QString::number(width_);
-    QString height_str = QString::number(height_+MARGIN_SIZE*2);
+    string long_str = to_string(lon_);
+    string lat_str = to_string(lat_);
+    string zoom_str = to_string(zoom_level_);
+    string width_str = to_string(width_);
+    string height_str = to_string(height_ + MARGIN_SIZE * 2);
 
-    QString url_string = "https://maps.googleapis.com/maps/api/staticmap";
-         url_string += "?center=" + lat_str + "," + long_str;
-         url_string += "&zoom=" + zoom_str;
-         url_string += "&size=" + width_str + "x" + height_str;
-         url_string += "&maptype=satellite";
-         url_string += "&key=AIzaSyAQSf40otiucpCT6HwYvIQuX2jqwhqOVsM";
+    string url_string = "https://maps.googleapis.com/maps/api/staticmap";
+    url_string += "?center=" + lat_str + "," + long_str;
+    url_string += "&zoom=" + zoom_str;
+    url_string += "&size=" + width_str + "x" + height_str;
+    url_string += "&maptype=satellite";
+    url_string += "&key=AIzaSyAQSf40otiucpCT6HwYvIQuX2jqwhqOVsM";
 
-    QString file_name = "lon@" + long_str + "_lat@" + lat_str + "_zoom@" + zoom_str;
+    string file_name = "lon@" + long_str + "_lat@" + lat_str + "_zoom@" + zoom_str;
 
-    download->downloadFile(QUrl(url_string), file_name, QString("C:/Users/fenwang"));
+    download->downloadFile(url_string, file_name, "C:/Users/fenwang");
 }
 
 core::vec2d project(double lon_, double lat_)
