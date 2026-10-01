@@ -10,6 +10,7 @@
 #include <fstream>
 #include <algorithm>
 #include <limits>
+#include <sstream>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -232,7 +233,10 @@ void MeshToolUI::DrawMenuBar()
     {
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem("Import GE Dump...",  "Ctrl+G"))   ActionImportGEDump();
+            if (ImGui::MenuItem("Open Scene...",      "Ctrl+O"))   ActionOpenScene();
+            if (ImGui::MenuItem("Save Scene...",      "Ctrl+S", false, !g_world.mesh_data_batches.empty()))
+                ActionSaveScene();
+            ImGui::Separator();
             if (ImGui::MenuItem("Import USGS...",     "Ctrl+U"))   ActionImportUSGS();
             if (ImGui::MenuItem("Import KML...",      "Ctrl+K"))   ActionImportKML();
             ImGui::Separator();
@@ -271,8 +275,34 @@ void MeshToolUI::DrawMenuBar()
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("View"))
+        {
+            if (ImGui::MenuItem("Frame All", "F", false, !g_world.mesh_data_batches.empty()))
+                wantFrameAll = true;
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Help"))
         {
+            if (ImGui::BeginMenu("Viewport Controls"))
+            {
+                ImGui::TextDisabled("Maya style");
+                ImGui::BulletText("Alt + Left drag     Orbit around pivot");
+                ImGui::BulletText("Alt + Middle drag   Pan");
+                ImGui::BulletText("Alt + Right drag    Dolly");
+                ImGui::Separator();
+                ImGui::TextDisabled("Unreal style");
+                ImGui::BulletText("Right drag          Look around");
+                ImGui::BulletText("Right + W/A/S/D     Fly, Q/E down/up");
+                ImGui::BulletText("Right + Wheel       Fly speed, Shift = faster");
+                ImGui::BulletText("Left drag           Move forward/back + turn");
+                ImGui::BulletText("Middle / L+R drag   Pan");
+                ImGui::Separator();
+                ImGui::BulletText("Wheel               Zoom to pivot");
+                ImGui::BulletText("F                   Frame all");
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             ImGui::MenuItem("About MeshTool", nullptr, false, false);
             ImGui::EndMenu();
         }
@@ -346,7 +376,7 @@ void MeshToolUI::DrawToolbar()
     ImGui::Spacing();
 
     // Import group
-    if (IconBtn(icons::ICON_GLOBE,   "Import GE Dump",     white)) ActionImportGEDump();
+    if (IconBtn(icons::ICON_IMPORT,  "Open Scene (Ctrl+O)", white)) ActionOpenScene();
     if (IconBtn(icons::ICON_TERRAIN, "Import USGS",        white)) ActionImportUSGS();
     if (IconBtn(icons::ICON_SPLINE,  "Import KML",         white)) ActionImportKML();
 
@@ -563,27 +593,16 @@ void MeshToolUI::DrawViewport()
 
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
 
-    // Gradient background: dark blue-black at top, slightly lighter at bottom
-    dl->AddRectFilledMultiColor(
-        ImVec2(x, y), ImVec2(x + w, y + h),
-        IM_COL32(8, 10, 18, 255),    // top-left
-        IM_COL32(8, 10, 18, 255),    // top-right
-        IM_COL32(18, 20, 30, 255),   // bottom-right
-        IM_COL32(18, 20, 30, 255));  // bottom-left
+    // No filled background here: ImGui is rendered after the 3D scene, so any
+    // opaque fill would cover the meshes. The renderer's clear color is the
+    // viewport background.
 
-    // Grid lines (subtle)
-    float gridSpacing = 60.0f;
-    ImU32 gridColor = IM_COL32(40, 42, 55, 80);
-    for (float gx = x + gridSpacing; gx < x + w; gx += gridSpacing)
-        dl->AddLine(ImVec2(gx, y), ImVec2(gx, y + h), gridColor);
-    for (float gy = y + gridSpacing; gy < y + h; gy += gridSpacing)
-        dl->AddLine(ImVec2(x, gy), ImVec2(x + w, gy), gridColor);
-
-    // Center crosshair (axis indicator)
-    float cx = x + w * 0.5f, cy = y + h * 0.5f;
-    float axLen = 30.0f;
-    dl->AddLine(ImVec2(cx - axLen, cy), ImVec2(cx + axLen, cy), IM_COL32(120, 50, 50, 120), 1.0f); // X red
-    dl->AddLine(ImVec2(cx, cy - axLen), ImVec2(cx, cy + axLen), IM_COL32(50, 120, 50, 120), 1.0f); // Y green
+    // Navigation hint (bottom-left)
+    {
+        const char* nav = "Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
+        float lineH = ImGui::GetTextLineHeight();
+        dl->AddText(ImVec2(x + 10, y + h - lineH - 8), IM_COL32(110, 118, 145, 170), nav);
+    }
 
     // Border
     dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(50, 52, 65, 200), 0.0f, 0, 1.0f);
@@ -594,16 +613,20 @@ void MeshToolUI::DrawViewport()
         const char* hint = "Drag & drop files or use File > Import to load mesh data";
         ImVec2 textSize = ImGui::CalcTextSize(hint);
         dl->AddText(
-            ImVec2(x + (w - textSize.x) * 0.5f, y + (h - textSize.y) * 0.5f),
+            ImVec2(x + (w - textSize.x) * 0.5f, y + h * 0.8f - textSize.y * 0.5f),
             IM_COL32(140, 145, 170, 200), hint);
     }
 
-    // Corner info overlay: show camera position
+    // Corner info overlay: GPS of the camera pivot (set by the app when the
+    // scene is georeferenced), else the configured reference point.
     {
-        char camInfo[128];
-        snprintf(camInfo, sizeof(camInfo), "Lon: %.4f  Lat: %.4f",
-                 g_world.reference_pos.x, g_world.reference_pos.y);
-        dl->AddText(ImVec2(x + 10, y + 8), IM_COL32(120, 130, 160, 180), camInfo);
+        char camInfo[160];
+        if (!geoText.empty())
+            snprintf(camInfo, sizeof(camInfo), "%s", geoText.c_str());
+        else
+            snprintf(camInfo, sizeof(camInfo), "Lon: %.4f  Lat: %.4f  (not georeferenced)",
+                     g_world.reference_pos.x, g_world.reference_pos.y);
+        dl->AddText(ImVec2(x + 10, y + 8), IM_COL32(120, 130, 160, 200), camInfo);
     }
 }
 
@@ -833,13 +856,17 @@ void MeshToolUI::DrawNavCaptureDialog()
         ImGui::Spacing();
 
         // Buttons
-        float bw = 160.0f;
-        float spacing = (ImGui::GetContentRegionAvail().x - bw * 2) / 3;
+        // Size both buttons to fit the longer label at the current font size.
+        const ImGuiStyle& style = ImGui::GetStyle();
+        float bw = (std::max)(ImGui::CalcTextSize("Launch & Capture").x,
+                              ImGui::CalcTextSize("Cancel").x) + style.FramePadding.x * 4.0f;
+        float bh = ImGui::GetFrameHeight() + style.FramePadding.y * 2.0f;
+        float spacing = (std::max)((ImGui::GetContentRegionAvail().x - bw * 2) / 3, style.ItemSpacing.x);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + spacing);
 
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.50f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.20f, 0.60f, 0.30f, 1.0f));
-        if (ImGui::Button("Launch & Capture", ImVec2(bw, 34)))
+        if (ImGui::Button("Launch & Capture", ImVec2(bw, bh)))
         {
             showNavCaptureDialog = false;
             ImGui::CloseCurrentPopup();
@@ -848,7 +875,7 @@ void MeshToolUI::DrawNavCaptureDialog()
         ImGui::PopStyleColor(2);
 
         ImGui::SameLine(0, spacing);
-        if (ImGui::Button("Cancel", ImVec2(bw, 34)))
+        if (ImGui::Button("Cancel", ImVec2(bw, bh)))
         {
             showNavCaptureDialog = false;
             ImGui::CloseCurrentPopup();
@@ -900,41 +927,36 @@ void MeshToolUI::SetStatus(const std::string& msg, float timeoutSeconds)
 // Action implementations (extracted from old button handlers)
 // ---------------------------------------------------------------------------
 
-void MeshToolUI::ActionImportGEDump()
+void MeshToolUI::ActionOpenScene()
 {
-    nfdpathset_t pathSet;
-    nfdresult_t result = NFD_OpenDialogMultiple("gpa_frame", nullptr, &pathSet);
-    if (result == NFD_OKAY)
+    nfdchar_t* outPath = nullptr;
+    if (NFD_OpenDialog("mtscene", nullptr, &outPath) == NFD_OKAY && outPath)
     {
-        size_t count = NFD_PathSet_GetCount(&pathSet);
-        if (count > 0)
-        {
-            std::vector<std::string> files;
-            for (size_t i = 0; i < count; i++)
-            {
-                nfdchar_t* p = NFD_PathSet_GetPath(&pathSet, i);
-                if (p) files.push_back(p);
-            }
-            NFD_PathSet_Free(&pathSet);
-
-            BatchMeshData* batch = new BatchMeshData;
-            batch->reference_pos = g_world.reference_pos;
-            batch->scissor_bbox = g_world.scissor_bbox;
-            batch->is_google_dump = true;
-            batch->is_spline_mesh = false;
-
-            progress.Reset();
-            DumpGoogleEarthMeshes(files, batch, &progress);
-            g_world.mesh_data_batches.push_back(batch);
-            g_world.bbox_ws += batch->bbox_ws;
-            g_world.bbox_gps += batch->bbox_gps;
-            progress.Reset();
-            SetStatus("Imported " + std::to_string(count) + " GE dump file(s).");
-        }
-        else NFD_PathSet_Free(&pathSet);
+        pendingOpenScenePath = outPath;
+        free(outPath);
     }
 }
 
+void MeshToolUI::ActionSaveScene()
+{
+    if (g_world.mesh_data_batches.empty())
+    {
+        ShowMessage("Save Scene", "Nothing to save.");
+        return;
+    }
+    nfdchar_t* outPath = nullptr;
+    if (NFD_SaveDialog("mtscene", nullptr, &outPath) == NFD_OKAY && outPath)
+    {
+        std::string fileName(outPath);
+        free(outPath);
+        // nfd does not append the extension
+        size_t dot = fileName.rfind('.');
+        size_t slash = fileName.find_last_of("/\\");
+        if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+            fileName += ".mtscene";
+        pendingSaveScenePath = fileName;
+    }
+}
 void MeshToolUI::ActionImportUSGS()
 {
     nfdpathset_t pathSet;
@@ -968,6 +990,7 @@ void MeshToolUI::ActionImportUSGS()
 
             g_world.mesh_data_batches.push_back(batch);
             g_world.bbox_ws += batch->bbox_ws;
+            wantFrameAll = true;
             SetStatus("USGS data imported.");
         }
         else NFD_PathSet_Free(&pathSet);
@@ -1002,6 +1025,7 @@ void MeshToolUI::ActionImportKML()
             g_world.mesh_data_batches.push_back(batch);
             g_world.bbox_ws += batch->bbox_ws;
             g_world.bbox_gps += batch->bbox_gps;
+            wantFrameAll = true;
             SetStatus("KML splines imported.");
         }
         else NFD_PathSet_Free(&pathSet);
@@ -1082,9 +1106,32 @@ void MeshToolUI::ActionNavCapture()
         if (c) SetStatus("Hook connected. Waiting for Google Earth to load scene...");
     };
 
-    // Generate KML and launch
+    // Generate KML and launch. With the view server running, the same file
+    // carries the NetworkLink through which GE reports its view (GPS).
     std::string kmlPath;
-    if (navMode == 0)
+    if (geoViewServer && geoViewServer->Port())
+    {
+        std::ostringstream extra;
+        extra.precision(10);
+        if (navMode == 0)
+        {
+            extra << "  <LookAt>\n"
+                  << "    <longitude>" << navLon << "</longitude>\n"
+                  << "    <latitude>" << navLat << "</latitude>\n"
+                  << "    <altitude>" << navAlt << "</altitude>\n"
+                  << "    <heading>" << navHeading << "</heading>\n"
+                  << "    <tilt>" << navTilt << "</tilt>\n"
+                  << "    <range>" << navRange << "</range>\n"
+                  << "    <altitudeMode>relativeToGround</altitudeMode>\n"
+                  << "  </LookAt>\n";
+        }
+        else
+        {
+            extra << "  <Placemark><name>" << navAddress << "</name></Placemark>\n";
+        }
+        kmlPath = geoViewServer->WriteKml("meshtool_flyto.kml", extra.str());
+    }
+    else if (navMode == 0)
     {
         kmlPath = ProcessManager::GenerateFlyToKML(navLon, navLat, navAlt, navHeading, navTilt, navRange);
     }
@@ -1096,7 +1143,7 @@ void MeshToolUI::ActionNavCapture()
     if (kmlPath.empty())
     { ShowMessage("Error", "Failed to generate KML file."); return; }
 
-    if (!processManager->StartGoogleEarthWithKML(kmlPath))
+    if (!processManager->StartGoogleEarth("", kmlPath))
     {
         ShowMessage("Error",
             "Failed to launch Google Earth Pro.\n\n"
@@ -1144,7 +1191,8 @@ void MeshToolUI::ActionLiveCapture()
     captureProcessor->m_on_capture_error = [this](const std::string& e) { SetStatus("Error: " + e, 10.0f); };
     captureProcessor->m_on_connection_changed = [this](bool c) { SetStatus(c ? "Hook connected." : "Hook disconnected."); };
 
-    if (!processManager->StartGoogleEarth())
+    std::string viewKml = geoViewServer ? geoViewServer->WriteKml("meshtool_view.kml") : std::string();
+    if (!processManager->StartGoogleEarth("", viewKml))
     {
         ShowMessage("Live Capture", "Failed to launch Google Earth Pro.\nEnsure proxy opengl32.dll is in the client directory.");
         delete liveBatch; liveBatch = nullptr;

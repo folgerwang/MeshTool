@@ -87,6 +87,32 @@ void VulkanMeshRenderer::Init(VulkanContext* ctx, VulkanTextureManager* texMgr, 
     m_ctx = ctx;
     m_texMgr = texMgr;
     m_pipeMgr = pipeMgr;
+
+    const uint8_t white[4] = { 255, 255, 255, 255 };
+    m_whiteTex = m_texMgr->UploadRGBA(white, 1, 1);
+}
+
+void VulkanMeshRenderer::DestroyMeshGPU(MeshGPUData& gpu)
+{
+    VkDevice dev = m_ctx->device;
+    DestroyBufferPair(dev, gpu.vertexBuffer, gpu.vertexMemory);
+    DestroyBufferPair(dev, gpu.uvBuffer, gpu.uvMemory);
+    DestroyBufferPair(dev, gpu.colorBuffer, gpu.colorMemory);
+    for (auto& dc : gpu.drawCalls)
+        DestroyBufferPair(dev, dc.indexBuffer, dc.indexMemory);
+    gpu.drawCalls.clear();
+    gpu.uploaded = false;
+}
+
+void VulkanMeshRenderer::BindTextureOrWhite(VkCommandBuffer cmd, uint32_t texHandle)
+{
+    VulkanTexture* tex = (texHandle != 0xFFFFFFFF) ? m_texMgr->GetTexture(texHandle) : nullptr;
+    if (!tex || tex->descriptorSet == VK_NULL_HANDLE)
+        tex = m_texMgr->GetTexture(m_whiteTex);
+    if (tex && tex->descriptorSet != VK_NULL_HANDLE)
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_pipeMgr->GetLayout(), 0, 1,
+                                &tex->descriptorSet, 0, nullptr);
 }
 
 void VulkanMeshRenderer::Shutdown()
@@ -96,15 +122,8 @@ void VulkanMeshRenderer::Shutdown()
     VkDevice dev = m_ctx->device;
 
     // Destroy all uploaded mesh GPU data
-    for (auto& pair : m_meshGPU) {
-        MeshGPUData& gpu = pair.second;
-        DestroyBufferPair(dev, gpu.vertexBuffer, gpu.vertexMemory);
-        DestroyBufferPair(dev, gpu.uvBuffer, gpu.uvMemory);
-        DestroyBufferPair(dev, gpu.colorBuffer, gpu.colorMemory);
-        for (auto& dc : gpu.drawCalls) {
-            DestroyBufferPair(dev, dc.indexBuffer, dc.indexMemory);
-        }
-    }
+    for (auto& pair : m_meshGPU)
+        DestroyMeshGPU(pair.second);
     m_meshGPU.clear();
 
     // Destroy quad geometry
@@ -128,9 +147,19 @@ void VulkanMeshRenderer::EnsureUploaded(MeshData* mesh)
     UploadMesh(mesh, gpu);
 }
 
+void VulkanMeshRenderer::ReleaseMesh(MeshData* mesh)
+{
+    auto it = m_meshGPU.find(mesh);
+    if (it == m_meshGPU.end())
+        return;
+    DestroyMeshGPU(it->second);
+    m_meshGPU.erase(it);
+}
+
 void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           const std::vector<BatchMeshData*>& batches,
                                           const float* viewProjMatrix,
+                                          const MeshDrawFrame& frame,
                                           bool culling)
 {
     for (const auto* batch : batches) {
@@ -140,13 +169,13 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
             for (auto* mesh : group->meshes) {
                 if (!mesh) continue;
                 EnsureUploaded(mesh);
-                DrawMesh(cmd, mesh, viewProjMatrix);
+                DrawMesh(cmd, mesh, viewProjMatrix, frame);
             }
         }
     }
 }
 
-void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix)
+void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame)
 {
     if (!mesh) return;
 
@@ -160,47 +189,38 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     PushConstants pc = {};
     memcpy(pc.viewProjMatrix, viewProjMatrix, 16 * sizeof(float));
 
-    // Copy model matrix from mesh (double to float conversion)
-    const double* mat_data = mesh->dumpped_matrix.get_value();
-    for (int i = 0; i < 16; ++i)
-        pc.modelMatrix[i] = static_cast<float>(mat_data[i]);
+    // Model matrix (column-major): uniform scale, then the mesh's offset from
+    // the reference position. The subtraction is done in double so large
+    // world coordinates keep their precision.
+    const float s = frame.scale;
+    pc.modelMatrix[0]  = s;
+    pc.modelMatrix[5]  = s;
+    pc.modelMatrix[10] = s;
+    pc.modelMatrix[12] = static_cast<float>((mesh->translation.x - frame.refPos[0]) * s);
+    pc.modelMatrix[13] = static_cast<float>((mesh->translation.y - frame.refPos[1]) * s);
+    pc.modelMatrix[14] = static_cast<float>((mesh->translation.z - frame.refPos[2]) * s);
+    pc.modelMatrix[15] = 1.0f;
 
     // Set boxColor: w > 0.5 signals "use texture"
-    bool hasTexture = (mesh->tex_id != 0xFFFFFFFF);
-    pc.boxColor[0] = 1.0f;
-    pc.boxColor[1] = 1.0f;
-    pc.boxColor[2] = 1.0f;
+    bool hasTexture = (mesh->tex_id != 0xFFFFFFFF) && m_texMgr->GetTexture(mesh->tex_id);
+    pc.boxColor[0] = 0.75f;
+    pc.boxColor[1] = 0.75f;
+    pc.boxColor[2] = 0.75f;
     pc.boxColor[3] = hasTexture ? 1.0f : 0.0f;
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    // Bind texture descriptor set if available
-    if (hasTexture) {
-        VulkanTexture* tex = m_texMgr->GetTexture(mesh->tex_id);
-        if (tex && tex->descriptorSet != VK_NULL_HANDLE) {
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    m_pipeMgr->GetLayout(), 0, 1,
-                                    &tex->descriptorSet, 0, nullptr);
-        }
-    }
+    BindTextureOrWhite(cmd, hasTexture ? mesh->tex_id : 0xFFFFFFFF);
 
-    // Bind vertex buffers
-    VkDeviceSize offsets[] = { 0 };
+    if (gpu.vertexBuffer == VK_NULL_HANDLE)
+        return;
 
-    // Binding 0: position
-    vkCmdBindVertexBuffers(cmd, 0, 1, &gpu.vertexBuffer, offsets);
-
-    // Binding 1: texcoord (if available)
-    if (gpu.uvBuffer != VK_NULL_HANDLE) {
-        vkCmdBindVertexBuffers(cmd, 1, 1, &gpu.uvBuffer, offsets);
-    }
-
-    // Binding 2: color (if available)
-    if (gpu.colorBuffer != VK_NULL_HANDLE) {
-        vkCmdBindVertexBuffers(cmd, 2, 1, &gpu.colorBuffer, offsets);
-    }
+    // Bind vertex buffers (UploadMesh guarantees all three exist)
+    VkBuffer vbs[3] = { gpu.vertexBuffer, gpu.uvBuffer, gpu.colorBuffer };
+    VkDeviceSize offsets[3] = { 0, 0, 0 };
+    vkCmdBindVertexBuffers(cmd, 0, 3, vbs, offsets);
 
     // Draw each draw call
     for (size_t i = 0; i < gpu.drawCalls.size(); ++i) {
@@ -283,24 +303,30 @@ void VulkanMeshRenderer::UploadMesh(MeshData* mesh, MeshGPUData& gpu)
         UploadBufferData(m_ctx, gpu.vertexBuffer, gpu.vertexMemory, mesh->vertex_list.get(), size);
     }
 
-    // --- UV coordinates (binding 1) ---
-    if (mesh->uv_list && mesh->num_vertex > 0) {
-        VkDeviceSize size = static_cast<VkDeviceSize>(mesh->num_vertex) * sizeof(core::vec2f);
-        CreateBufferAndMemory(m_ctx, size,
+    // --- UV coordinates (binding 1) and vertex colors (binding 2) ---
+    // The lit pipelines declare all three bindings, so a mesh without UVs or
+    // colors still gets a zero-filled buffer for each.
+    if (mesh->num_vertex > 0) {
+        VkDeviceSize uvSize = static_cast<VkDeviceSize>(mesh->num_vertex) * sizeof(core::vec2f);
+        std::vector<uint8_t> zeros;
+        if (!mesh->uv_list)
+            zeros.assign(static_cast<size_t>(uvSize), 0);
+        CreateBufferAndMemory(m_ctx, uvSize,
                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                               hostVisible,
                               gpu.uvBuffer, gpu.uvMemory);
-        UploadBufferData(m_ctx, gpu.uvBuffer, gpu.uvMemory, mesh->uv_list.get(), size);
-    }
+        UploadBufferData(m_ctx, gpu.uvBuffer, gpu.uvMemory,
+                         mesh->uv_list ? static_cast<const void*>(mesh->uv_list.get()) : zeros.data(), uvSize);
 
-    // --- Vertex colors (binding 2) ---
-    if (mesh->color_list && mesh->num_vertex > 0) {
-        VkDeviceSize size = static_cast<VkDeviceSize>(mesh->num_vertex) * sizeof(uint32_t);
-        CreateBufferAndMemory(m_ctx, size,
+        VkDeviceSize colorSize = static_cast<VkDeviceSize>(mesh->num_vertex) * sizeof(uint32_t);
+        if (!mesh->color_list)
+            zeros.assign(static_cast<size_t>(colorSize), 0);
+        CreateBufferAndMemory(m_ctx, colorSize,
                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                               hostVisible,
                               gpu.colorBuffer, gpu.colorMemory);
-        UploadBufferData(m_ctx, gpu.colorBuffer, gpu.colorMemory, mesh->color_list.get(), size);
+        UploadBufferData(m_ctx, gpu.colorBuffer, gpu.colorMemory,
+                         mesh->color_list ? static_cast<const void*>(mesh->color_list.get()) : zeros.data(), colorSize);
     }
 
     // --- Index buffers (one per draw call) ---

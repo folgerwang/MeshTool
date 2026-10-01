@@ -162,7 +162,113 @@ static void EmitShadowBuffer(uint32_t id)
     ReleaseSRWLockShared(&g_shadow_lock);
 }
 
-// Buffers referenced by the draw call about to be recorded.
+// ============================================================================
+// Texture readback
+// ============================================================================
+// Like the buffers, Google Earth uploads a tile's texture when the tile loads,
+// not when it is drawn. Instead of mirroring every upload (GE keeps hundreds of
+// MB of textures), the texture a captured draw samples is read back from the
+// GPU - we are on GE's GL thread inside the draw - and sent once per capture as
+// a normal (compressed) tex-image record. Only level 0 is sent.
+
+static std::unordered_set<uint32_t> g_sent_textures;  // sent in the current capture
+
+static void EmitDrawTexture()
+{
+    const uint32_t tex = g_hook_state.bound_texture[0];
+    if (tex == 0 || g_sent_textures.count(tex))
+        return;
+    g_sent_textures.insert(tex);   // even on failure: don't retry it every draw
+
+    typedef void (__stdcall *PFN_GetIntegerv)(unsigned int, int*);
+    typedef void (__stdcall *PFN_GetTexLevelParameteriv)(unsigned int, int, unsigned int, int*);
+    typedef void (__stdcall *PFN_GetTexImage)(unsigned int, int, unsigned int, unsigned int, void*);
+    typedef void (__stdcall *PFN_GetCompressedTexImage)(unsigned int, int, void*);
+    typedef void (__stdcall *PFN_PixelStorei)(unsigned int, int);
+    static PFN_GetIntegerv getIntegerv = (PFN_GetIntegerv)GetProcAddress(g_real_opengl32, "glGetIntegerv");
+    static PFN_GetTexLevelParameteriv getTexLevelParam = (PFN_GetTexLevelParameteriv)GetProcAddress(g_real_opengl32, "glGetTexLevelParameteriv");
+    static PFN_GetTexImage getTexImage = (PFN_GetTexImage)GetProcAddress(g_real_opengl32, "glGetTexImage");
+    static PFN_PixelStorei pixelStorei = (PFN_PixelStorei)GetProcAddress(g_real_opengl32, "glPixelStorei");
+    static PFN_GetCompressedTexImage getCompressedTexImage =
+        real_wglGetProcAddress ? (PFN_GetCompressedTexImage)real_wglGetProcAddress("glGetCompressedTexImage") : nullptr;
+    if (!getIntegerv || !getTexLevelParam || !getTexImage || !pixelStorei)
+        return;
+
+    const unsigned int kTex2D = 0x0DE1;  // GL_TEXTURE_2D
+
+    // Query unit 0 (the unit the draw record names), then restore the active unit.
+    uint32_t prev_unit = g_hook_state.active_texture_unit;
+    if (prev_unit != 0 && real_glActiveTexture)
+        real_glActiveTexture(0x84C0);   // GL_TEXTURE0
+
+    int width = 0, height = 0, internal_format = 0, compressed = 0;
+    getTexLevelParam(kTex2D, 0, 0x1000, &width);            // GL_TEXTURE_WIDTH
+    getTexLevelParam(kTex2D, 0, 0x1001, &height);           // GL_TEXTURE_HEIGHT
+    getTexLevelParam(kTex2D, 0, 0x1003, &internal_format);  // GL_TEXTURE_INTERNAL_FORMAT
+    getTexLevelParam(kTex2D, 0, 0x86A1, &compressed);       // GL_TEXTURE_COMPRESSED
+
+    int pack_buffer = 0;
+    getIntegerv(0x88ED, &pack_buffer);  // GL_PIXEL_PACK_BUFFER_BINDING: readback would go there instead
+
+    if (width > 0 && height > 0 && width <= 16384 && height <= 16384 && pack_buffer == 0)
+    {
+        if (compressed && getCompressedTexImage)
+        {
+            int size = 0;
+            getTexLevelParam(kTex2D, 0, 0x86A0, &size);    // GL_TEXTURE_COMPRESSED_IMAGE_SIZE
+            if (size > 0)
+            {
+                void* payload = g_ipc_writer.BeginRecord(CMD_COMPRESSED_TEX_IMAGE_2D, sizeof(CmdCompressedTexImage2D) + size);
+                if (payload)
+                {
+                    CmdCompressedTexImage2D* cmd = (CmdCompressedTexImage2D*)payload;
+                    cmd->target = kTex2D;
+                    cmd->level = 0;
+                    cmd->internalformat = (uint32_t)internal_format;
+                    cmd->width = width;
+                    cmd->height = height;
+                    cmd->border = 0;
+                    cmd->imageSize = size;
+                    cmd->texture_id = tex;
+                    getCompressedTexImage(kTex2D, 0, cmd + 1);
+                    g_ipc_writer.EndRecord();
+                }
+            }
+        }
+        else if (!compressed)
+        {
+            // Uncompressed: read back as tightly packed RGBA8.
+            uint32_t size = uint32_t(width) * uint32_t(height) * 4;
+            void* payload = g_ipc_writer.BeginRecord(CMD_TEX_IMAGE_2D, sizeof(CmdTexImage2D) + size);
+            if (payload)
+            {
+                CmdTexImage2D* cmd = (CmdTexImage2D*)payload;
+                cmd->target = kTex2D;
+                cmd->level = 0;
+                cmd->internalformat = 0x8058;   // GL_RGBA8
+                cmd->width = width;
+                cmd->height = height;
+                cmd->border = 0;
+                cmd->format = 0x1908;           // GL_RGBA
+                cmd->type = 0x1401;             // GL_UNSIGNED_BYTE
+                cmd->data_size = size;
+                cmd->texture_id = tex;
+
+                int prev_alignment = 4;
+                getIntegerv(0x0D05, &prev_alignment);   // GL_PACK_ALIGNMENT
+                pixelStorei(0x0D05, 1);
+                getTexImage(kTex2D, 0, 0x1908, 0x1401, cmd + 1);
+                pixelStorei(0x0D05, prev_alignment);
+                g_ipc_writer.EndRecord();
+            }
+        }
+    }
+
+    if (prev_unit != 0 && real_glActiveTexture)
+        real_glActiveTexture(0x84C0 + prev_unit);
+}
+
+// Buffers and texture referenced by the draw call about to be recorded.
 static void EmitDrawResources(bool indexed)
 {
     if (indexed)
@@ -172,6 +278,7 @@ static void EmitDrawResources(bool indexed)
         if (g_hook_state.vertex_attribs[i].is_enabled)
             EmitShadowBuffer(g_hook_state.vertex_attribs[i].data_buffer_obj);
     }
+    EmitDrawTexture();
 }
 
 // Byte size of glTexImage2D client data, honouring GL_UNPACK_ALIGNMENT /
@@ -263,9 +370,9 @@ static void OnFrameBoundary()
         g_capture_stats.last_capture_bytes = end >= start ? end - start : GLCAPTURE_RING_SIZE - start + end;
         g_capture_stats.last_capture_draws = g_capture_stats.captured_draws;
         g_capture_stats.captures_done++;
-        ProxyLog("capture %u done: %u of %u draw calls recorded, %u buffers sent, %u bytes%s\n",
+        ProxyLog("capture %u done: %u of %u draw calls recorded, %u buffers + %u textures sent, %u bytes%s\n",
                  g_capture_stats.captures_done, g_capture_stats.captured_draws, g_capture_stats.last_frame_draws,
-                 (unsigned)g_sent_buffers.size(), g_capture_stats.last_capture_bytes,
+                 (unsigned)g_sent_buffers.size(), (unsigned)g_sent_textures.size(), g_capture_stats.last_capture_bytes,
                  (hdr && (hdr->status_flags & GLCAPTURE_STATUS_OVERFLOW)) ? "  (RING OVERFLOW - data dropped)" : "");
     }
 
@@ -278,6 +385,7 @@ static void OnFrameBoundary()
         g_capture_stats.captured_draws = 0;
         g_capture_stats.capture_start_offset = hdr ? hdr->write_offset : 0;
         g_sent_buffers.clear();
+        g_sent_textures.clear();
         g_ipc_writer.SetRecording(true);
         ProxyLog("capture started (%u shadowed buffers)\n", (unsigned)g_shadow_buffers.size());
     }

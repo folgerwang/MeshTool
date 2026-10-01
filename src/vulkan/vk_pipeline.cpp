@@ -246,13 +246,11 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    // No culling: captured meshes keep GL's winding, which Vulkan's Y-down clip
+    // space flips, and the planar camera may view them from either side.
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
-
-    if (type == PIPELINE_SCREEN_QUAD) {
-        rasterizer.cullMode = VK_CULL_MODE_NONE;
-    }
 
     // --- Multisampling ---
     VkPipelineMultisampleStateCreateInfo multisampling = {};

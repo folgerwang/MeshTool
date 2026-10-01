@@ -341,7 +341,22 @@ VulkanTexture* VulkanTextureManager::GetTexture(uint32_t handle)
 {
     if (handle >= static_cast<uint32_t>(m_textures.size()))
         return nullptr;
-    return &m_textures[handle];
+    VulkanTexture* tex = &m_textures[handle];
+    return tex->image != VK_NULL_HANDLE ? tex : nullptr;
+}
+
+void VulkanTextureManager::ReleaseTexture(uint32_t handle)
+{
+    if (handle >= static_cast<uint32_t>(m_textures.size()))
+        return;
+    VulkanTexture& tex = m_textures[handle];
+    if (tex.descriptorSet != VK_NULL_HANDLE)
+        vkFreeDescriptorSets(m_ctx->device, m_ctx->descriptorPool, 1, &tex.descriptorSet);
+    if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(m_ctx->device, tex.sampler, nullptr);
+    if (tex.view != VK_NULL_HANDLE)    vkDestroyImageView(m_ctx->device, tex.view, nullptr);
+    if (tex.image != VK_NULL_HANDLE)   vkDestroyImage(m_ctx->device, tex.image, nullptr);
+    if (tex.memory != VK_NULL_HANDLE)  vkFreeMemory(m_ctx->device, tex.memory, nullptr);
+    tex = VulkanTexture{};
 }
 
 uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width, uint32_t height)

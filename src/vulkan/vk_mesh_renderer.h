@@ -17,6 +17,13 @@ namespace core {
     typedef matrix4<float> matrix4f;
 }
 
+// Camera-relative placement: a mesh is drawn at
+// (vertex + mesh->translation - refPos) * scale.
+struct MeshDrawFrame {
+    double refPos[3] = { 0.0, 0.0, 0.0 };
+    float  scale = 1.0f;
+};
+
 // Per-mesh GPU resources
 struct MeshGPUData {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
@@ -44,10 +51,14 @@ public:
     // Upload mesh data to GPU (lazy - called on first draw)
     void EnsureUploaded(MeshData* mesh);
 
+    // Frees a mesh's GPU buffers before the MeshData is deleted. The caller
+    // must make sure the GPU is idle (no frame in flight uses them).
+    void ReleaseMesh(MeshData* mesh);
+
     // Draw functions
     void DrawBatchMeshes(VkCommandBuffer cmd, const std::vector<BatchMeshData*>& batches,
-                         const float* viewProjMatrix, bool culling);
-    void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix);
+                         const float* viewProjMatrix, const MeshDrawFrame& frame, bool culling);
+    void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame);
     void DrawQuad(VkCommandBuffer cmd, float x, float y, float w, float h, uint32_t texHandle);
 
 private:
@@ -63,6 +74,12 @@ private:
     VkBuffer m_quadIdxBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_quadIdxMemory = VK_NULL_HANDLE;
 
+    // 1x1 white texture bound when a mesh has none: the lit pipeline's fragment
+    // shader always declares the sampler, so set 0 must be bound for every draw.
+    uint32_t m_whiteTex = 0xFFFFFFFF;
+
     void UploadMesh(MeshData* mesh, MeshGPUData& gpu);
     void UploadQuadGeometry();
+    void BindTextureOrWhite(VkCommandBuffer cmd, uint32_t texHandle);
+    void DestroyMeshGPU(MeshGPUData& gpu);
 };

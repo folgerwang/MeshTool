@@ -11,6 +11,7 @@
 #include "glcapturedata.h"
 #include "glcapture_ipc.h"
 #include "coretexture.h"
+#include "geoview.h"
 
 struct MeshData;
 struct GroupMeshData;
@@ -33,6 +34,27 @@ public:
     std::function<void(bool)>               m_on_connection_changed;
 
     void processFrame();
+
+    // What the last processFrame() did to the scene. Meshes in `removed` were
+    // taken out of the output batch and must be freed (GPU data + delete) by
+    // the caller; meshes in `modified` changed their index lists, so cached GPU
+    // data must be dropped. When `merged` is false the newest group replaces
+    // the previous capture; when true it was folded into the existing group.
+    struct FrameResult
+    {
+        bool new_data = false;
+        bool merged = false;
+        std::vector<MeshData*> modified;
+        std::vector<MeshData*> removed;
+    };
+    const FrameResult& LastResult() const { return m_last; }
+
+    // Forget the capture being merged into (it was deleted by the app).
+    void ResetMerge();
+
+    // Google Earth's view (from the KML view link) for the next processFrame():
+    // with it, captures are placed in real GPS coordinates.
+    void SetGeoView(const GeoView& view) { m_geo_view = view; }
 
 private:
     HANDLE              m_mapping;
@@ -60,6 +82,61 @@ private:
     bool                m_has_first_matrix;
     core::matrix4d      m_first_inv_transform_matrix;
 
+    // Fixed-function matrices (glMatrixMode / glLoadMatrixf), row-vector layout.
+    uint32_t            m_matrix_mode = 0x1700;     // GL_MODELVIEW
+    core::matrix4f      m_modelview;
+    core::matrix4f      m_projection;
+    bool                m_has_modelview = false;
+    uint32_t            m_last_uniform_location = 0xFFFFFFFF;
+    uint32_t            m_current_program = 0;
+
+    // Sum of area-weighted triangle normals (eye space) over the current frame.
+    core::vec3d         m_up_accum;
+
+    // Edge length (metres) of each GE tile mesh this frame, from its modelview
+    // scale: Google Earth draws coarse parent tiles under finer children and
+    // hides the overlap with the stencil buffer, so both end up captured.
+    std::map<MeshData*, double> m_tile_size;
+
+    // Drops coarse-tile triangles whose ground footprint finer tiles cover,
+    // which is what GE's stencil masking does on screen.
+    void RemoveCoveredLods(GroupMeshData* group);
+
+    // Eye space -> ground frame: metres, Z up, Y pointing away from the GE
+    // camera, centred on the first capture of a merged area.
+    struct GroundFrame
+    {
+        core::vec3d origin, x_axis, y_axis, up;
+        bool valid = false;
+        bool geo = false;       // x/y/up are East/North/Up at the batch's GPS reference
+    };
+    GroundFrame         m_ref_frame;           // frame of the capture being merged into
+
+    // GE view at capture time (invalid if the KML view link never reported).
+    GeoView             m_geo_view;
+    // Eye space -> East/North/Up metres at (lat0, lon0, 0), from the GE view.
+    GroundFrame GroundFrameFromGeo(double lon0, double lat0) const;
+    static core::matrix4d FrameMatrix(const GroundFrame& f);   // row-vector [p,1] -> [ground / metres-per-unit, 1]
+    // Logs how far the GE look-at point is from the captured surface at screen centre.
+    void CheckLookAt(const GroupMeshData* group) const;
+    GroupMeshData*      m_merged_group = nullptr;
+
+    // Tile identity across captures: hash of a tile's vertex + index data.
+    std::map<MeshData*, uint64_t>       m_tile_key;
+    std::map<uint64_t, core::matrix4d>  m_ref_tile_mv;   // key -> modelview into the reference eye space
+    std::map<uint64_t, MeshData*>       m_key_mesh;      // tiles present in m_merged_group
+
+    FrameResult         m_last;
+
+    GroundFrame ComputeGroundFrame(const GroupMeshData* group) const;
+    // Moves a group's meshes from this frame's eye space (optionally via the
+    // eye-to-reference-eye transform X) into ground frame `f`.
+    void ApplyGroundFrame(GroupMeshData* group, const core::matrix4d* X, const GroundFrame& f);
+    // Finds X (this frame's eye space -> reference eye space) from tiles both
+    // captures contain; false if fewer than 3 agree.
+    bool RegisterToReference(const GroupMeshData* group, core::matrix4d& X, int& support) const;
+    void HandOutTextures(GroupMeshData* group, uint32_t index_offset);
+
     void ProcessRecord(const GLCaptureRecord* record, const char* payload);
     void HandleBindBuffer(const CmdBindBuffer* cmd);
     void HandleBufferData(const CmdBufferData* cmd, const char* data);
@@ -86,7 +163,8 @@ public:
     ProcessManager();
     ~ProcessManager();
 
-    bool StartGoogleEarth(const std::string& ge_path = "");
+    // `kml_path`, if given, is opened by GE at startup (e.g. the GPS view link).
+    bool StartGoogleEarth(const std::string& ge_path = "", const std::string& kml_path = "");
     // Launch Google Earth and fly to a KML file
     bool StartGoogleEarthWithKML(const std::string& kml_path);
     void StopGoogleEarth();

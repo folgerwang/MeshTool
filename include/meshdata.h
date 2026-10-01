@@ -217,7 +217,8 @@ struct BatchMeshData
     bool                    is_spline_mesh;
     bool                    is_texture_loaded;
     bool                    is_google_dump;
-    core::vec2d             reference_pos;
+    bool                    is_georeferenced = false;  // bbox/vertices are East/North/Up metres at reference_pos
+    core::vec2d             reference_pos;             // x = longitude, y = latitude (degrees)
     core::bounds2d          scissor_bbox;
     core::bounds3d          bbox_ws;
     core::bounds3d          bbox_gps;

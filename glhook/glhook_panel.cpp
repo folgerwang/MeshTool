@@ -155,7 +155,7 @@ static void Text(float x, float y, float scale, const char* text, float r, float
 
 static const float kPanelX = 20.0f;      // top-left corner, client pixels
 static const float kPanelY = 20.0f;
-static const float kPanelW = 520.0f;
+static const float kPanelW = 640.0f;      // fits "FRAME nnnnn  nnnn DRAWS" + activity dots, and buffer % + F12 hint
 static const float kPanelHBase    = 190.0f;  // title, link, frame counter
 static const float kPanelHCapture = 290.0f;  // + capture state, progress bar, buffer
 static volatile float g_panelH = kPanelHBase;

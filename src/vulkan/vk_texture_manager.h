@@ -24,8 +24,12 @@ public:
     // Upload a texture from Texture2DInfo (handles compressed formats)
     uint32_t UploadTexture(const core::Texture2DInfo* info);
 
-    // Get texture by handle
+    // Get texture by handle (nullptr if unknown or released)
     VulkanTexture* GetTexture(uint32_t handle);
+
+    // Frees a texture's GPU resources; the handle is not reused. The caller
+    // must make sure the GPU is idle.
+    void ReleaseTexture(uint32_t handle);
 
     // Upload raw RGBA pixels (for icons, UI images)
     uint32_t UploadRGBA(const uint8_t* pixels, uint32_t width, uint32_t height);

@@ -47,6 +47,9 @@ set(NEW_SOURCES
     src/app.cpp
     src/ui.cpp
     src/input.cpp
+    src/viewcamera.cpp
+    src/scenefile.cpp
+    src/geoview.cpp
     src/file_downloader.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp

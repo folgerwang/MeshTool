@@ -22,12 +22,20 @@ public:
     float statusTimeout = 0;
 
     ProcessManager* processManager = nullptr;
+    class GeoViewServer* geoViewServer = nullptr;   // GE reports its view (GPS) here
+    std::string     geoText;                         // GPS readout for the viewport corner
     LiveCaptureProcessor* captureProcessor = nullptr;
     BatchMeshData* liveBatch = nullptr;
 
     bool wantCaptureFrame = false;
     bool wantStopCapture = false;
+    bool wantFrameAll = false;      // point the camera at everything loaded
 
+    // Scene file requests, chosen in a file dialog and carried out by the app.
+    std::string pendingOpenScenePath;
+    std::string pendingSaveScenePath;
+    void ActionOpenScene();
+    void ActionSaveScene();
     // Viewport rect (set each frame, read by app for 3D rendering)
     float viewportX = 0, viewportY = 0, viewportW = 100, viewportH = 100;
 
@@ -84,7 +92,6 @@ private:
     void SetStatus(const std::string& msg, float timeoutSeconds = 5.0f);
 
     // Action helpers
-    void ActionImportGEDump();
     void ActionImportUSGS();
     void ActionImportKML();
     void ActionExport();

@@ -6,11 +6,14 @@
 #include "glhook_injector.h"
 #include "livecaptureprocessor.h"
 #include <array>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include "meshdata.h"
 #include "worlddata.h"
 #include "debugout.h"
+#include <GeographicLib/LocalCartesian.hpp>
+#include <GLFW/glfw3.h>
 
 using namespace std;
 
@@ -27,6 +30,9 @@ static void CapLog(const char* fmt, ...)
     va_end(args);
     fclose(f);
 }
+
+// Google Earth's world unit is one Earth radius.
+static const double kMetresPerUnit = 6378137.0;
 
 static int g_logged_draws = 0;          // draw calls logged in the current frame
 static const int kMaxLoggedDraws = 40;
@@ -167,45 +173,76 @@ void LiveCaptureProcessor::processFrame()
         return;
     }
 
-    // Create a new group for this frame's meshes
-    m_current_group = new GroupMeshData;
-    g_logged_draws = 0;
-    g_meshes_from_frame = 0;
-    std::map<uint32_t, uint32_t> record_counts;
-    CapLog("=== processFrame: read=%u write=%u status=0x%X\n",
-           m_header->read_offset, m_header->write_offset, m_header->status_flags);
-    m_has_first_matrix = false;
-    m_matrix_stack.clear();
-
-    // Read all available records from the ring buffer
+    m_last = FrameResult();
     uint32_t read_pos = m_header->read_offset;
-    uint32_t write_pos = m_header->write_offset;
+    const uint32_t write_pos = m_header->write_offset;
 
-    while (read_pos != write_pos)
+    // Pass 1: find the end of the newest complete frame. More than one may be
+    // queued (two captures can finish before we wake up: the ready event only
+    // remembers one signal), and the newest is the one GE shows right now -
+    // older ones would make every capture lag one behind. Records after the
+    // last frame end belong to a capture still being written; leave them.
+    uint32_t last_end = 0;
+    int complete_frames = 0;
+    for (uint32_t p = read_pos; p != write_pos;)
     {
-        // Bounds check
-        if (read_pos >= GLCAPTURE_RING_SIZE)
+        if (p >= GLCAPTURE_RING_SIZE) { p = 0; continue; }
+        const GLCaptureRecord* rec = reinterpret_cast<const GLCaptureRecord*>(m_ring_base + p);
+        if (rec->cmd_id == CMD_NONE) { p = 0; continue; }
+        if (rec->total_size == 0) break;   // corrupt; don't spin
+        p += rec->total_size;
+        if (p >= GLCAPTURE_RING_SIZE) p = 0;
+        if (rec->cmd_id == CMD_FRAME_END)
         {
-            read_pos = 0;
-            continue;
+            last_end = p;
+            complete_frames++;
         }
+    }
+    CapLog("=== processFrame: read=%u write=%u status=0x%X, %d complete frame(s) queued\n",
+           read_pos, write_pos, m_header->status_flags, complete_frames);
+    if (complete_frames == 0)
+        return;
 
+    auto start_frame = [this]() {
+        m_current_group = new GroupMeshData;
+        g_logged_draws = 0;
+        g_meshes_from_frame = 0;
+        m_has_first_matrix = false;
+        m_matrix_stack.clear();
+        m_up_accum = core::vec3d(0.0, 0.0, 0.0);
+        // m_tile_size / m_tile_key persist: the merged capture's meshes keep theirs.
+    };
+    start_frame();
+    std::map<uint32_t, uint32_t> record_counts;
+
+    // Pass 2: replay every queued record (GL state carries across frames) but
+    // keep only the newest frame's meshes.
+    while (read_pos != last_end)
+    {
+        if (read_pos >= GLCAPTURE_RING_SIZE) { read_pos = 0; continue; }
         const GLCaptureRecord* record = reinterpret_cast<const GLCaptureRecord*>(m_ring_base + read_pos);
+        if (record->cmd_id == CMD_NONE) { read_pos = 0; continue; }
+        if (record->total_size == 0) break;
 
-        // Skip marker (wrap-around)
-        if (record->cmd_id == CMD_NONE)
-        {
-            read_pos = 0;
-            continue;
-        }
-
-        // Frame end - stop processing
         if (record->cmd_id == CMD_FRAME_END)
         {
             read_pos += record->total_size;
-            if (read_pos >= GLCAPTURE_RING_SIZE)
-                read_pos = 0;
-            break;
+            if (read_pos >= GLCAPTURE_RING_SIZE) read_pos = 0;
+            if (read_pos != last_end)
+            {
+                // An older queued frame: drop its meshes and start over.
+                CapLog("  skipped an older queued frame (%d meshes)\n", int(m_current_group->meshes.size()));
+                for (MeshData* mesh : m_current_group->meshes)
+                {
+                    m_tile_size.erase(mesh);
+                    m_tile_key.erase(mesh);
+                    delete mesh;
+                }
+                delete m_current_group;
+                start_frame();
+                record_counts.clear();
+            }
+            continue;
         }
 
         const char* payload = m_ring_base + read_pos + sizeof(GLCaptureRecord);
@@ -213,13 +250,11 @@ void LiveCaptureProcessor::processFrame()
         ProcessRecord(record, payload);
 
         read_pos += record->total_size;
-        if (read_pos >= GLCAPTURE_RING_SIZE)
-            read_pos = 0;
+        if (read_pos >= GLCAPTURE_RING_SIZE) read_pos = 0;
     }
 
     // Update read position
     m_header->read_offset = read_pos;
-
     CapLog("  records:");
     for (auto& rc : record_counts)
         CapLog(" 0x%04X x%u", rc.first, rc.second);
@@ -231,28 +266,639 @@ void LiveCaptureProcessor::processFrame()
     int mesh_count = (int)m_current_group->meshes.size();
     if (mesh_count > 0 && m_output_batch)
     {
-        // Transfer textures from texture_store to group
-        for (auto& pair : m_texture_store)
+        // Where this capture goes. Every capture is placed in one scene frame:
+        // East/North/Up metres at the batch's GPS reference when GE reported
+        // its view, otherwise a frame derived from the first capture's camera.
+        // A capture that overlaps or borders the current one is merged into it,
+        // through X (this frame's eye space -> the reference capture's eye
+        // space): from tiles both contain (exact) or else from both GPS views.
+        const bool geo = m_geo_view.valid;
+        CheckLookAt(m_current_group);
+
+        auto footprint = [&](const core::matrix4d& Xm) {
+            core::bounds3d box;
+            for (MeshData* mesh : m_current_group->meshes)
+            {
+                if (!mesh->bbox_ws.b_valid) continue;
+                for (int c = 0; c < 8; c++)
+                {
+                    core::vec3d p((c & 1) ? mesh->bbox_ws.bb_max.x : mesh->bbox_ws.bb_min.x,
+                                  (c & 2) ? mesh->bbox_ws.bb_max.y : mesh->bbox_ws.bb_min.y,
+                                  (c & 4) ? mesh->bbox_ws.bb_max.z : mesh->bbox_ws.bb_min.z);
+                    core::vec4d q = core::vec4d(p.x, p.y, p.z, 1.0) * Xm;
+                    core::vec3d d = core::vec3d(q.x, q.y, q.z) - m_ref_frame.origin;
+                    box += core::vec3d(dot(d, m_ref_frame.x_axis), dot(d, m_ref_frame.y_axis),
+                                       dot(d, m_ref_frame.up)) * kMetresPerUnit;
+                }
+            }
+            return box;
+        };
+        auto neighbours = [&](const core::bounds3d& probe_box, const char* how, int support) {
+            const core::bounds3d& old_box = m_merged_group->bbox_ws;
+            const double kNeighbourGap = 100.0;   // metres between footprints that still count as neighbours
+            double gap_x = (std::max)(probe_box.bb_min.x - old_box.bb_max.x, old_box.bb_min.x - probe_box.bb_max.x);
+            double gap_y = (std::max)(probe_box.bb_min.y - old_box.bb_max.y, old_box.bb_min.y - probe_box.bb_max.y);
+            // Comparable zoom: a frame grabbed while GE was still zoomed out
+            // (planet-sized) must not swallow a street-level capture or vice versa.
+            const double kMaxScaleRatio = 8.0;
+            double new_size = probe_box.b_valid ? (std::max)(probe_box.GetDiagonal().x, probe_box.GetDiagonal().y) : 0.0;
+            double old_size = old_box.b_valid ? (std::max)(old_box.GetDiagonal().x, old_box.GetDiagonal().y) : 0.0;
+            double ratio = (std::max)(new_size, old_size) / (std::max)((std::min)(new_size, old_size), 1.0);
+            bool ok = probe_box.b_valid && old_box.b_valid && gap_x <= kNeighbourGap && gap_y <= kNeighbourGap &&
+                      ratio <= kMaxScaleRatio;
+            CapLog("  placement by %s (%d agreeing tiles): footprint gap %.1f x %.1f m, size %.0f vs %.0f m -> %s\n",
+                   how, support, (std::max)(gap_x, 0.0), (std::max)(gap_y, 0.0), new_size, old_size,
+                   ok ? "MERGE" : "new area");
+            return ok;
+        };
+
+        core::matrix4d X;
+        bool merge = false;
+        GroundFrame geo_in_ref;   // this capture's GPS frame at the current scene reference
+        if (geo && m_merged_group && m_ref_frame.geo)
+            geo_in_ref = GroundFrameFromGeo(m_output_batch->reference_pos.x, m_output_batch->reference_pos.y);
+
+        if (m_merged_group && m_ref_frame.valid)
         {
-            m_current_group->loaded_textures.push_back(pair.second);
-            m_textures_handed_out.insert(pair.second);
+            int support = 0;
+            if (RegisterToReference(m_current_group, X, support))
+            {
+                merge = neighbours(footprint(X), "shared tiles", support);
+                if (geo_in_ref.valid)
+                {
+                    // Both placements are available: how well does GPS agree with the exact one?
+                    core::matrix4d Xg = FrameMatrix(geo_in_ref) * inverse(FrameMatrix(m_ref_frame));
+                    double dx = (X(3, 0) - Xg(3, 0)), dy = (X(3, 1) - Xg(3, 1)), dz = (X(3, 2) - Xg(3, 2));
+                    CapLog("  GPS vs shared-tile placement of the camera: %.2f m apart\n",
+                           sqrt(dx * dx + dy * dy + dz * dz) * kMetresPerUnit);
+                }
+            }
+            else if (geo_in_ref.valid)
+            {
+                X = FrameMatrix(geo_in_ref) * inverse(FrameMatrix(m_ref_frame));
+                merge = neighbours(footprint(X), "GPS", 0);
+            }
+            else
+            {
+                CapLog("  placement: no shared tiles and no GPS view -> new area\n");
+            }
         }
-        // Don't clear texture_store - the pointers are now owned by the group
+        if (merge)
+        {
+            // Tiles the merged capture already has are identical data: drop them.
+            int duplicates = 0;
+            for (size_t k = 0; k < m_current_group->meshes.size();)
+            {
+                MeshData* mesh = m_current_group->meshes[k];
+                auto key = m_tile_key.find(mesh);
+                if (key != m_tile_key.end() && m_key_mesh.count(key->second))
+                {
+                    m_tile_key.erase(mesh);
+                    m_tile_size.erase(mesh);
+                    delete mesh;   // never uploaded
+                    m_current_group->meshes.erase(m_current_group->meshes.begin() + k);
+                    duplicates++;
+                    continue;
+                }
+                k++;
+            }
+
+            ApplyGroundFrame(m_current_group, &X, m_ref_frame);
+            HandOutTextures(m_current_group, uint32_t(m_merged_group->loaded_textures.size()));
+            for (core::Texture2DInfo* tex : m_current_group->loaded_textures)
+                m_merged_group->loaded_textures.push_back(tex);
+            for (MeshData* mesh : m_current_group->meshes)
+            {
+                auto key = m_tile_key.find(mesh);
+                if (key != m_tile_key.end())
+                {
+                    m_key_mesh[key->second] = mesh;
+                    m_ref_tile_mv[key->second] = mesh->dumpped_matrix * X;
+                }
+                m_merged_group->meshes.push_back(mesh);
+            }
+            int added = int(m_current_group->meshes.size());
+            m_current_group->meshes.clear();
+            m_current_group->loaded_textures.clear();
+            delete m_current_group;
+            m_current_group = nullptr;
+
+            // Finer tiles from either capture now hide coarser ones from both.
+            RemoveCoveredLods(m_merged_group);
+            m_merged_group->bbox_ws.Reset();
+            for (MeshData* mesh : m_merged_group->meshes)
+                if (mesh->bbox_ws.b_valid) m_merged_group->bbox_ws += mesh->bbox_ws;
+            m_output_batch->bbox_ws = m_merged_group->bbox_ws;
+
+            CapLog("  merged: %d tiles added, %d duplicates dropped, %u meshes total\n",
+                   added, duplicates, unsigned(m_merged_group->meshes.size()));
+            m_last.new_data = true;
+            m_last.merged = true;
+            if (m_on_frame_captured) m_on_frame_captured(int(m_merged_group->meshes.size()));
+            return;
+        }
+
+        // New area: this capture becomes the reference others merge into.
+        std::map<MeshData*, double> sizes;
+        std::map<MeshData*, uint64_t> keys;
+        for (MeshData* mesh : m_current_group->meshes)
+        {
+            auto s = m_tile_size.find(mesh);
+            if (s != m_tile_size.end()) sizes.insert(*s);
+            auto k = m_tile_key.find(mesh);
+            if (k != m_tile_key.end()) keys.insert(*k);
+        }
+        m_tile_size.swap(sizes);   // forget the previous area's meshes
+        m_tile_key.swap(keys);
+        m_key_mesh.clear();
+        m_ref_tile_mv.clear();
+
+        if (geo)
+        {
+            // The scene's GPS origin is this capture's look-at point.
+            const double lon0 = m_geo_view.hasLookAt ? m_geo_view.laLon : m_geo_view.lookLon;
+            const double lat0 = m_geo_view.hasLookAt ? m_geo_view.laLat : m_geo_view.lookLat;
+            m_output_batch->reference_pos = core::vec2d(lon0, lat0);
+            m_output_batch->is_georeferenced = true;
+            m_ref_frame = GroundFrameFromGeo(lon0, lat0);
+        }
+        else
+        {
+            CapLog("  no GPS view from Google Earth (KML view link not loaded?): using a camera-based frame\n");
+            m_output_batch->is_georeferenced = false;
+            m_ref_frame = ComputeGroundFrame(m_current_group);
+        }        for (MeshData* mesh : m_current_group->meshes)
+        {
+            auto key = m_tile_key.find(mesh);
+            if (key != m_tile_key.end())
+            {
+                m_key_mesh[key->second] = mesh;
+                m_ref_tile_mv[key->second] = mesh->dumpped_matrix;   // reference eye space = this frame's
+            }
+        }
+        ApplyGroundFrame(m_current_group, nullptr, m_ref_frame);
+        RemoveCoveredLods(m_current_group);
+        HandOutTextures(m_current_group, 0);
 
         m_output_batch->group_meshes.push_back(m_current_group);
-        m_output_batch->bbox_ws += m_current_group->bbox_ws;
-        m_output_batch->bbox_gps += m_current_group->bbox_gps;
+        m_output_batch->bbox_ws = m_current_group->bbox_ws;
+        m_output_batch->bbox_gps = m_current_group->bbox_gps;
+        m_merged_group = m_current_group;
         m_current_group = nullptr;
 
-        if (m_on_frame_captured) m_on_frame_captured(mesh_count);
+        m_last.new_data = true;
+        if (m_on_frame_captured) m_on_frame_captured(int(m_merged_group->meshes.size()));
     }
     else
     {
+        for (MeshData* mesh : m_current_group->meshes)
+        {
+            m_tile_size.erase(mesh);
+            m_tile_key.erase(mesh);
+            delete mesh;
+        }
         delete m_current_group;
         m_current_group = nullptr;
 
         if (m_on_frame_captured) m_on_frame_captured(0);
     }
+}
+
+LiveCaptureProcessor::GroundFrame LiveCaptureProcessor::GroundFrameFromGeo(double lon0, double lat0) const
+{
+    GroundFrame f;
+    const GeoView& v = m_geo_view;
+    if (!v.valid)
+        return f;
+
+    // GE's LookAt, in East/North/Up metres at the look-at point L (at altitude
+    // 0, which is what `range` is measured from): the camera sits `range`
+    // away, tilted `tilt` from vertical, looking along `heading`; GE cameras
+    // don't roll, so screen-right stays horizontal. A link written by an older
+    // MeshTool has no LookAt point; the terrain point is the same for tilt 0.
+    const double la_lon = v.hasLookAt ? v.laLon : v.lookLon;
+    const double la_lat = v.hasLookAt ? v.laLat : v.lookLat;
+    const double deg = 3.14159265358979323846 / 180.0;
+    const double h = v.heading * deg, t = v.tilt * deg;
+    const core::vec3d right(cos(h), -sin(h), 0.0);
+    const core::vec3d horiz(sin(h), cos(h), 0.0);
+    const core::vec3d cam = core::vec3d(-sin(t) * horiz.x, -sin(t) * horiz.y, cos(t)) * v.range;
+    const core::vec3d fwd(sin(t) * horiz.x, sin(t) * horiz.y, -cos(t));
+    const core::vec3d eye_up = cross(right, fwd);
+    const core::vec3d eye_z = fwd * -1.0;                       // eye space looks down -Z
+
+    // L's ENU -> scene ENU at (lat0, lon0, 0): L's position T and rotation M.
+    GeographicLib::LocalCartesian scene(lat0, lon0, 0.0);
+    double tx, ty, tz;
+    std::vector<double> M(9);
+    scene.Forward(la_lat, la_lon, 0.0, tx, ty, tz, M);
+    auto rotate = [&M](const core::vec3d& p) {
+        return core::vec3d(M[0] * p.x + M[1] * p.y + M[2] * p.z,
+                           M[3] * p.x + M[4] * p.y + M[5] * p.z,
+                           M[6] * p.x + M[7] * p.y + M[8] * p.z);
+    };
+
+    // ground = metres * Rot * p_eye + trans, Rot's columns = eye axes in scene ENU.
+    core::vec3d c0 = rotate(right), c1 = rotate(eye_up), c2 = rotate(eye_z);
+    core::vec3d trans = core::vec3d(tx, ty, tz) + rotate(cam);
+    f.x_axis = core::vec3d(c0.x, c1.x, c2.x);   // rows of Rot, as eye-space vectors
+    f.y_axis = core::vec3d(c0.y, c1.y, c2.y);
+    f.up     = core::vec3d(c0.z, c1.z, c2.z);
+    // ground = metres * Rot * (p - origin)  =>  origin = -Rot^T * trans / metres,
+    // and Rot^T's rows are Rot's columns.
+    f.origin = core::vec3d(dot(c0, trans), dot(c1, trans), dot(c2, trans)) * (-1.0 / kMetresPerUnit);
+    f.valid = true;
+    f.geo = true;
+
+    // Cross-check against GE's own camera position (its altitude reference
+    // may differ, so horizontal and vertical are reported separately).
+    double cx, cy, cz;
+    scene.Forward(v.camLat, v.camLon, v.camAlt, cx, cy, cz);
+    CapLog("  GPS view: look-at %.7f, %.7f%s  range %.1f m  heading %.2f  tilt %.2f  terrain %.1f m  (age %.1f s)\n"
+           "  GPS camera check: computed vs GE camera differ %.2f m horizontally, %.2f m vertically\n",
+           la_lat, la_lon, v.hasLookAt ? "" : " (terrain point: old view link)", v.range, v.heading, v.tilt,
+           v.lookAlt, glfwGetTime() - v.time,
+           sqrt((cx - trans.x) * (cx - trans.x) + (cy - trans.y) * (cy - trans.y)), cz - trans.z);
+    return f;
+}
+
+core::matrix4d LiveCaptureProcessor::FrameMatrix(const GroundFrame& f)
+{
+    // [g, 1] = [p, 1] * G with g = Rot * (p - origin)  (row vectors).
+    core::matrix4d G;
+    const core::vec3d ax[3] = { f.x_axis, f.y_axis, f.up };
+    for (int k = 0; k < 3; k++)
+    {
+        for (int i = 0; i < 3; i++)
+            G(k, i) = ax[i][k];
+        G(k, 3) = 0.0;
+    }
+    for (int i = 0; i < 3; i++)
+        G(3, i) = -dot(f.origin, ax[i]);
+    G(3, 3) = 1.0;
+    return G;
+}
+
+void LiveCaptureProcessor::CheckLookAt(const GroupMeshData* group) const
+{
+    // GE's look-at point is the terrain at screen centre, `range` metres down
+    // the camera's -Z axis. Find the captured vertex closest to that ray.
+    if (!m_geo_view.valid || !group)
+        return;
+    double best_angle = 1e9, best_depth = 0.0;
+    for (const MeshData* mesh : group->meshes)
+    {
+        if (!mesh->vertex_list) continue;
+        for (int i = 0; i < mesh->num_vertex; i++)
+        {
+            const core::vec3f& v = mesh->vertex_list[i];
+            core::vec3d p = core::vec3d(v.x, v.y, v.z) + mesh->translation;
+            if (p.z >= 0.0) continue;
+            double angle = sqrt(p.x * p.x + p.y * p.y) / -p.z;
+            if (angle < best_angle) { best_angle = angle; best_depth = -p.z * kMetresPerUnit; }
+        }
+    }
+    if (best_angle >= 0.01)
+        return;
+
+    // Where GE says the screen-centre terrain is, seen from the camera that
+    // GE's LookAt describes.
+    const GeoView& v = m_geo_view;
+    const double la_lon = v.hasLookAt ? v.laLon : v.lookLon;
+    const double la_lat = v.hasLookAt ? v.laLat : v.lookLat;
+    const double deg = 3.14159265358979323846 / 180.0;
+    const double h = v.heading * deg, t = v.tilt * deg;
+    GeographicLib::LocalCartesian at(la_lat, la_lon, 0.0);
+    double ex, ey, ez;
+    at.Forward(v.lookLat, v.lookLon, v.lookAlt, ex, ey, ez);
+    double cx = -sin(t) * sin(h) * v.range, cy = -sin(t) * cos(h) * v.range, cz = cos(t) * v.range;
+    double expected = sqrt((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy) + (ez - cz) * (ez - cz));
+    CapLog("  GPS look-at check: captured surface at screen centre %.2f m away, GE view says %.2f m (diff %.2f m)\n",
+           best_depth, expected, best_depth - expected);
+}
+
+void LiveCaptureProcessor::ResetMerge()
+{
+    m_merged_group = nullptr;
+    m_ref_frame = GroundFrame();
+    m_key_mesh.clear();
+    m_ref_tile_mv.clear();
+    m_tile_size.clear();
+    m_tile_key.clear();
+}
+
+void LiveCaptureProcessor::HandOutTextures(GroupMeshData* group, uint32_t index_offset)
+{
+    // Hand the group the textures its meshes sample. Meshes recorded the GL
+    // texture id; remap it to an index into the (eventual) loaded_textures,
+    // which is what the renderer and exporters expect.
+    std::map<uint32_t, uint32_t> gl_to_index;
+    int textured = 0;
+    for (MeshData* mesh : group->meshes)
+    {
+        uint32_t gl_id = mesh->idx_in_texture_list;
+        mesh->idx_in_texture_list = INVALID_VALUE;
+        auto st = m_texture_store.find(gl_id);
+        if (gl_id == 0 || st == m_texture_store.end() || !st->second->m_levelCount ||
+            !st->second->m_mips[0].m_imageData)
+            continue;
+        auto it = gl_to_index.find(gl_id);
+        if (it == gl_to_index.end())
+        {
+            it = gl_to_index.emplace(gl_id, index_offset + uint32_t(group->loaded_textures.size())).first;
+            group->loaded_textures.push_back(st->second);
+            m_textures_handed_out.insert(st->second);
+        }
+        mesh->idx_in_texture_list = it->second;
+        textured++;
+    }
+    // The group owns those now; a later capture re-sends them and must get
+    // fresh objects rather than overwrite this group's.
+    for (auto& g : gl_to_index)
+        m_texture_store.erase(g.first);
+    CapLog("  textures: %u used, %d of %u meshes textured\n",
+           unsigned(gl_to_index.size()), textured, unsigned(group->meshes.size()));
+}
+
+bool LiveCaptureProcessor::RegisterToReference(const GroupMeshData* group, core::matrix4d& X, int& support) const
+{
+    // Each tile both captures contain gives the camera-to-camera transform:
+    // p_eye_new * inv(MV_new) = p_tile, p_tile * MV_ref = p_eye_ref.
+    std::vector<core::matrix4d> candidates;
+    for (const MeshData* mesh : group->meshes)
+    {
+        auto key = m_tile_key.find(const_cast<MeshData*>(mesh));
+        if (key == m_tile_key.end()) continue;
+        auto ref = m_ref_tile_mv.find(key->second);
+        if (ref == m_ref_tile_mv.end()) continue;
+        candidates.push_back(inverse(mesh->dumpped_matrix) * ref->second);
+    }
+
+    // Consensus on where the new camera sits in the reference eye space
+    // (translation row); a hash collision or reused tile can't win the vote.
+    const double kTolerance = 3e-7;   // Earth radii, about 2 m
+    int best = -1, best_votes = 0;
+    for (size_t i = 0; i < candidates.size(); i++)
+    {
+        int votes = 0;
+        for (size_t j = 0; j < candidates.size(); j++)
+        {
+            double dx = candidates[i](3, 0) - candidates[j](3, 0);
+            double dy = candidates[i](3, 1) - candidates[j](3, 1);
+            double dz = candidates[i](3, 2) - candidates[j](3, 2);
+            if (dx * dx + dy * dy + dz * dz < kTolerance * kTolerance)
+                votes++;
+        }
+        if (votes > best_votes) { best_votes = votes; best = int(i); }
+    }
+    support = best_votes;
+    if (best < 0 || best_votes < 3)
+        return false;
+    X = candidates[size_t(best)];
+    return true;
+}
+
+LiveCaptureProcessor::GroundFrame LiveCaptureProcessor::ComputeGroundFrame(const GroupMeshData* group) const
+{
+    GroundFrame f;
+    if (!group || !group->bbox_ws.b_valid)
+        return f;
+
+    // Eye space: GE camera at the origin, looking down -Z, screen-up = +Y.
+    f.origin = group->bbox_ws.GetCentroid();
+    f.up = core::vec3d(0.0, 1.0, 0.0);
+    double up_len = length(m_up_accum);
+    if (up_len > 0.0)
+    {
+        f.up = m_up_accum / up_len;
+        if (dot(f.up, f.origin) > 0.0)   // the camera (eye-space origin) is above the ground
+            f.up = f.up * -1.0;
+    }
+
+    // Y axis: screen-up laid onto the ground plane, i.e. "away from the camera"
+    // when GE is tilted and screen-up when it looks straight down.
+    f.y_axis = core::vec3d(0.0, 1.0, 0.0) - f.up * f.up.y;
+    if (length(f.y_axis) < 1e-6)
+        f.y_axis = core::vec3d(0.0, 0.0, -1.0) - f.up * -f.up.z;
+    f.y_axis = normalize(f.y_axis);
+    f.x_axis = cross(f.y_axis, f.up);
+    f.valid = true;
+
+    CapLog("  ground frame: up=(%.4f %.4f %.4f) origin=(%.6g %.6g %.6g) units\n",
+           f.up.x, f.up.y, f.up.z, f.origin.x, f.origin.y, f.origin.z);
+    return f;
+}
+
+void LiveCaptureProcessor::ApplyGroundFrame(GroupMeshData* group, const core::matrix4d* X, const GroundFrame& f)
+{
+    if (!group || !f.valid)
+        return;
+
+    auto to_ground = [&](core::vec3d p) {
+        if (X)
+        {
+            core::vec4d q = core::vec4d(p.x, p.y, p.z, 1.0) * (*X);
+            p = core::vec3d(q.x, q.y, q.z);
+        }
+        core::vec3d d = p - f.origin;
+        return core::vec3d(dot(d, f.x_axis), dot(d, f.y_axis), dot(d, f.up)) * kMetresPerUnit;
+    };
+
+    group->bbox_ws.Reset();
+    for (MeshData* mesh : group->meshes)
+    {
+        if (!mesh || !mesh->vertex_list || mesh->num_vertex <= 0)
+            continue;
+        uint32_t n = uint32_t(mesh->num_vertex);
+        std::vector<core::vec3d> pos(n);
+        mesh->bbox_ws.Reset();
+        for (uint32_t i = 0; i < n; i++)
+        {
+            const core::vec3f& v = mesh->vertex_list[i];
+            pos[i] = to_ground(core::vec3d(v.x, v.y, v.z) + mesh->translation);
+            mesh->bbox_ws += pos[i];
+        }
+        mesh->translation = mesh->bbox_ws.GetCentroid();
+        for (uint32_t i = 0; i < n; i++)
+            mesh->vertex_list[i] = core::vec3f(pos[i] - mesh->translation);
+        group->bbox_ws += mesh->bbox_ws;
+    }
+
+    if (group->bbox_ws.b_valid)
+    {
+        core::vec3d d = group->bbox_ws.GetDiagonal();
+        CapLog("  ground frame extent: %.1f x %.1f x %.1f m\n", d.x, d.y, d.z);
+    }
+}
+void LiveCaptureProcessor::RemoveCoveredLods(GroupMeshData* group)
+{
+    if (!group)
+        return;
+
+    struct Item { MeshData* mesh; double size; int level; };
+    std::vector<Item> items;
+    core::bounds3d area;
+    for (MeshData* mesh : group->meshes)
+    {
+        auto it = m_tile_size.find(mesh);
+        if (it == m_tile_size.end() || !(it->second > 0.0) || !mesh->vertex_list ||
+            mesh->draw_call_list.empty() || !mesh->draw_call_list[0].is_ge_mesh() || !mesh->bbox_ws.b_valid)
+            continue;
+        items.push_back({ mesh, it->second, int(floor(log2(it->second) + 0.5)) });
+        area += mesh->bbox_ws;
+    }
+    if (items.size() < 2)
+        return;
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.size < b.size; });
+    if (items.front().level == items.back().level)
+        return;   // single level of detail: nothing to hide
+
+    // Ground coverage grid (XY, metres), fine enough for the finest tiles.
+    double cell = items.front().size / 8.0;
+    const double minX = area.bb_min.x, minY = area.bb_min.y;
+    const double spanX = area.bb_max.x - minX, spanY = area.bb_max.y - minY;
+    const double kMaxCells = 4096.0;
+    cell = (std::max)(cell, (std::max)(spanX, spanY) / kMaxCells);
+    const int nx = (std::max)(1, int(ceil(spanX / cell)) + 1);
+    const int ny = (std::max)(1, int(ceil(spanY / cell)) + 1);
+    std::vector<uint8_t> covered(size_t(nx) * size_t(ny), 0);
+
+    auto cellIndex = [&](double x, double y) -> int64_t {
+        int cx = int((x - minX) / cell), cy = int((y - minY) / cell);
+        if (cx < 0 || cy < 0 || cx >= nx || cy >= ny) return -1;
+        return int64_t(cy) * nx + cx;
+    };
+
+    // Visits the grid cells whose centres lie inside the triangle's XY
+    // projection; a triangle too thin to contain any (e.g. a wall) visits the
+    // cell under its centroid instead.
+    auto forEachCell = [&](const core::vec3d& a, const core::vec3d& b, const core::vec3d& c, auto&& fn) {
+        double x0 = (std::min)({ a.x, b.x, c.x }), x1 = (std::max)({ a.x, b.x, c.x });
+        double y0 = (std::min)({ a.y, b.y, c.y }), y1 = (std::max)({ a.y, b.y, c.y });
+        int cx0 = (std::max)(0, int(floor((x0 - minX) / cell - 0.5)));
+        int cx1 = (std::min)(nx - 1, int(ceil((x1 - minX) / cell - 0.5)));
+        int cy0 = (std::max)(0, int(floor((y0 - minY) / cell - 0.5)));
+        int cy1 = (std::min)(ny - 1, int(ceil((y1 - minY) / cell - 0.5)));
+        double area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        int visited = 0;
+        if (area2 != 0.0)
+        {
+            for (int cy = cy0; cy <= cy1; cy++)
+                for (int cx = cx0; cx <= cx1; cx++)
+                {
+                    double px = minX + (cx + 0.5) * cell, py = minY + (cy + 0.5) * cell;
+                    double w0 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
+                    double w1 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
+                    double w2 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
+                    bool inside = area2 > 0.0 ? (w0 >= 0 && w1 >= 0 && w2 >= 0) : (w0 <= 0 && w1 <= 0 && w2 <= 0);
+                    if (inside)
+                    {
+                        fn(int64_t(cy) * nx + cx);
+                        visited++;
+                    }
+                }
+        }
+        if (visited == 0)
+        {
+            int64_t ci = cellIndex((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0);
+            if (ci >= 0) fn(ci);
+        }
+    };
+
+    auto worldPos = [](const MeshData* m, uint32_t i) {
+        const core::vec3f& v = m->vertex_list[i];
+        return core::vec3d(v.x, v.y, v.z) + m->translation;
+    };
+
+    size_t tris_before = 0, tris_after = 0;
+    for (size_t i = 0; i < items.size();)
+    {
+        size_t j = i;
+        while (j < items.size() && items[j].level == items[i].level)
+            j++;
+
+        // Filter this level against everything finer, then add it to the coverage.
+        for (size_t k = i; k < j; k++)
+        {
+            MeshData* m = items[k].mesh;
+            DrawCallInfo& dc = m->draw_call_list[0];
+            int n = dc.get_index_count();
+            std::vector<uint32_t> kept;
+            kept.reserve(size_t(n));
+            for (int t = 0; t + 2 < n; t += 3)
+            {
+                uint32_t i0 = dc.get_index(t), i1 = dc.get_index(t + 1), i2 = dc.get_index(t + 2);
+                tris_before++;
+                if (i == 0)   // the finest level is always kept
+                {
+                    kept.insert(kept.end(), { i0, i1, i2 });
+                    continue;
+                }
+                int total = 0, hit = 0;
+                forEachCell(worldPos(m, i0), worldPos(m, i1), worldPos(m, i2),
+                            [&](int64_t ci) { total++; hit += covered[size_t(ci)]; });
+                if (total == 0 || hit * 2 <= total)   // keep unless mostly covered by finer tiles
+                    kept.insert(kept.end(), { i0, i1, i2 });
+            }
+            if (kept.size() != size_t(n))
+            {
+                dc.clear_index_buffer();
+                for (uint32_t idx : kept)
+                    dc.add_index(idx);
+                if (!kept.empty())
+                    m_last.modified.push_back(m);   // its GPU copy is stale now
+            }
+            tris_after += kept.size() / 3;
+        }
+        for (size_t k = i; k < j; k++)
+        {
+            MeshData* m = items[k].mesh;
+            const DrawCallInfo& dc = m->draw_call_list[0];
+            for (int t = 0; t + 2 < dc.get_index_count(); t += 3)
+                forEachCell(worldPos(m, dc.get_index(t)), worldPos(m, dc.get_index(t + 1)), worldPos(m, dc.get_index(t + 2)),
+                            [&](int64_t ci) { covered[size_t(ci)] = 1; });
+        }
+        i = j;
+    }
+
+    // Drop meshes left empty; shrink the bounds of the rest to what remains.
+    int removed_meshes = 0;
+    group->bbox_ws.Reset();
+    for (size_t k = 0; k < group->meshes.size();)
+    {
+        MeshData* m = group->meshes[k];
+        if (m_tile_size.count(m) && !m->draw_call_list.empty() && m->draw_call_list[0].is_ge_mesh())
+        {
+            const DrawCallInfo& dc = m->draw_call_list[0];
+            if (dc.get_index_count() == 0)
+            {
+                // The caller frees it: it may already have GPU data.
+                auto key = m_tile_key.find(m);
+                if (key != m_tile_key.end())
+                {
+                    auto km = m_key_mesh.find(key->second);
+                    if (km != m_key_mesh.end() && km->second == m)
+                        m_key_mesh.erase(km);   // a later capture may bring it back; the LOD filter will judge again
+                    m_tile_key.erase(key);
+                }
+                m_tile_size.erase(m);
+                m_last.removed.push_back(m);
+                group->meshes.erase(group->meshes.begin() + k);
+                removed_meshes++;
+                continue;
+            }
+            m->bbox_ws.Reset();
+            for (int t = 0; t < dc.get_index_count(); t++)
+                m->bbox_ws += worldPos(m, dc.get_index(t));
+        }
+        if (m->bbox_ws.b_valid)
+            group->bbox_ws += m->bbox_ws;
+        k++;
+    }
+
+    CapLog("  LOD filter: levels %d..%d (tile %.1f..%.1f m), %zu -> %zu triangles, %d meshes removed (grid %dx%d, cell %.2f m)\n",
+           items.front().level, items.back().level, items.front().size, items.back().size,
+           tris_before, tris_after, removed_meshes, nx, ny, cell);
 }
 
 void LiveCaptureProcessor::ProcessRecord(const GLCaptureRecord* record, const char* payload)
@@ -310,6 +956,25 @@ void LiveCaptureProcessor::ProcessRecord(const GLCaptureRecord* record, const ch
     case CMD_USE_PROGRAM:
         HandleUseProgram(reinterpret_cast<const CmdUseProgram*>(payload));
         break;
+    case CMD_MATRIX_MODE:
+        m_matrix_mode = *reinterpret_cast<const uint32_t*>(payload);
+        break;
+    case CMD_LOAD_MATRIX_F:
+    {
+        const CmdLoadMatrixf* cmd = reinterpret_cast<const CmdLoadMatrixf*>(payload);
+        core::matrix4f mat;
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++)
+                mat(r, c) = cmd->matrix[r * 4 + c];
+        if (cmd->mode == 0x1700)        // GL_MODELVIEW
+        {
+            m_modelview = mat;
+            m_has_modelview = true;
+        }
+        else if (cmd->mode == 0x1701)   // GL_PROJECTION
+            m_projection = mat;
+        break;
+    }
     default:
         break;
     }
@@ -503,6 +1168,7 @@ void LiveCaptureProcessor::HandleUniformMatrix4fv(const CmdUniformMatrix4fv* cmd
 
     m_render_states.m_transform_matrix = mat;
     m_matrix_stack.push_back(mat);
+    m_last_uniform_location = cmd->location;
 
     if (!m_has_first_matrix)
     {
@@ -594,7 +1260,15 @@ void LiveCaptureProcessor::HandleDrawArrays(const CmdDrawArrays* cmd, const char
 
 void LiveCaptureProcessor::HandleUseProgram(const CmdUseProgram* cmd)
 {
-    // Track current program (for shader-related state)
+    m_current_program = cmd->program;
+}
+
+static void LogMatrix(const char* name, const core::matrix4f& m)
+{
+    CapLog("    %s:", name);
+    for (int r = 0; r < 4; r++)
+        CapLog(" [%.6g %.6g %.6g %.6g]", m(r, 0), m(r, 1), m(r, 2), m(r, 3));
+    CapLog("\n");
 }
 
 // ============================================================================
@@ -746,8 +1420,27 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
     }
 
     if (log_this)
+    {
         CapLog("    -> %u positions, %u uvs, %u indices\n",
                unsigned(position_data.size()), unsigned(texture_coord_data.size()), unsigned(index_data.size()));
+        CapLog("    program=%u uniform_loc=%d has_modelview=%d\n",
+               m_current_program, int(m_last_uniform_location), int(m_has_modelview));
+        LogMatrix("uniform   ", state.m_transform_matrix);
+        LogMatrix("modelview ", m_modelview);
+        LogMatrix("projection", m_projection);
+        if (!position_data.empty())
+        {
+            const core::vec3f& p0 = position_data[0];
+            core::vec3f pmin = p0, pmax = p0;
+            for (const auto& p : position_data)
+            {
+                pmin = core::vec3f((std::min)(pmin.x, p.x), (std::min)(pmin.y, p.y), (std::min)(pmin.z, p.z));
+                pmax = core::vec3f((std::max)(pmax.x, p.x), (std::max)(pmax.y, p.y), (std::max)(pmax.z, p.z));
+            }
+            CapLog("    raw pos range: (%.6g %.6g %.6g) - (%.6g %.6g %.6g)\n",
+                   pmin.x, pmin.y, pmin.z, pmax.x, pmax.y, pmax.z);
+        }
+    }
 
     // Deduplicate vertices (same as CreateObjectFile)
     vector<int32_t> index_match_table(position_data.size(), -1);
@@ -776,9 +1469,41 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
     mesh_data->num_vertex = int32_t(new_index_match_table.size());
     uint32_t num_vertex = uint32_t(mesh_data->num_vertex);
 
-    // Apply transformation matrix
-    Matrix4fToMatrix4d(state.m_transform_matrix, mesh_data->dumpped_matrix);
-    mesh_data->dumpped_matrix *= state.m_first_inv_transform_matrix;
+    // Transformation into a common space. Google Earth loads each tile's
+    // modelview with glLoadMatrixf, which takes its quantized vertices straight
+    // to eye space (units of one Earth radius). Its glUniformMatrix4fv is
+    // modelview * projection, so it is only a fallback for programs without a
+    // fixed-function modelview.
+    if (m_has_modelview)
+    {
+        Matrix4fToMatrix4d(m_modelview, mesh_data->dumpped_matrix);
+        // Vertices are quantized to 0..1 per tile, so the X axis scale is the
+        // tile's edge length - its level of detail.
+        if (is_ge_mesh)
+        {
+            core::vec4d ax = mesh_data->dumpped_matrix.get_row(0);
+            m_tile_size[mesh_data] = sqrt(ax.x * ax.x + ax.y * ax.y + ax.z * ax.z) * kMetresPerUnit;
+
+            // Identity of the tile across captures: its vertex and index data
+            // (GL buffer ids get reused, the content does not).
+            uint64_t key = 1469598103934665603ull;
+            auto fnv = [&key](const void* p, size_t n) {
+                const uint8_t* b = static_cast<const uint8_t*>(p);
+                for (size_t i = 0; i < n; i++) { key ^= b[i]; key *= 1099511628211ull; }
+            };
+            auto vb = m_buffer_store.find(state.m_vertexStream[0].data_buffer_obj);
+            if (vb != m_buffer_store.end())
+                fnv(vb->second.data(), vb->second.size());
+            fnv(&state.m_vertexStream[0].start_offset, sizeof(state.m_vertexStream[0].start_offset));
+            fnv(index_data.data(), index_data.size() * sizeof(uint32_t));
+            m_tile_key[mesh_data] = key;
+        }
+    }
+    else
+    {
+        Matrix4fToMatrix4d(state.m_transform_matrix, mesh_data->dumpped_matrix);
+        mesh_data->dumpped_matrix *= state.m_first_inv_transform_matrix;
+    }
 
     // Positions
     if (position_data.size() > 0)
@@ -846,19 +1571,39 @@ void LiveCaptureProcessor::ExtractMeshFromDrawCall(const RenderingStates& state)
     // Texture reference
     mesh_data->idx_in_texture_list = state.m_textureSlot[0].index_in_list;
 
-    // World bounds and translation, as the GPA dump import does without a KML
-    // reference: vertices are row vectors transformed by dumpped_matrix (the
-    // same matrix the renderer uses as model matrix).
+    // Bake vertices into world space (row vectors times dumpped_matrix, in
+    // double), stored relative to the mesh centre as the KML-referenced GPA
+    // import does: world position = vertex_list[i] + translation. The renderer
+    // and the exporters both rely on that layout.
     mesh_data->bbox_ws.Reset();
     if (mesh_data->vertex_list)
     {
+        std::vector<core::vec3d> pos_ws(num_vertex);
         for (uint32_t i = 0; i < num_vertex; i++)
         {
-            core::vec4d pos_ws = core::vec4d(mesh_data->vertex_list[i], 1.0) * mesh_data->dumpped_matrix;
-            mesh_data->bbox_ws += core::vec3d(pos_ws);
+            pos_ws[i] = core::vec3d(core::vec4d(mesh_data->vertex_list[i], 1.0) * mesh_data->dumpped_matrix);
+            mesh_data->bbox_ws += pos_ws[i];
+        }
+        mesh_data->translation = mesh_data->bbox_ws.GetCentroid();
+        for (uint32_t i = 0; i < num_vertex; i++)
+            mesh_data->vertex_list[i] = core::vec3f(pos_ws[i] - mesh_data->translation);
+
+        // Area-weighted surface normal, used later to find "up" for the frame.
+        // Walls of closed shapes cancel out, so the ground dominates.
+        if (is_ge_mesh && !mesh_data->draw_call_list.empty())
+        {
+            for (uint32_t i = 0; i + 2 < index_data.size(); i += 3)
+            {
+                uint32_t a = index_data[i], b = index_data[i + 1], c = index_data[i + 2];
+                if (a >= index_match_table.size() || b >= index_match_table.size() || c >= index_match_table.size())
+                    continue;
+                const core::vec3d& pa = pos_ws[uint32_t(index_match_table[a])];
+                const core::vec3d& pb = pos_ws[uint32_t(index_match_table[b])];
+                const core::vec3d& pc = pos_ws[uint32_t(index_match_table[c])];
+                m_up_accum += cross(pb - pa, pc - pa);
+            }
         }
     }
-    mesh_data->translation = mesh_data->dumpped_matrix.get_row(3);
     m_current_group->bbox_ws += mesh_data->bbox_ws;
 
     // Add to current group
@@ -940,7 +1685,7 @@ void ProcessManager::DestroySharedMemory()
     }
 }
 
-bool ProcessManager::StartGoogleEarth(const std::string& ge_path)
+bool ProcessManager::StartGoogleEarth(const std::string& ge_path, const std::string& kml_path)
 {
     if (!ge_path.empty())
         m_ge_path = ge_path;
@@ -952,7 +1697,9 @@ bool ProcessManager::StartGoogleEarth(const std::string& ge_path)
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
 
-    std::string cmd = m_ge_path;
+    std::string cmd = "\"" + m_ge_path + "\"";
+    if (!kml_path.empty())
+        cmd += " \"" + kml_path + "\"";
 
     if (!CreateProcessA(nullptr, &cmd[0], nullptr, nullptr, FALSE,
                          0, nullptr, nullptr, &si, &pi))

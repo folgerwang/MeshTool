@@ -147,7 +147,7 @@ bool VulkanRenderer::BeginFrame()
     rpInfo.renderArea.extent = m_ctx.swapchainExtent;
 
     VkClearValue clearValues[2];
-    clearValues[0].color = {{0.04f, 0.04f, 0.06f, 1.0f}};
+    clearValues[0].color = {{0.03f, 0.04f, 0.07f, 1.0f}};
     clearValues[1].depthStencil = {1.0f, 0};
     rpInfo.clearValueCount = 2;
     rpInfo.pClearValues = clearValues;
@@ -802,13 +802,13 @@ void VulkanRenderer::CreateDescriptorPool()
 {
     VkDescriptorPoolSize poolSizes[] = {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16384},  // one per captured texture
     };
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = 1100;
+    poolInfo.maxSets = 16384 + 100;
     poolInfo.poolSizeCount = 2;
     poolInfo.pPoolSizes = poolSizes;
 

@@ -9,7 +9,7 @@
 #define GLCAPTURE_EVENT_READY       "Local\\MeshToolCaptureReady"
 #define GLCAPTURE_EVENT_CONTROL     "Local\\MeshToolCaptureControl"
 
-#define GLCAPTURE_SHARED_MEM_SIZE   (64 * 1024 * 1024)  // 64 MB
+#define GLCAPTURE_SHARED_MEM_SIZE   (256 * 1024 * 1024) // 256 MB: a dense city frame plus its textures
 #define GLCAPTURE_HEADER_SIZE       4096
 #define GLCAPTURE_RING_SIZE         (GLCAPTURE_SHARED_MEM_SIZE - GLCAPTURE_HEADER_SIZE)
 

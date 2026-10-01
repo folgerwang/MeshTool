@@ -47,6 +47,44 @@ glm and stb are header-only. The compiled shaders are copied next to `MeshTool.e
 `run.bat` - starts `build\Release\MeshTool.exe` from the repo root, where
 `land_ocean_ice_8192.png` and `mesh_tool.cfg` live.
 
+After pulling hook changes, redeploy the proxy (`deploy_hook.bat` as
+administrator, option 2): MeshTool and `opengl32.dll` share the capture buffer
+layout (256 MB) and must match.
+
+## Live capture
+
+Launch Google Earth from MeshTool (Capture > Launch Google Earth, or Navigate &
+Capture), then Capture Frame or F12 inside Google Earth.
+
+- **GPS.** MeshTool opens a KML NetworkLink in Google Earth that reports the
+  view to `http://127.0.0.1:47321/view` whenever the camera stops. Captures are
+  placed in East/North/Up metres at a GPS origin (the first capture's look-at
+  point); the viewport corner shows the pivot's latitude/longitude. Heights are
+  GE's (above sea level). Without the link, a camera-based frame is used.
+- **Merging.** A capture next to or overlapping the current one is merged into
+  it (placed through tiles both contain, or else GPS); any other capture
+  replaces it. Tiles already captured are dropped.
+- **Levels of detail.** Google Earth draws coarse tiles under finer ones; the
+  covered coarse triangles are removed.
+- Diagnostics: `C:\Users\Public\meshtool_capture.log` (placement, GPS checks,
+  LOD filter) and `C:\Users\Public\meshtool_proxy.log` (hook side).
+
+## Scene files
+
+File > Save Scene / Open Scene (Ctrl+S / Ctrl+O): `.mtscene`, MeshTool's
+lossless native format - meshes, textures as captured, GPS origin.
+
+## Viewport
+
+| | Maya style | Unreal style |
+|---|---|---|
+| Orbit / look | Alt + LMB | RMB drag (look around) |
+| Pan | Alt + MMB | MMB, or LMB + RMB |
+| Dolly / move | Alt + RMB | LMB drag (forward/back + turn) |
+| Fly | | RMB + W/A/S/D, Q/E down/up; wheel = speed, Shift = faster |
+
+Wheel zooms to the pivot, F frames everything.
+
 ## Export
 
 File > Export Mesh writes glTF 2.0, picked by the extension you type:

@@ -13,4 +13,6 @@ thirdparty/
 *.spv
 meshtool_flyto.kml
 meshtool_search.kml
+meshtool_view.kml
+*.mtscene
 *.ini
