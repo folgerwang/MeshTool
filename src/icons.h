@@ -209,6 +209,23 @@ inline void GenNavigateIcon(uint8_t* buf)
     FillCircle(buf, P(16), P(16), P(4), 255, 120, 60);
 }
 
+// Segmentation: a scene split into class-coloured parts (building, tree,
+// water, road), with a sparkle for the AI labelling.
+inline void GenSegmentIcon(uint8_t* buf)
+{
+    memset(buf, 0, ICON_BYTES);
+    FillRect(buf, P(4),  P(6),  P(15), P(16), 230, 115, 64);    // building
+    FillRect(buf, P(17), P(6),  P(25), P(16), 40, 150, 50);     // tree
+    FillRect(buf, P(4),  P(18), P(12), P(27), 60, 120, 240);    // water
+    FillRect(buf, P(14), P(18), P(25), P(27), 150, 150, 162);   // road
+    // four-point sparkle, top right
+    const int cx = P(26), cy = P(6);
+    DrawTriangle(buf, cx - P(1), cy, cx, cy - P(5), cx + P(1), cy, 255, 255, 255);
+    DrawTriangle(buf, cx - P(1), cy, cx, cy + P(5), cx + P(1), cy, 255, 255, 255);
+    DrawTriangle(buf, cx, cy - P(1), cx - P(5), cy, cx, cy + P(1), 255, 255, 255);
+    DrawTriangle(buf, cx, cy - P(1), cx + P(5), cy, cx, cy + P(1), 255, 255, 255);
+}
+
 #undef P
 #undef S
 
@@ -225,6 +242,7 @@ enum IconID
     ICON_PIN,
     ICON_REGION,
     ICON_NAVIGATE,
+    ICON_SEGMENT,
     ICON_COUNT
 };
 
@@ -243,7 +261,8 @@ inline IconGenFunc GetIconGenerator(IconID id)
         GenExportIcon,
         GenPinIcon,
         GenRegionIcon,
-        GenNavigateIcon
+        GenNavigateIcon,
+        GenSegmentIcon
     };
     return funcs[id];
 }

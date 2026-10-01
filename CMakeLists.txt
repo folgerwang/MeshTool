@@ -50,6 +50,8 @@ set(NEW_SOURCES
     src/viewcamera.cpp
     src/scenefile.cpp
     src/geoview.cpp
+    src/segment/segmenter.cpp
+    src/segment/qwen_client.cpp
     src/file_downloader.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp
@@ -92,6 +94,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/segment
     ${CMAKE_SOURCE_DIR}/src/vulkan
     ${CMAKE_SOURCE_DIR}/glhook
     ${CMAKE_SOURCE_DIR}/hfa

@@ -30,6 +30,7 @@ public:
     ~MeshToolApp();
 
     bool Init();
+    void OpenOnStart(const std::string& path);   // scene file given on the command line
     void MainLoop();
     void Shutdown();
 
@@ -50,6 +51,10 @@ private:
 
     // Receives Google Earth's view (GPS) through a KML NetworkLink.
     std::unique_ptr<class GeoViewServer> m_geoServer;
+
+    // Background scene segmentation (Tools > Segment Scene).
+    std::unique_ptr<class Segmenter> m_segmenter;
+    void UpdateSegmentation();
 
     void UpdateGeoReadout();   // GPS of the camera pivot -> m_ui->geoText
     ProcessManager*        m_processManager = nullptr;

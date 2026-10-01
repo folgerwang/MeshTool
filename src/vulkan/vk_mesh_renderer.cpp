@@ -4,6 +4,7 @@
 #include "vk_buffer.h"
 #include "vk_texture_manager.h"
 #include "meshdata.h"
+#include "objectclass.h"
 #include "coremath.h"
 
 #include <cstring>
@@ -168,14 +169,21 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
             if (!group) continue;
             for (auto* mesh : group->meshes) {
                 if (!mesh) continue;
+                ObjectClass cls = kObjUnknown;
+                if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
+                    cls = group->objects[size_t(mesh->object_id)].cls;
+                if (frame.classVisible && !frame.classVisible[cls])
+                    continue;
                 EnsureUploaded(mesh);
-                DrawMesh(cmd, mesh, viewProjMatrix, frame);
+                DrawMesh(cmd, mesh, viewProjMatrix, frame,
+                         frame.classColors ? GetObjectClassInfo(cls).color : nullptr);
             }
         }
     }
 }
 
-void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame)
+void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix,
+                                  const MeshDrawFrame& frame, const float* flatColor)
 {
     if (!mesh) return;
 
@@ -202,10 +210,10 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     pc.modelMatrix[15] = 1.0f;
 
     // Set boxColor: w > 0.5 signals "use texture"
-    bool hasTexture = (mesh->tex_id != 0xFFFFFFFF) && m_texMgr->GetTexture(mesh->tex_id);
-    pc.boxColor[0] = 0.75f;
-    pc.boxColor[1] = 0.75f;
-    pc.boxColor[2] = 0.75f;
+    bool hasTexture = !flatColor && (mesh->tex_id != 0xFFFFFFFF) && m_texMgr->GetTexture(mesh->tex_id);
+    pc.boxColor[0] = flatColor ? flatColor[0] : 0.75f;
+    pc.boxColor[1] = flatColor ? flatColor[1] : 0.75f;
+    pc.boxColor[2] = flatColor ? flatColor[2] : 0.75f;
     pc.boxColor[3] = hasTexture ? 1.0f : 0.0f;
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),

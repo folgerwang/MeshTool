@@ -5,6 +5,7 @@
 #include "imgui.h"
 #include "progress.h"
 #include "icons.h"
+#include "segmenter.h"
 
 struct WorldData;
 struct BatchMeshData;
@@ -28,8 +29,21 @@ public:
     BatchMeshData* liveBatch = nullptr;
 
     bool wantCaptureFrame = false;
+    bool captureWaiting = false;    // set by the app while a requested capture hasn't arrived
     bool wantStopCapture = false;
     bool wantFrameAll = false;      // point the camera at everything loaded
+
+    // Segmentation (Tools > Segment Scene): settings and requests for the app,
+    // progress reported back by it.
+    SegmentSettings segSettings;
+    bool  wantStartSegment = false;
+    bool  wantCancelSegment = false;
+    bool  segRunning = false;
+    float segProgress = 0.0f;
+    std::string segStatus;
+    // Viewing segmented objects.
+    bool  classColors = false;
+    bool  classVisible[kObjClassCount] = { true, true, true, true, true, true, true, true };
 
     // Scene file requests, chosen in a file dialog and carried out by the app.
     std::string pendingOpenScenePath;
@@ -69,6 +83,13 @@ private:
 
     // Scene info panel
     bool showScenePanel = true;
+
+    // Segment Scene dialog
+    bool showSegmentDialog = false;
+    char segServer[256] = "http://127.0.0.1:11434";
+    char segModel[128] = "qwen3.8:latest";
+    void DrawSegmentDialog();
+    void DrawObjectsSection();
 
     // Icon textures
     VulkanTextureManager* m_texMgr = nullptr;

@@ -22,6 +22,7 @@
 #include "coregeographic.h"
 #include "GpaDumpAnalyzeTool.h"
 #include "livecaptureprocessor.h"
+#include "objectclass.h"
 
 // ---------------------------------------------------------------------------
 // Custom dark theme inspired by Blender/RenderDoc/Unreal
@@ -171,6 +172,7 @@ void MeshToolUI::DrawUI()
     if (showRefPointDialog)     DrawRefPointDialog();
     if (showRegionSelectDialog) DrawRegionSelectDialog();
     if (showNavCaptureDialog)   DrawNavCaptureDialog();
+    if (showSegmentDialog)      DrawSegmentDialog();
     if (showMessageBox)         DrawMessageBox();
 
     // Auto-capture timer
@@ -272,6 +274,13 @@ void MeshToolUI::DrawMenuBar()
             }
             ImGui::Separator();
             ImGui::MenuItem("Scene Panel", nullptr, &showScenePanel);
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Tools"))
+        {
+            if (ImGui::MenuItem("Segment Scene (AI)...", nullptr, false, !g_world.mesh_data_batches.empty()))
+                showSegmentDialog = true;
             ImGui::EndMenu();
         }
 
@@ -391,6 +400,13 @@ void MeshToolUI::DrawToolbar()
     ImGui::Separator();
     ImGui::Spacing();
 
+    // Segmentation
+    if (IconBtn(icons::ICON_SEGMENT, "Segment Scene (AI)",  white)) showSegmentDialog = true;
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // Settings
     if (IconBtn(icons::ICON_PIN,     "GPS Reference",       white))
     {
@@ -491,6 +507,8 @@ void MeshToolUI::DrawScenePanel()
     ImGui::Spacing();
 
     ImGui::PopStyleColor(2);
+
+    DrawObjectsSection();
 
     // --- Batch list ---
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.40f, 0.28f, 0.18f, 1.0f));
@@ -650,20 +668,49 @@ void MeshToolUI::DrawStatusBar()
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    if (!statusMessage.empty())
+    char info[128];
+    snprintf(info, sizeof(info), "%.1f FPS | %zu batches",
+             ImGui::GetIO().Framerate, g_world.mesh_data_batches.size());
+    const float infoW = ImGui::CalcTextSize(info).x;
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    if (segRunning || captureWaiting)
+    {
+        // Full-width progress bar across the bottom of the window.
+        const float barH = statusH - 8.0f;
+        float cancelW = 0.0f;
+        if (segRunning)
+            cancelW = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f + style.ItemSpacing.x;
+        float barW = ImGui::GetContentRegionAvail().x - infoW - cancelW - 24.0f;
+        char overlay[320];
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
+        if (segRunning)
+        {
+            snprintf(overlay, sizeof(overlay), "%s   %d%%", segStatus.c_str(), int(segProgress * 100.0f + 0.5f));
+            ImGui::ProgressBar(segProgress, ImVec2(barW, barH), overlay);
+        }
+        else
+        {
+            // Unknown duration: indeterminate (animated) bar.
+            ImGui::ProgressBar(-1.0f * float(ImGui::GetTime()), ImVec2(barW, barH), "Waiting for Google Earth to capture the frame...");
+        }
+        ImGui::PopStyleColor(2);
+        if (segRunning)
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Cancel"))
+                wantCancelSegment = true;
+        }
+    }
+    else if (!statusMessage.empty())
         ImGui::TextUnformatted(statusMessage.c_str());
     else
         ImGui::TextDisabled("Ready");
 
     // Right-aligned info
-    {
-        char info[128];
-        snprintf(info, sizeof(info), "%.1f FPS | %zu batches",
-                 ImGui::GetIO().Framerate, g_world.mesh_data_batches.size());
-        float textW = ImGui::CalcTextSize(info).x;
-        ImGui::SameLine(ImGui::GetWindowWidth() - textW - 16);
-        ImGui::TextDisabled("%s", info);
-    }
+    ImGui::SameLine(ImGui::GetWindowWidth() - infoW - 16);
+    ImGui::TextDisabled("%s", info);
 
     ImGui::End();
     ImGui::PopStyleColor();
@@ -671,8 +718,127 @@ void MeshToolUI::DrawStatusBar()
 }
 
 // ---------------------------------------------------------------------------
+// Segmented objects (scene panel)
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawObjectsSection()
+{
+    size_t instances[kObjClassCount] = {};
+    size_t total = 0;
+    for (const BatchMeshData* batch : g_world.mesh_data_batches)
+        for (const GroupMeshData* group : batch->group_meshes)
+            for (const SceneObject& o : group->objects)
+            {
+                instances[o.cls < kObjClassCount ? o.cls : kObjUnknown]++;
+                total++;
+            }
+    if (total == 0)
+        return;
+
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.18f, 0.34f, 0.40f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.22f, 0.42f, 0.48f, 1.0f));
+    if (ImGui::CollapsingHeader("Objects", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Indent(8);
+        ImGui::Checkbox("Colour by class", &classColors);
+        ImGui::Spacing();
+        for (int c = 1; c < kObjClassCount; c++)
+        {
+            const ObjectClassInfo& info = GetObjectClassInfo(ObjectClass(c));
+            ImGui::PushID(c);
+            ImGui::Checkbox("##vis", &classVisible[c]);
+            ImGui::SameLine();
+            ImGui::ColorButton("##col", ImVec4(info.color[0], info.color[1], info.color[2], 1.0f),
+                               ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, ImVec2(16, 16));
+            ImGui::SameLine();
+            if (IsInstanceClass(ObjectClass(c)))
+                ImGui::Text("%-9s %zu", info.name, instances[c]);
+            else
+                ImGui::Text("%-9s %s", info.name, instances[c] ? "area" : "-");
+            ImGui::PopID();
+        }
+        // Meshes outside any object (e.g. not yet segmented captures).
+        ImGui::Checkbox("##vis0", &classVisible[kObjUnknown]);
+        ImGui::SameLine();
+        ImGui::TextDisabled("unassigned");
+        ImGui::Unindent(8);
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::Spacing();
+}
+
+// ---------------------------------------------------------------------------
 // Dialogs
 // ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawSegmentDialog()
+{
+    ImGui::OpenPopup("Segment Scene");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Segment Scene", &showSegmentDialog, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextColored(ImVec4(0.5f, 0.85f, 1.0f, 1.0f),
+            "Split the scene into buildings, trees, cars, road, plants, water and ground.");
+        ImGui::TextDisabled("A vision model labels a top-down render; the 3D mesh gives the exact outlines.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (segRunning)
+        {
+            ImGui::ProgressBar(segProgress, ImVec2(460, 0));
+            ImGui::TextUnformatted(segStatus.c_str());
+            ImGui::TextDisabled("Captures wait until segmentation finishes.");
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                wantCancelSegment = true;
+            ImGui::SameLine();
+            if (ImGui::Button("Hide", ImVec2(120, 0)))
+            {
+                showSegmentDialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        else
+        {
+            ImGui::Checkbox("Use vision model", &segSettings.useModel);
+            ImGui::BeginDisabled(!segSettings.useModel);
+            ImGui::InputText("Server (Ollama)", segServer, sizeof(segServer));
+            ImGui::InputText("Model", segModel, sizeof(segModel));
+            ImGui::EndDisabled();
+            if (!segSettings.useModel)
+                ImGui::TextDisabled("Without the model, classes come from colour and height only.");
+
+            ImGui::Spacing();
+            ImGui::InputDouble("Resolution (m/pixel)", &segSettings.metresPerPixel, 0.05, 0.25, "%.2f");
+            ImGui::InputDouble("Ground search radius (m)", &segSettings.groundRadius, 5, 20, "%.0f");
+            ImGui::InputDouble("Raised above ground (m)", &segSettings.raisedHeight, 0.1, 0.5, "%.1f");
+            segSettings.metresPerPixel = std::clamp(segSettings.metresPerPixel, 0.05, 5.0);
+            segSettings.groundRadius = std::clamp(segSettings.groundRadius, 5.0, 500.0);
+            segSettings.raisedHeight = std::clamp(segSettings.raisedHeight, 0.3, 20.0);
+            ImGui::TextDisabled("The radius must exceed half the width of the largest building.");
+            ImGui::TextDisabled("Debug images and log: %s", segSettings.debugDir.c_str());
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            if (ImGui::Button("Segment", ImVec2(140, 0)))
+            {
+                segSettings.server = segServer;
+                segSettings.model = segModel;
+                wantStartSegment = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close", ImVec2(140, 0)))
+            {
+                showSegmentDialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
 
 void MeshToolUI::DrawRefPointDialog()
 {

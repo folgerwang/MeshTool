@@ -529,6 +529,10 @@ bool ExportGltfMeshFile(const string& file_name, const vector<BatchMeshData*>& b
                 int32_t material_idx = tex_file_name.empty() ? -1 : gltf.GetMaterial(tex_file_name, embed, gltf_dir, textures_rel_dir);
 
                 string mesh_idx_string = to_string(iMeshBatch) + "_" + to_string(iMeshGroup) + "_" + to_string(iMesh);
+                // Segmented scenes: name parts after their object (building_012_...).
+                const GroupMeshData* group = batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup];
+                if (mesh_data->object_id >= 0 && size_t(mesh_data->object_id) < group->objects.size())
+                    mesh_idx_string = group->objects[size_t(mesh_data->object_id)].name + "_" + mesh_idx_string;
                 string primitive = "{\"attributes\":{" + attributes + "},\"indices\":" + to_string(idx_acc) + ",\"mode\":4";
                 if (material_idx >= 0)
                 {

@@ -9,7 +9,7 @@
 namespace
 {
     const char     kMagic[8] = { 'M', 'T', 'S', 'C', 'E', 'N', 'E', '\0' };
-    const uint32_t kVersion = 2;          // 2: per-batch georeferenced flag
+    const uint32_t kVersion = 3;          // 2: per-batch georeferenced flag, 3: segmented objects
     const uint32_t kOldestVersion = 1;
 
     // Sanity limits so a corrupt file fails cleanly instead of allocating wildly.
@@ -91,6 +91,7 @@ namespace
         uint32_t n = m->num_vertex > 0 && m->vertex_list ? uint32_t(m->num_vertex) : 0;
         w.pod(n);
         w.pod(m->idx_in_texture_list);
+        w.pod(m->object_id);
         w.pod(m->translation.x); w.pod(m->translation.y); w.pod(m->translation.z);
         uint8_t has_uv = (n && m->uv_list) ? 1 : 0;
         uint8_t has_color = (n && m->color_list) ? 1 : 0;
@@ -114,12 +115,14 @@ namespace
         }
     }
 
-    MeshData* ReadMesh(Reader& r)
+    MeshData* ReadMesh(Reader& r, uint32_t version)
     {
         MeshData* m = new MeshData;
         uint32_t n = r.count();
         m->num_vertex = int32_t(n);
         m->idx_in_texture_list = r.pod<uint32_t>();
+        if (version >= 3)
+            m->object_id = r.pod<int32_t>();
         double t[3] = { r.pod<double>(), r.pod<double>(), r.pod<double>() };
         m->translation = core::vec3d(t[0], t[1], t[2]);
         uint8_t has_uv = r.pod<uint8_t>();
@@ -218,6 +221,14 @@ bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batch
             w.pod(num_meshes);
             for (const MeshData* m : g->meshes)
                 if (m) WriteMesh(w, m);
+
+            w.pod(uint32_t(g->objects.size()));
+            for (const SceneObject& o : g->objects)
+            {
+                w.pod(uint32_t(o.name.size()));
+                w.bytes(o.name.data(), o.name.size());
+                w.pod(uint8_t(o.cls));
+            }
         }
     }
 
@@ -273,10 +284,31 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
             uint32_t num_meshes = r.count(1u << 24);
             for (uint32_t mi = 0; mi < num_meshes && r.ok; mi++)
             {
-                MeshData* m = ReadMesh(r);
+                MeshData* m = ReadMesh(r, version);
                 g->meshes.push_back(m);
                 if (m->bbox_ws.b_valid)
                     g->bbox_ws += m->bbox_ws;
+            }
+            if (version >= 3)
+            {
+                uint32_t num_objects = r.count(1u << 24);
+                for (uint32_t oi = 0; oi < num_objects && r.ok; oi++)
+                {
+                    SceneObject o;
+                    uint32_t len = r.count(4096);
+                    o.name.resize(len);
+                    r.bytes(o.name.data(), len);
+                    uint8_t cls = r.pod<uint8_t>();
+                    o.cls = cls < kObjClassCount ? ObjectClass(cls) : kObjUnknown;
+                    g->objects.push_back(std::move(o));
+                }
+                // Object bounds are derived, not stored.
+                for (MeshData* m : g->meshes)
+                {
+                    if (m->object_id >= int32_t(g->objects.size())) m->object_id = -1;
+                    if (m->object_id >= 0 && m->bbox_ws.b_valid)
+                        g->objects[size_t(m->object_id)].bbox_ws += m->bbox_ws;
+                }
             }
             if (g->bbox_ws.b_valid)
                 b->bbox_ws += g->bbox_ws;

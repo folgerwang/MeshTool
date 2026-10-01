@@ -160,6 +160,7 @@ struct MeshData : public core::Primitive
     unique_ptr<core::vec2f[]> uv_list;
     unique_ptr<uint32_t[]> color_list;
     vector<DrawCallInfo> draw_call_list;
+    int32_t         object_id = -1;     // index into the owning group's objects, -1 = none
 
     MeshData() : num_vertex(0),
                  idx_in_texture_list(INVALID_VALUE),
@@ -194,6 +195,29 @@ struct MeshData : public core::Primitive
     }
 };
 
+// Semantic class of a segmented scene object.
+enum ObjectClass : uint8_t
+{
+    kObjUnknown = 0,
+    kObjGround,         // sidewalk, plaza, parking, bare ground
+    kObjRoad,
+    kObjBuilding,
+    kObjCar,
+    kObjTree,
+    kObjPlants,         // grass, shrubs, low vegetation
+    kObjWater,
+    kObjClassCount
+};
+
+// One segmented object (a building, a tree, all road surface, ...). Its
+// geometry is the group's meshes whose object_id is this object's index.
+struct SceneObject
+{
+    string          name;               // e.g. "building_012", "road"
+    ObjectClass     cls = kObjUnknown;
+    core::bounds3d  bbox_ws;
+};
+
 struct GroupMeshData
 {
     core::bounds3d          bbox_ws;
@@ -201,6 +225,7 @@ struct GroupMeshData
     vector<MeshData*>       meshes;
     vector<core::Texture2DInfo*> loaded_textures;
     vector<shared_ptr<string>> texture_names;
+    vector<SceneObject>     objects;    // filled by segmentation
 
     void remove_item(uint32_t index)
     {

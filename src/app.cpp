@@ -21,6 +21,7 @@
 #include "coretexture.h"
 #include "scenefile.h"
 #include "geoview.h"
+#include "segmenter.h"
 #include <GeographicLib/LocalCartesian.hpp>
 #include "coregeographic.h"
 #include "viewcamera.h"
@@ -263,6 +264,8 @@ void MeshToolApp::MainLoop()
         drawFrame.refPos[1] = eyePos.y;
         drawFrame.refPos[2] = eyePos.z;
         drawFrame.scale = 1.0f;
+        drawFrame.classColors = m_ui->classColors;
+        drawFrame.classVisible = m_ui->classVisible;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
         // Render ImGui draw data
@@ -277,6 +280,12 @@ void MeshToolApp::MainLoop()
 // ---------------------------------------------------------------------------
 // Process UI-requested actions
 // ---------------------------------------------------------------------------
+
+void MeshToolApp::OpenOnStart(const std::string& path)
+{
+    if (m_ui)
+        m_ui->pendingOpenScenePath = path;   // opened on the first frame
+}
 
 void MeshToolApp::UpdateGeoReadout()
 {
@@ -362,8 +371,103 @@ void MeshToolApp::ClearScene()
     RecomputeWorldBounds();
 }
 
+void MeshToolApp::UpdateSegmentation()
+{
+    if (!m_segmenter)
+        m_segmenter = std::make_unique<Segmenter>();
+
+    if (m_ui->wantCancelSegment)
+    {
+        m_ui->wantCancelSegment = false;
+        m_segmenter->Cancel();
+    }
+
+    if (m_ui->wantStartSegment)
+    {
+        m_ui->wantStartSegment = false;
+        if (m_segmenter->Running())
+            return;
+
+        // Segment the batch with the most geometry, plus any batch in the
+        // same coordinate frame (same GPS origin); spline batches are not
+        // captured surfaces.
+        const BatchMeshData* primary = nullptr;
+        size_t best = 0;
+        for (const BatchMeshData* b : g_world.mesh_data_batches)
+        {
+            if (!b || b->is_spline_mesh) continue;
+            size_t n = 0;
+            for (const GroupMeshData* g : b->group_meshes)
+                for (const MeshData* m : g->meshes) n += size_t(std::max(m->num_vertex, 0));
+            if (n > best) { best = n; primary = b; }
+        }
+        std::vector<GroupMeshData*> groups;
+        for (BatchMeshData* b : g_world.mesh_data_batches)
+        {
+            if (!b || !primary || b->is_spline_mesh) continue;
+            bool same_frame = b == primary ||
+                (b->is_georeferenced && primary->is_georeferenced &&
+                 b->reference_pos.x == primary->reference_pos.x && b->reference_pos.y == primary->reference_pos.y);
+            if (same_frame)
+                groups.insert(groups.end(), b->group_meshes.begin(), b->group_meshes.end());
+        }
+        if (groups.empty())
+        {
+            m_ui->statusMessage = "Nothing to segment.";
+            m_ui->statusTimeout = 5.0f;
+            return;
+        }
+        m_segmenter->Start(groups, m_ui->segSettings);
+    }
+
+    m_ui->segRunning = m_segmenter->Running();
+    if (m_ui->segRunning)
+    {
+        m_ui->segProgress = m_segmenter->Progress();
+        m_ui->segStatus = m_segmenter->Status();
+        return;
+    }
+
+    std::unique_ptr<SegmentResult> result = m_segmenter->TakeResult();
+    if (!result)
+        return;
+    if (!result->ok)
+    {
+        m_ui->statusMessage = "Segmentation: " + result->error;
+        m_ui->statusTimeout = 12.0f;
+        return;
+    }
+
+    // Split meshes into per-object meshes; the old ones may be on the GPU.
+    vkDeviceWaitIdle(m_renderer->GetContext().device);
+    std::vector<MeshData*> replaced = ApplySegmentation(*result);
+    for (MeshData* m : replaced)
+    {
+        m_meshRenderer->ReleaseMesh(m);
+        delete m;
+    }
+    std::set<GroupMeshData*> touched;
+    for (const SegmentResult::MeshAssign& a : result->assignments)
+        touched.insert(a.group);
+    for (GroupMeshData* g : touched)
+        UploadGroupTextures(g);   // new meshes reuse the uploaded textures
+    // The capture merger tracks tiles by mesh; those meshes are gone.
+    if (m_ui->captureProcessor)
+        m_ui->captureProcessor->ResetMerge();
+
+    m_ui->classColors = true;
+    m_ui->statusMessage = result->summary;
+    m_ui->statusTimeout = 15.0f;
+}
+
 void MeshToolApp::OpenScene(const std::string& path)
 {
+    if (m_segmenter && m_segmenter->Running())
+    {
+        m_ui->statusMessage = "Wait for segmentation to finish (or cancel it) before opening a scene.";
+        m_ui->statusTimeout = 6.0f;
+        return;
+    }
     std::vector<BatchMeshData*> loaded;
     std::string error;
     if (!LoadScene(path, loaded, error))
@@ -520,9 +624,14 @@ void MeshToolApp::ProcessPendingActions()
         }
     }
 
+    UpdateSegmentation();
+    const bool segmenting = m_segmenter && m_segmenter->Running();
+
     // A finished capture, requested here or with F12 inside Google Earth.
+    // While segmentation reads the meshes, captures stay queued in the hook's
+    // buffer (the event stays signalled) and are picked up afterwards.
     HANDLE readyEvent = m_processManager ? m_processManager->GetReadyEvent() : nullptr;
-    if (readyEvent && m_ui->captureProcessor && WaitForSingleObject(readyEvent, 0) == WAIT_OBJECT_0)
+    if (!segmenting && readyEvent && m_ui->captureProcessor && WaitForSingleObject(readyEvent, 0) == WAIT_OBJECT_0)
     {
         m_capturePending = false;
 
@@ -567,12 +676,13 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->statusTimeout = 6.0f;
         }
     }
-    else if (m_capturePending && glfwGetTime() - m_captureRequestTime > 10.0)
+    else if (!segmenting && m_capturePending && glfwGetTime() - m_captureRequestTime > 10.0)
     {
         m_capturePending = false;
         m_ui->statusMessage = "Timed out waiting for frame capture.";
         m_ui->statusTimeout = 5.0f;
     }
+    m_ui->captureWaiting = m_capturePending;
 
     if (m_ui->wantStopCapture)
     {
@@ -642,6 +752,8 @@ void MeshToolApp::SaveConfig()
 
 void MeshToolApp::Shutdown()
 {
+    m_segmenter.reset();   // cancels and joins a running segmentation
+
     SaveConfig();
 
     if (m_renderer)

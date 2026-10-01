@@ -22,6 +22,11 @@ namespace core {
 struct MeshDrawFrame {
     double refPos[3] = { 0.0, 0.0, 0.0 };
     float  scale = 1.0f;
+
+    // Segmented scenes: colour meshes by object class instead of texture, and
+    // skip classes switched off (indexed by ObjectClass; nullptr = all shown).
+    bool        classColors = false;
+    const bool* classVisible = nullptr;
 };
 
 // Per-mesh GPU resources
@@ -58,7 +63,9 @@ public:
     // Draw functions
     void DrawBatchMeshes(VkCommandBuffer cmd, const std::vector<BatchMeshData*>& batches,
                          const float* viewProjMatrix, const MeshDrawFrame& frame, bool culling);
-    void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame);
+    // flatColor: draw untextured in this RGB colour instead (nullptr = textured).
+    void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame,
+                  const float* flatColor = nullptr);
     void DrawQuad(VkCommandBuffer cmd, float x, float y, float w, float h, uint32_t texHandle);
 
 private:

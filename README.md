@@ -69,6 +69,30 @@ Capture), then Capture Frame or F12 inside Google Earth.
 - Diagnostics: `C:\Users\Public\meshtool_capture.log` (placement, GPS checks,
   LOD filter) and `C:\Users\Public\meshtool_proxy.log` (hook side).
 
+## Segmentation
+
+Tools > Segment Scene splits the scene into objects: each building, tree and
+car on its own (`building_012`, `tree_007`, `car_003`), plus one object each
+for road, plants, water and other ground. Needs [Ollama](https://ollama.com)
+with a vision model (default `qwen3.8:latest`); without it, classes come from
+colour and height only.
+
+1. The mesh is rendered top-down (0.25 m/pixel): colour, height, coverage.
+2. A ground model (lowest points flooded across max-35% slopes, local plane
+   fits) gives height above ground - exact on slopes and hills.
+3. Raised areas split into instances at height breaks; ground split into
+   colour regions.
+4. The model labels numbered regions on 768 px tiles, told which are raised;
+   answers are schema-constrained JSON.
+5. Triangles join the object under them (walls via height above ground) and
+   meshes are split per object. Objects are saved in `.mtscene` and name the
+   glTF nodes.
+
+Scene panel > Objects: colour by class, show/hide classes. Debug images
+(orthophoto, regions, classes, marked tiles) and a log go to
+`C:\Users\Public\meshtool_segment\`. Headless:
+`MeshTool.exe --segment in.mtscene out.mtscene [--no-model] [--res m]`.
+
 ## Scene files
 
 File > Save Scene / Open Scene (Ctrl+S / Ctrl+O): `.mtscene`, MeshTool's
