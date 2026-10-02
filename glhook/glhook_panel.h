@@ -36,6 +36,7 @@ struct PanelStatus
     bool         overflow;        // ring buffer overflowed, records were dropped
     int          frame;
     float        flash;           // 0..1, cyan border around the view (capture feedback)
+    unsigned     capture_gate;    // GLCAPTURE_GATE_*: hotkey hint ready / wait
 };
 
 typedef void* (__stdcall *PFN_PanelGetProcAddress)(const char*);

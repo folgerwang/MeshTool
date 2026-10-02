@@ -380,7 +380,13 @@ void PanelDraw(void* hdc, HMODULE opengl32, PFN_PanelGetProcAddress get_proc, co
             Text(px + 20, py + 222, sc * 0.6f, buf, 1.0f, 0.35f, 0.3f, a);
         else
             Text(px + 20, py + 222, sc * 0.6f, buf, 0.5f, 0.5f, 0.6f, a);
-        Text(px + pw - 20 - 12 * 6.0f * sc * 0.6f, py + 222, sc * 0.6f, "F12: CAPTURE", 0.45f, 0.45f, 0.55f, a);
+        // Hotkey hint; while GE follows MeshTool's viewport, whether a capture
+        // would be kept (GE settled on the viewport camera) or ignored.
+        const char* hint = "F12: CAPTURE";
+        float hr = 0.45f, hg = 0.45f, hb = 0.55f;
+        if (status.capture_gate == 1)      { hint = "F12: CAPTURE READY";   hr = 0.35f; hg = 0.9f;  hb = 0.4f; }
+        else if (status.capture_gate == 2) { hint = "F12: WAIT - SETTLING"; hr = 1.0f;  hg = 0.75f; hb = 0.25f; }
+        Text(px + pw - 20 - float(strlen(hint)) * 6.0f * sc * 0.6f, py + 222, sc * 0.6f, hint, hr, hg, hb, a);
 
         // Shared buffer bar (thin)
         Rect(bx, py + 254, bw, 6, 0.2f, 0.2f, 0.25f, a);

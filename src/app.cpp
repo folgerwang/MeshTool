@@ -539,6 +539,9 @@ void MeshToolApp::UpdateGeFollow()
     m_ui->statusTimeout = 3.0f;
     m_followSentEye = eye;
     m_followSentFwd = fwd;
+    m_followSentLat = lat;
+    m_followSentLon = lon;
+    m_followSentAlt = h;
     m_followSent = true;
 }
 
@@ -549,21 +552,81 @@ bool MeshToolApp::CaptureSettled()
         return true;   // not following (no GPS scene yet: the first capture must be possible)
 
     // GE needs time to stream the tiles of the new view after it stops.
-    const double kSettle = 1.5;   // seconds after GE reports its camera at rest
+    const double kSettle = 1.5;      // seconds after GE is at the camera
+    const double kNoReport = 4.0;    // GE reports a view only when it moved and stopped
     const double now = glfwGetTime();
     double delivered = 0.0;
-    if (now - m_followMoveTime < 0.25 || !m_followSent || m_geoServer->FollowPending(&delivered))
+    const bool pending = m_geoServer->FollowPending(&delivered);
+    if (now - m_followMoveTime < 0.25 || !m_followSent || pending)
     {
-        m_ui->captureGate = "viewport camera moving";
+        m_ui->captureGate = pending ? "camera not yet picked up by Google Earth" : "viewport camera moving";
+        static double lastLog = 0.0;
+        if (now - lastLog > 2.0)
+        {
+            lastLog = now;
+            if (FILE* f = fopen("C:\\Users\\Public\\meshtool_capture.log", "a"))
+            {
+                fprintf(f, "  [gate] now %.2f  moved %.2f s ago  sent %d  pending %d  last GE poll %.2f s ago\n",
+                        now, now - m_followMoveTime, int(m_followSent), int(pending),
+                        now - m_geoServer->LastFollowPoll());
+                fclose(f);
+            }
+        }
         return false;
     }
+
+    // When did GE's camera stop moving? Each report that differs from the
+    // previous one restarts the clock.
     const GeoView view = m_geoServer->Latest();
-    if (!view.valid || view.time <= delivered)
+    auto metresApart = [](double lat0, double lon0, double alt0, double lat1, double lon1, double alt1) {
+        GeographicLib::LocalCartesian at(lat0, lon0, alt0);
+        double e, n, u;
+        at.Forward(lat1, lon1, alt1, e, n, u);
+        return sqrt(e * e + n * n + u * u);
+    };
+    if (view.valid && view.time != m_geCamTime)
+    {
+        if (m_geCamTime < 0.0 ||
+            metresApart(m_geCamLat, m_geCamLon, m_geCamAlt, view.camLat, view.camLon, view.camAlt) > 0.2)
+            m_geStillSince = view.time;
+        m_geCamLat = view.camLat;
+        m_geCamLon = view.camLon;
+        m_geCamAlt = view.camAlt;
+        m_geCamTime = view.time;
+    }
+
+    // GE is at the camera once its camera is the one sent (since it stopped
+    // there); if it rests elsewhere (e.g. kept above terrain), once it has
+    // rested kNoReport; with no reports at all, kNoReport after delivery.
+    double atCamera = -1.0;   // glfwGetTime() GE was known to be at the camera
+    if (view.valid &&
+        metresApart(m_followSentLat, m_followSentLon, m_followSentAlt, view.camLat, view.camLon, view.camAlt) < 2.0)
+        atCamera = (std::max)(m_geStillSince, delivered);
+    else if (view.valid && view.time > delivered && m_geStillSince > delivered && now - m_geStillSince >= kNoReport)
+        atCamera = m_geStillSince + kNoReport - kSettle;
+    else if (!(view.valid && view.time > delivered) && now - delivered >= kNoReport)
+        atCamera = delivered + kNoReport - kSettle;
+
+    // Diagnostics (capture log): what the gate sees, every 2 s while waiting.
+    static double lastLog = 0.0;
+    if (now - lastLog > 2.0 && (atCamera < 0.0 || now - atCamera < kSettle))
+    {
+        lastLog = now;
+        if (FILE* f = fopen("C:\\Users\\Public\\meshtool_capture.log", "a"))
+        {
+            fprintf(f, "  [gate] now %.2f  moved %.2f s ago  sent %d  delivered %.2f  view valid %d time %.2f  "
+                       "cam %.7f, %.7f, %.1f  sent cam %.7f, %.7f, %.1f  atCamera %.2f\n",
+                    now, now - m_followMoveTime, int(m_followSent), delivered, int(view.valid), view.time,
+                    view.camLat, view.camLon, view.camAlt, m_followSentLat, m_followSentLon, m_followSentAlt, atCamera);
+            fclose(f);
+        }
+    }
+    if (atCamera < 0.0)
     {
         m_ui->captureGate = "Google Earth flying to the viewport camera";
         return false;
     }
-    if (now - view.time < kSettle)
+    if (now - atCamera < kSettle)
     {
         m_ui->captureGate = "Google Earth loading the view";
         return false;
@@ -1293,6 +1356,11 @@ void MeshToolApp::ProcessPendingActions()
     }
 
     const bool captureSettled = CaptureSettled();
+    // Tell the hook, for its F12 hint and to ignore F12 while GE settles.
+    if (GLCaptureHeader* hdr = m_processManager ? m_processManager->GetHeader() : nullptr)
+        hdr->capture_gate = !m_ui->geFollowViewport || !GeoreferencedBatch() ? GLCAPTURE_GATE_NONE
+                            : captureSettled                                 ? GLCAPTURE_GATE_READY
+                                                                             : GLCAPTURE_GATE_WAIT;
     if (m_ui->wantCaptureFrame)
     {
         m_ui->wantCaptureFrame = false;

@@ -40,7 +40,19 @@ struct GLCaptureHeader
     uint32_t            gl_version_major;
     uint32_t            gl_version_minor;
     uint32_t            pid;                // Google Earth process ID
-    uint32_t            _reserved[53];      // Pad header to 256 bytes used, rest is spare
+
+    // Written by consumer (MeshTool): may F12 capture now? (GLCAPTURE_GATE_*)
+    volatile uint32_t   capture_gate;
+    uint32_t            _reserved[52];      // Pad header to 256 bytes used, rest is spare
+};
+
+// capture_gate: while Google Earth follows MeshTool's viewport, a capture is
+// only useful once GE has flown to the viewport camera and loaded the view.
+enum : uint32_t
+{
+    GLCAPTURE_GATE_NONE  = 0,   // not following: F12 always captures
+    GLCAPTURE_GATE_READY = 1,   // following, GE settled: F12 captures
+    GLCAPTURE_GATE_WAIT  = 2,   // following, GE still moving/loading: F12 ignored
 };
 
 // Command record IDs

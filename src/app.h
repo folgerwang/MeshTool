@@ -92,6 +92,11 @@ private:
     void UpdateGeFollow();
     core::vec3d m_followPrevEye, m_followPrevFwd;   // last frame's camera
     core::vec3d m_followSentEye, m_followSentFwd;   // camera last sent to GE
+    double      m_followSentLat = 0.0, m_followSentLon = 0.0, m_followSentAlt = 0.0;   // ... as GE gets it
+    // GE's reported camera and since when it hasn't changed (GE reports its
+    // view about once a second, moving or not).
+    double      m_geCamLat = 0.0, m_geCamLon = 0.0, m_geCamAlt = 0.0;
+    double      m_geCamTime = -1.0, m_geStillSince = 0.0;
     double      m_followMoveTime = 0.0;             // glfwGetTime() of the last camera change
     bool        m_followSent = false;
     bool        m_followWasOn = false;
