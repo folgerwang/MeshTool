@@ -9,6 +9,8 @@
 #include <cstring>
 #include <algorithm>
 #include <set>
+#include <cmath>
+#include <limits>
 
 #include <vulkan/vulkan.h>
 #include "imgui.h"
@@ -22,6 +24,7 @@
 #include "scenefile.h"
 #include "geoview.h"
 #include "segmenter.h"
+#include "objectclass.h"
 #include <GeographicLib/LocalCartesian.hpp>
 #include "coregeographic.h"
 #include "viewcamera.h"
@@ -222,6 +225,7 @@ void MeshToolApp::MainLoop()
         m_camera->Update(m_window, m_input->GetState().scrollDelta, vpRect,
                          ImGui::GetIO().WantCaptureMouse, dt);
         UpdateGeoReadout();
+        UpdateSelection();
 
         ImGui::Render();
 
@@ -265,6 +269,19 @@ void MeshToolApp::MainLoop()
         drawFrame.refPos[2] = eyePos.z;
         drawFrame.scale = 1.0f;
         drawFrame.classColors = m_ui->classColors;
+        drawFrame.buildingColors = m_ui->buildingColors;
+        drawFrame.selGroup = m_selGroup;
+        drawFrame.selObject = m_selObject;
+        drawFrame.selMesh = m_selMesh;
+        drawFrame.isolateSelection = m_ui->isolateSelection;
+        drawFrame.selActual = m_ui->selectionView == MeshToolUI::kSelActual;
+        {
+            // Pulse between yellow and white so the selection stands out in any colour mode.
+            float k = 0.5f + 0.5f * float(sin(glfwGetTime() * 5.0));
+            drawFrame.selColor[0] = 1.0f;
+            drawFrame.selColor[1] = 0.80f + 0.20f * k;
+            drawFrame.selColor[2] = 0.05f + 0.75f * k;
+        }
         drawFrame.classVisible = m_ui->classVisible;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
@@ -331,6 +348,8 @@ void MeshToolApp::ReleaseGroup(GroupMeshData* group)
     // Caller has waited for the GPU to go idle.
     if (!group)
         return;
+    if (group == m_selGroup)
+        ClearSelection();
     for (MeshData* mesh : group->meshes)
     {
         if (!mesh) continue;
@@ -440,6 +459,7 @@ void MeshToolApp::UpdateSegmentation()
 
     // Split meshes into per-object meshes; the old ones may be on the GPU.
     vkDeviceWaitIdle(m_renderer->GetContext().device);
+    ClearSelection();   // object indices and meshes are about to change
     std::vector<MeshData*> replaced = ApplySegmentation(*result);
     for (MeshData* m : replaced)
     {
@@ -570,6 +590,332 @@ void MeshToolApp::FrameBounds(const core::bounds3d& bbox)
     m_camera->Frame(bbox, aspectX);
 }
 
+// ---------------------------------------------------------------------------
+// Object selection (click in the viewport) and its debug view
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Ray vs axis-aligned box; true when it enters the box before maxT.
+bool RayHitsBox(const core::vec3d& o, const core::vec3d& d, const core::bounds3d& b, double maxT)
+{
+    double t0 = 0.0, t1 = maxT;
+    const double ro[3] = { o.x, o.y, o.z }, rd[3] = { d.x, d.y, d.z };
+    const double lo[3] = { b.bb_min.x, b.bb_min.y, b.bb_min.z }, hi[3] = { b.bb_max.x, b.bb_max.y, b.bb_max.z };
+    const double margin = 1e-3;
+    for (int a = 0; a < 3; a++)
+    {
+        if (fabs(rd[a]) < 1e-12)
+        {
+            if (ro[a] < lo[a] - margin || ro[a] > hi[a] + margin) return false;
+            continue;
+        }
+        double inv = 1.0 / rd[a];
+        double ta = (lo[a] - margin - ro[a]) * inv, tb = (hi[a] + margin - ro[a]) * inv;
+        if (ta > tb) std::swap(ta, tb);
+        t0 = (std::max)(t0, ta);
+        t1 = (std::min)(t1, tb);
+        if (t0 > t1) return false;
+    }
+    return true;
+}
+
+// Moller-Trumbore, both faces; distance along d, or -1 for a miss.
+double RayTriangle(const core::vec3d& o, const core::vec3d& d,
+                   const core::vec3d& a, const core::vec3d& b, const core::vec3d& c)
+{
+    core::vec3d e1 = b - a, e2 = c - a;
+    core::vec3d p = cross(d, e2);
+    double det = dot(e1, p);
+    if (fabs(det) < 1e-12) return -1.0;
+    double inv = 1.0 / det;
+    core::vec3d s = o - a;
+    double u = dot(s, p) * inv;
+    if (u < 0.0 || u > 1.0) return -1.0;
+    core::vec3d q = cross(s, e1);
+    double v = dot(d, q) * inv;
+    if (v < 0.0 || u + v > 1.0) return -1.0;
+    double t = dot(e2, q) * inv;
+    return t > 0.0 ? t : -1.0;
+}
+
+ObjectClass MeshClass(const GroupMeshData* group, const MeshData* mesh)
+{
+    if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
+        return group->objects[size_t(mesh->object_id)].cls;
+    return kObjUnknown;
+}
+
+size_t TriangleCount(const MeshData* mesh)
+{
+    size_t n = 0;
+    for (const DrawCallInfo& dc : mesh->draw_call_list)
+    {
+        int idx = dc.get_index_count();
+        n += size_t(dc.get_primitive_type() == kGlTriangleStrip ? (std::max)(idx - 2, 0) : idx / 3);
+    }
+    return n;
+}
+
+} // namespace
+
+void MeshToolApp::ClearSelection()
+{
+    m_selGroup = nullptr;
+    m_selObject = -1;
+    m_selMesh = nullptr;
+    if (m_ui)
+        m_ui->selection = MeshToolUI::SelectionInfo();
+}
+
+bool MeshToolApp::SelectionBounds(core::bounds3d& box, int* meshes, size_t* triangles) const
+{
+    box.Reset();
+    if (!m_selGroup)
+        return false;
+    int count = 0;
+    size_t tris = 0;
+    for (const MeshData* mesh : m_selGroup->meshes)
+    {
+        if (!mesh || (m_selMesh ? mesh != m_selMesh : mesh->object_id != m_selObject))
+            continue;
+        if (mesh->bbox_ws.b_valid) box += mesh->bbox_ws;
+        count++;
+        tris += TriangleCount(mesh);
+    }
+    if (meshes) *meshes = count;
+    if (triangles) *triangles = tris;
+    return count > 0 && box.b_valid;
+}
+
+void MeshToolApp::PickAt(float mouseX, float mouseY)
+{
+    const double vw = (std::max)(m_ui->viewportW, 1.0f), vh = (std::max)(m_ui->viewportH, 1.0f);
+    const double ndcX = 2.0 * (mouseX - m_ui->viewportX) / vw - 1.0;
+    const double ndcY = 1.0 - 2.0 * (mouseY - m_ui->viewportY) / vh;   // +1 = top
+    const double tanHalf = tan(m_camera->fovY * 0.5);
+    const core::vec3d eye = m_camera->Eye();
+    core::vec3d dir = m_camera->Forward() + m_camera->Right() * (ndcX * tanHalf * vw / vh) +
+                      m_camera->Up() * (ndcY * tanHalf);
+    dir = dir * (1.0 / length(dir));
+
+    double best = std::numeric_limits<double>::max();
+    BatchMeshData* bestBatch = nullptr;
+    GroupMeshData* bestGroup = nullptr;
+    MeshData* bestMesh = nullptr;
+    for (BatchMeshData* batch : g_world.mesh_data_batches)
+    {
+        if (!batch) continue;
+        for (GroupMeshData* group : batch->group_meshes)
+        {
+            if (!group) continue;
+            for (MeshData* mesh : group->meshes)
+            {
+                // Only what is drawn can be clicked.
+                if (!mesh || !mesh->vertex_list || mesh->num_vertex <= 0) continue;
+                if (!m_ui->classVisible[MeshClass(group, mesh)]) continue;
+                if (m_ui->isolateSelection && m_selGroup &&
+                    !(group == m_selGroup && (m_selMesh ? mesh == m_selMesh : mesh->object_id == m_selObject)))
+                    continue;
+                if (mesh->bbox_ws.b_valid && !RayHitsBox(eye, dir, mesh->bbox_ws, best)) continue;
+
+                const core::vec3d o = eye - mesh->translation;   // ray in mesh-local coordinates
+                auto vert = [&](uint32_t i) {
+                    const core::vec3f& v = mesh->vertex_list[i];
+                    return core::vec3d(v.x, v.y, v.z);
+                };
+                for (const DrawCallInfo& dc : mesh->draw_call_list)
+                {
+                    if (!dc.is_drawable()) continue;
+                    const int n = dc.get_index_count();
+                    const bool strip = dc.get_primitive_type() == kGlTriangleStrip;
+                    const int tris = strip ? n - 2 : n / 3;
+                    for (int k = 0; k < tris; k++)
+                    {
+                        const int b = strip ? k : k * 3;
+                        uint32_t i0 = dc.get_index(b), i1 = dc.get_index(b + 1), i2 = dc.get_index(b + 2);
+                        if (i0 >= uint32_t(mesh->num_vertex) || i1 >= uint32_t(mesh->num_vertex) ||
+                            i2 >= uint32_t(mesh->num_vertex))
+                            continue;   // strip restart or bad index
+                        double t = RayTriangle(o, dir, vert(i0), vert(i1), vert(i2));
+                        if (t > 0.0 && t < best)
+                        {
+                            best = t;
+                            bestBatch = batch;
+                            bestGroup = group;
+                            bestMesh = mesh;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!bestMesh)
+    {
+        ClearSelection();   // clicked empty space
+        return;
+    }
+
+    m_selGroup = bestGroup;
+    if (bestMesh->object_id >= 0 && size_t(bestMesh->object_id) < bestGroup->objects.size())
+    {
+        m_selObject = bestMesh->object_id;
+        m_selMesh = nullptr;
+    }
+    else
+    {
+        m_selObject = -1;
+        m_selMesh = bestMesh;
+    }
+
+    MeshToolUI::SelectionInfo& info = m_ui->selection;
+    info = MeshToolUI::SelectionInfo();
+    info.active = true;
+    info.name = m_selMesh ? "mesh (not segmented)" : bestGroup->objects[size_t(m_selObject)].name;
+    info.className = m_selMesh ? "-" : GetObjectClassInfo(MeshClass(bestGroup, bestMesh)).name;
+    core::bounds3d box;
+    SelectionBounds(box, &info.meshes, &info.triangles);
+    if (box.b_valid)
+    {
+        info.size[0] = box.bb_max.x - box.bb_min.x;
+        info.size[1] = box.bb_max.y - box.bb_min.y;
+        info.size[2] = box.bb_max.z - box.bb_min.z;
+    }
+    const core::vec3d hit = eye + dir * best;
+    info.hit[0] = hit.x; info.hit[1] = hit.y; info.hit[2] = hit.z;
+    if (bestBatch->is_georeferenced)
+    {
+        GeographicLib::LocalCartesian local(bestBatch->reference_pos.y, bestBatch->reference_pos.x, 0.0);
+        double lat, lon, h;
+        local.Reverse(hit.x, hit.y, hit.z, lat, lon, h);
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%.7f, %.7f   %.1f m", lat, lon, h);
+        info.gpsText = buf;
+    }
+}
+
+void MeshToolApp::UpdateSelection()
+{
+    if (m_ui->wantClearSelection)
+    {
+        m_ui->wantClearSelection = false;
+        ClearSelection();
+    }
+
+    // A click (press and release without dragging) in the viewport, not over
+    // UI and not part of a camera move.
+    ImGuiIO& io = ImGui::GetIO();
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !io.WantCaptureMouse && !io.KeyAlt &&
+        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 16.0f)
+    {
+        const ImVec2 p = io.MouseClickedPos[ImGuiMouseButton_Left];
+        if (p.x >= m_ui->viewportX && p.y >= m_ui->viewportY &&
+            p.x < m_ui->viewportX + m_ui->viewportW && p.y < m_ui->viewportY + m_ui->viewportH)
+            PickAt(p.x, p.y);
+    }
+
+    // Still in the scene? Captures and scene loads replace groups and meshes.
+    if (m_selGroup)
+    {
+        bool found = false;
+        for (const BatchMeshData* batch : g_world.mesh_data_batches)
+            if (batch && std::find(batch->group_meshes.begin(), batch->group_meshes.end(), m_selGroup) != batch->group_meshes.end())
+                found = true;
+        if (found && m_selMesh)
+            found = std::find(m_selGroup->meshes.begin(), m_selGroup->meshes.end(), m_selMesh) != m_selGroup->meshes.end();
+        if (found && !m_selMesh)
+            found = m_selObject >= 0 && size_t(m_selObject) < m_selGroup->objects.size();
+        if (!found)
+            ClearSelection();
+    }
+    if (!m_selGroup)
+    {
+        m_ui->wantFrameSelection = false;
+        return;
+    }
+
+    if (m_ui->wantFrameSelection)
+    {
+        m_ui->wantFrameSelection = false;
+        core::bounds3d box;
+        if (SelectionBounds(box))
+            FrameBounds(box);
+    }
+
+    DrawSelectionOverlay();
+}
+
+void MeshToolApp::DrawSelectionOverlay()
+{
+    core::bounds3d box;
+    if (!SelectionBounds(box))
+        return;
+
+    const float vx = m_ui->viewportX, vy = m_ui->viewportY;
+    const float vw = (std::max)(m_ui->viewportW, 1.0f), vh = (std::max)(m_ui->viewportH, 1.0f);
+    float vp[16];
+    m_camera->BuildViewProj(vw / vh, vp);
+    const core::vec3d eye = m_camera->Eye();
+
+    // Camera-relative point -> clip space (column-major matrix).
+    struct Clip { double x, y, z, w; };
+    auto toClip = [&](const core::vec3d& p) {
+        const double v[3] = { p.x - eye.x, p.y - eye.y, p.z - eye.z };
+        double out[4];
+        for (int r = 0; r < 4; r++)
+            out[r] = vp[r] * v[0] + vp[4 + r] * v[1] + vp[8 + r] * v[2] + vp[12 + r];
+        return Clip{ out[0], out[1], out[2], out[3] };
+    };
+    auto toScreen = [&](const Clip& c) {
+        return ImVec2(vx + float((c.x / c.w * 0.5 + 0.5) * vw), vy + float((c.y / c.w * 0.5 + 0.5) * vh));
+    };
+
+    // Background list: over the 3D scene, under the UI windows.
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    dl->PushClipRect(ImVec2(vx, vy), ImVec2(vx + vw, vy + vh), true);
+    const ImU32 lineCol = IM_COL32(255, 220, 30, 230);
+    const double kNearW = 1e-3;
+    auto line = [&](const core::vec3d& a, const core::vec3d& b) {
+        Clip ca = toClip(a), cb = toClip(b);
+        if (ca.w < kNearW && cb.w < kNearW) return;
+        if (ca.w < kNearW || cb.w < kNearW)
+        {
+            // Cut the part behind the camera.
+            double t = (kNearW - ca.w) / (cb.w - ca.w);
+            Clip m{ ca.x + (cb.x - ca.x) * t, ca.y + (cb.y - ca.y) * t, ca.z + (cb.z - ca.z) * t, kNearW };
+            (ca.w < kNearW ? ca : cb) = m;
+        }
+        dl->AddLine(toScreen(ca), toScreen(cb), lineCol, 2.0f);
+    };
+
+    const core::vec3d lo = box.bb_min, hi = box.bb_max;
+    core::vec3d c[8];
+    for (int i = 0; i < 8; i++)
+        c[i] = core::vec3d((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, (i & 4) ? hi.z : lo.z);
+    const int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+    for (const auto& e : edges)
+        line(c[e[0]], c[e[1]]);
+
+    // Label above the box.
+    Clip top = toClip(core::vec3d((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, hi.z));
+    if (top.w > kNearW)
+    {
+        const MeshToolUI::SelectionInfo& info = m_ui->selection;
+        char text[192];
+        snprintf(text, sizeof(text), "%s  [%s]  %.1f x %.1f x %.1f m  (%s)", info.name.c_str(), info.className.c_str(),
+                 info.size[0], info.size[1], info.size[2],
+                 m_ui->selectionView == MeshToolUI::kSelActual ? "actual" : "segment");
+        ImVec2 ts = ImGui::CalcTextSize(text);
+        ImVec2 p = toScreen(top);
+        p.x -= ts.x * 0.5f;
+        p.y -= ts.y + 10.0f;
+        dl->AddRectFilled(ImVec2(p.x - 6, p.y - 3), ImVec2(p.x + ts.x + 6, p.y + ts.y + 3), IM_COL32(15, 15, 22, 210), 4.0f);
+        dl->AddText(p, IM_COL32(255, 225, 60, 255), text);
+    }
+    dl->PopClipRect();
+}
+
 void MeshToolApp::ProcessPendingActions()
 {
     if (!m_ui) return;
@@ -583,6 +929,9 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->ActionSaveScene();
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
             m_ui->wantFrameAll = true;
+        else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && m_ui->selection.active)
+            m_ui->selectionView = m_ui->selectionView == MeshToolUI::kSelActual ? MeshToolUI::kSelSegment
+                                                                                : MeshToolUI::kSelActual;
     }
 
     if (!m_ui->pendingOpenScenePath.empty())

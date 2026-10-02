@@ -43,7 +43,27 @@ public:
     std::string segStatus;
     // Viewing segmented objects.
     bool  classColors = false;
+    bool  buildingColors = true;   // with classColors: a distinct colour per building
     bool  classVisible[kObjClassCount] = { true, true, true, true, true, true, true, true };
+
+    // Object clicked in the viewport (filled by the app; active = something selected).
+    struct SelectionInfo
+    {
+        bool        active = false;
+        std::string name;           // object name, or "mesh" for an unsegmented mesh
+        std::string className;
+        int         meshes = 0;
+        size_t      triangles = 0;
+        double      size[3] = {};   // bounding box extent, metres
+        double      hit[3] = {};    // clicked point, scene coordinates
+        std::string gpsText;        // clicked point in WGS84 when georeferenced
+    };
+    SelectionInfo selection;
+    bool  isolateSelection = false;
+    enum SelectionView { kSelSegment = 0, kSelActual = 1 };
+    int   selectionView = kSelSegment;   // T toggles: highlighted segment / actual textured object
+    bool  wantFrameSelection = false;
+    bool  wantClearSelection = false;
 
     // Scene file requests, chosen in a file dialog and carried out by the app.
     std::string pendingOpenScenePath;
@@ -90,6 +110,7 @@ private:
     char segModel[128] = "qwen3.8:latest";
     void DrawSegmentDialog();
     void DrawObjectsSection();
+    void DrawSelectionSection();
 
     // Icon textures
     VulkanTextureManager* m_texMgr = nullptr;

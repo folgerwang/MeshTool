@@ -26,7 +26,20 @@ struct MeshDrawFrame {
     // Segmented scenes: colour meshes by object class instead of texture, and
     // skip classes switched off (indexed by ObjectClass; nullptr = all shown).
     bool        classColors = false;
+    bool        buildingColors = false;   // with classColors: one colour per building
     const bool* classVisible = nullptr;
+
+    // Debug view of a clicked object: its meshes in selColor; with
+    // isolateSelection everything else is hidden. selMesh set = that one mesh
+    // (scene not segmented), else the meshes of selGroup with object_id selObject.
+    const GroupMeshData* selGroup = nullptr;
+    int32_t              selObject = -1;
+    const MeshData*      selMesh = nullptr;
+    bool                 isolateSelection = false;
+    bool                 selActual = false;   // selection drawn as captured (textured), not highlighted
+    float                selColor[3] = { 1.0f, 0.85f, 0.1f };
+
+    bool IsSelected(const GroupMeshData* group, const MeshData* mesh) const;
 };
 
 // Per-mesh GPU resources

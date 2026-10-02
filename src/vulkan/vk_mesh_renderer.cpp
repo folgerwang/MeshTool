@@ -7,6 +7,7 @@
 #include "objectclass.h"
 #include "coremath.h"
 
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -157,6 +158,32 @@ void VulkanMeshRenderer::ReleaseMesh(MeshData* mesh)
     m_meshGPU.erase(it);
 }
 
+bool MeshDrawFrame::IsSelected(const GroupMeshData* group, const MeshData* mesh) const
+{
+    if (!selGroup || group != selGroup) return false;
+    return selMesh ? mesh == selMesh : (selObject >= 0 && mesh->object_id == selObject);
+}
+
+// A colour per building: hues a golden-ratio step apart, so buildings with
+// neighbouring indices (found next to each other) never look alike.
+static void BuildingColor(int32_t objectId, float rgb[3])
+{
+    float h = fmodf(float(objectId) * 0.618034f, 1.0f) * 6.0f;
+    const float s = (objectId & 1) ? 0.55f : 0.75f, v = (objectId & 2) ? 0.80f : 0.95f;
+    int i = int(h);
+    float f = h - float(i);
+    float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i % 6)
+    {
+    case 0: rgb[0] = v; rgb[1] = t; rgb[2] = p; break;
+    case 1: rgb[0] = q; rgb[1] = v; rgb[2] = p; break;
+    case 2: rgb[0] = p; rgb[1] = v; rgb[2] = t; break;
+    case 3: rgb[0] = p; rgb[1] = q; rgb[2] = v; break;
+    case 4: rgb[0] = t; rgb[1] = p; rgb[2] = v; break;
+    default: rgb[0] = v; rgb[1] = p; rgb[2] = q; break;
+    }
+}
+
 void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           const std::vector<BatchMeshData*>& batches,
                                           const float* viewProjMatrix,
@@ -174,9 +201,24 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                     cls = group->objects[size_t(mesh->object_id)].cls;
                 if (frame.classVisible && !frame.classVisible[cls])
                     continue;
+                const bool selected = frame.IsSelected(group, mesh);
+                if (frame.isolateSelection && frame.selGroup && !selected)
+                    continue;
                 EnsureUploaded(mesh);
-                DrawMesh(cmd, mesh, viewProjMatrix, frame,
-                         frame.classColors ? GetObjectClassInfo(cls).color : nullptr);
+                const float* flat = nullptr;
+                float instanceColor[3];
+                if (selected)
+                    flat = frame.selActual ? nullptr : frame.selColor;
+                else if (frame.classColors)
+                {
+                    flat = GetObjectClassInfo(cls).color;
+                    if (frame.buildingColors && cls == kObjBuilding)
+                    {
+                        BuildingColor(mesh->object_id, instanceColor);
+                        flat = instanceColor;
+                    }
+                }
+                DrawMesh(cmd, mesh, viewProjMatrix, frame, flat);
             }
         }
     }

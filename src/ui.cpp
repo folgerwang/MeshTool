@@ -509,6 +509,7 @@ void MeshToolUI::DrawScenePanel()
     ImGui::PopStyleColor(2);
 
     DrawObjectsSection();
+    DrawSelectionSection();
 
     // --- Batch list ---
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.40f, 0.28f, 0.18f, 1.0f));
@@ -617,7 +618,7 @@ void MeshToolUI::DrawViewport()
 
     // Navigation hint (bottom-left)
     {
-        const char* nav = "Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
+        const char* nav = "Click select  T segment/actual  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
         float lineH = ImGui::GetTextLineHeight();
         dl->AddText(ImVec2(x + 10, y + h - lineH - 8), IM_COL32(110, 118, 145, 170), nav);
     }
@@ -718,6 +719,50 @@ void MeshToolUI::DrawStatusBar()
 }
 
 // ---------------------------------------------------------------------------
+// Object clicked in the viewport (scene panel)
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawSelectionSection()
+{
+    if (!selection.active)
+        return;
+
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.42f, 0.36f, 0.10f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.50f, 0.43f, 0.14f, 1.0f));
+    if (ImGui::CollapsingHeader("Selected Object", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Indent(8);
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.1f, 1.0f), "%s", selection.name.c_str());
+        ImGui::Text("Class:     %s", selection.className.c_str());
+        ImGui::Text("Meshes:    %d", selection.meshes);
+        ImGui::Text("Triangles: %zu", selection.triangles);
+        ImGui::Text("Size:      %.1f x %.1f m", selection.size[0], selection.size[1]);
+        ImGui::Text("Height:    %.1f m", selection.size[2]);
+        ImGui::Text("Hit:       %.2f, %.2f, %.2f", selection.hit[0], selection.hit[1], selection.hit[2]);
+        if (!selection.gpsText.empty())
+            ImGui::TextDisabled("%s", selection.gpsText.c_str());
+        ImGui::Spacing();
+        ImGui::TextUnformatted("View:");
+        ImGui::SameLine();
+        ImGui::RadioButton("Segment", &selectionView, kSelSegment);
+        ImGui::SameLine();
+        ImGui::RadioButton("Actual", &selectionView, kSelActual);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(T)");
+        ImGui::Checkbox("Isolate", &isolateSelection);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Frame"))
+            wantFrameSelection = true;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear"))
+            wantClearSelection = true;
+        ImGui::Unindent(8);
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::Spacing();
+}
+
+// ---------------------------------------------------------------------------
 // Segmented objects (scene panel)
 // ---------------------------------------------------------------------------
 
@@ -741,6 +786,8 @@ void MeshToolUI::DrawObjectsSection()
     {
         ImGui::Indent(8);
         ImGui::Checkbox("Colour by class", &classColors);
+        if (classColors)
+            ImGui::Checkbox("Distinct colour per building", &buildingColors);
         ImGui::Spacing();
         for (int c = 1; c < kObjClassCount; c++)
         {

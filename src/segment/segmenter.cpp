@@ -447,7 +447,8 @@ ObjectClass FallbackClass(const Region& r, double m2PerPixel)
         return kObjBuilding;
     }
     if (exg > 18.0) return kObjPlants;
-    if (B > R + 12 && B > G && lum < 140) return kObjWater;
+    // No water here: building shadows are dark and bluish too. Water comes
+    // from the model, directly or through a similar labelled neighbour.
     if (lum < 100 && sat < 0.18) return kObjRoad;
     return kObjGround;
 }
@@ -697,6 +698,41 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
         std::vector<uint8_t> raised(N, 0);
         for (size_t i = 0; i < N; i++)
             raised[i] = top[i] > -kInf && hag[i] > st.raisedHeight;
+
+        // Vegetation mask (excess green, box-smoothed over ~1 m): tree canopy
+        // touching roofs at a similar height must not join them into one
+        // region - the model labels a region by one number, and a canopy that
+        // bridges a street would turn whole blocks into "tree".
+        std::vector<uint8_t> veg(N, 0);
+        {
+            const int rad = std::max(1, int(1.0 / res));
+            std::vector<float> exg(N, 0.0f), tmp(N, 0.0f);
+            for (size_t i = 0; i < N; i++)
+                if (top[i] > -kInf) exg[i] = 2.0f * G8(color[i]) - R8(color[i]) - B8(color[i]);
+            for (int y = 0; y < H; y++)   // horizontal running sum
+            {
+                const float* row = &exg[size_t(y) * W];
+                float s = 0.0f;
+                for (int x = -rad; x < W; x++)
+                {
+                    if (x + rad < W) s += row[x + rad];
+                    if (x - rad - 1 >= 0) s -= row[x - rad - 1];
+                    if (x >= 0) tmp[size_t(y) * W + x] = s;
+                }
+            }
+            const float norm = 1.0f / float((2 * rad + 1) * (2 * rad + 1));
+            for (int x = 0; x < W; x++)   // vertical running sum
+            {
+                float s = 0.0f;
+                for (int y = -rad; y < H; y++)
+                {
+                    if (y + rad < H) s += tmp[size_t(y + rad) * W + x];
+                    if (y - rad - 1 >= 0) s -= tmp[size_t(y - rad - 1) * W + x];
+                    if (y >= 0) veg[size_t(y) * W + x] = s * norm > 18.0f;
+                }
+            }
+        }
+
         const float step = 1.5f;   // max height jump between neighbours of one object
         UnionFind uf(N);
         for (int y = 0; y < H; y++)
@@ -704,8 +740,10 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
             {
                 size_t i = size_t(y) * W + x;
                 if (!raised[i]) continue;
-                if (x + 1 < W && raised[i + 1] && fabs(top[i] - top[i + 1]) < step) uf.Union(int32_t(i), int32_t(i + 1));
-                if (y + 1 < H && raised[i + W] && fabs(top[i] - top[i + W]) < step) uf.Union(int32_t(i), int32_t(i + W));
+                if (x + 1 < W && raised[i + 1] && veg[i] == veg[i + 1] && fabs(top[i] - top[i + 1]) < step)
+                    uf.Union(int32_t(i), int32_t(i + 1));
+                if (y + 1 < H && raised[i + W] && veg[i] == veg[i + W] && fabs(top[i] - top[i + W]) < step)
+                    uf.Union(int32_t(i), int32_t(i + W));
             }
         std::map<int32_t, int64_t> sizes;
         for (size_t i = 0; i < N; i++) if (raised[i]) sizes[uf.Find(int32_t(i))]++;
@@ -1106,9 +1144,77 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
         for (int c = 0; c < kObjClassCount; c++)
             if (r.votes[c] > best_v) { best_v = r.votes[c]; best = c; }
         if (best >= 0) { r.cls = ObjectClass(best); voted++; }
-        else r.cls = FallbackClass(r, m2PerPixel);
     }
-    SegLog("  %d of %zu regions labelled by the model, rest by colour/geometry\n", voted, regions.size());
+
+    // Regions the model never saw (each tile marks only its biggest ones)
+    // take the class of a labelled neighbour of the same kind and similar
+    // colour - longest shared border first - spreading a few rings out.
+    int inherited = 0;
+    {
+        const size_t RN = regions.size();
+        std::vector<float> rlab(RN * 3, 0.0f);
+        for (size_t k = 0; k < RN; k++)
+        {
+            const Region& r = regions[k];
+            double n = double(std::max<int64_t>(r.area, 1));
+            RgbToLab(uint8_t(r.sr / n), uint8_t(r.sg / n), uint8_t(r.sb / n), &rlab[k * 3]);
+        }
+        std::map<std::pair<int32_t, int32_t>, int32_t> border;
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++)
+            {
+                size_t i = size_t(y) * W + x;
+                int32_t a = region[i];
+                if (a < 0) continue;
+                int32_t b = x + 1 < W ? region[i + 1] : -1;
+                if (b >= 0 && b != a) border[{ std::min(a, b), std::max(a, b) }]++;
+                b = y + 1 < H ? region[i + W] : -1;
+                if (b >= 0 && b != a) border[{ std::min(a, b), std::max(a, b) }]++;
+            }
+        std::vector<std::vector<std::pair<int32_t, int32_t>>> nbrs(RN);   // (neighbour, border length)
+        for (auto& e : border)
+            if (regions[size_t(e.first.first)].raised == regions[size_t(e.first.second)].raised)
+            {
+                nbrs[size_t(e.first.first)].push_back({ e.first.second, e.second });
+                nbrs[size_t(e.first.second)].push_back({ e.first.first, e.second });
+            }
+        const float kInheritDist = 15.0f;   // Lab distance; road vs sidewalk is ~40
+        for (int ring = 0; ring < 8; ring++)
+        {
+            std::vector<std::pair<size_t, ObjectClass>> assign;
+            for (size_t k = 0; k < RN; k++)
+            {
+                if (regions[k].cls != kObjUnknown || regions[k].votes[kObjUnknown] > 0) continue;
+                int32_t best_len = 0;
+                ObjectClass best_cls = kObjUnknown;
+                for (auto& nb : nbrs[k])
+                {
+                    const Region& o = regions[size_t(nb.first)];
+                    if (o.cls == kObjUnknown || nb.second <= best_len) continue;
+                    float dl = rlab[k * 3] - rlab[size_t(nb.first) * 3];
+                    float da = rlab[k * 3 + 1] - rlab[size_t(nb.first) * 3 + 1];
+                    float db = rlab[k * 3 + 2] - rlab[size_t(nb.first) * 3 + 2];
+                    if (sqrtf(dl * dl + da * da + db * db) > kInheritDist) continue;
+                    best_len = nb.second;
+                    best_cls = o.cls;
+                }
+                if (best_cls != kObjUnknown) assign.push_back({ k, best_cls });
+            }
+            if (assign.empty()) break;
+            for (auto& a : assign) regions[a.first].cls = a.second;
+            inherited += int(assign.size());
+        }
+    }
+
+    int by_colour = 0;
+    for (Region& r : regions)
+        if (r.cls == kObjUnknown && r.votes[kObjUnknown] <= 0)
+        {
+            r.cls = FallbackClass(r, m2PerPixel);
+            by_colour++;
+        }
+    SegLog("  %zu regions: %d labelled by the model, %d from similar labelled neighbours, %d by colour/geometry\n",
+           regions.size(), voted, inherited, by_colour);
 
     // ---------------------------------------------------------------------
     // 6. Objects: one per raised region, one per ground class

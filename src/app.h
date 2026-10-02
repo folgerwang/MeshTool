@@ -16,6 +16,7 @@ class ViewCamera;
 class ProcessManager;
 class LiveCaptureProcessor;
 struct GroupMeshData;
+struct MeshData;
 struct BatchMeshData;
 
 namespace core {
@@ -63,6 +64,17 @@ private:
     double                 m_captureRequestTime = 0.0;   // glfwGetTime() of the request
 
     void ProcessPendingActions();
+
+    // Debug view of an object clicked in the viewport: a segmented object
+    // (group + object index) or, in an unsegmented scene, a single mesh.
+    GroupMeshData* m_selGroup = nullptr;
+    int32_t        m_selObject = -1;
+    MeshData*      m_selMesh = nullptr;
+    void UpdateSelection();                   // clicks, validity, UI requests, overlay
+    void PickAt(float mouseX, float mouseY);  // ray-cast the visible meshes
+    void ClearSelection();
+    bool SelectionBounds(core::bounds3d& box, int* meshes = nullptr, size_t* triangles = nullptr) const;
+    void DrawSelectionOverlay();
     void FrameBounds(const core::bounds3d& bbox);   // point the planar camera at bbox
     void UploadGroupTextures(GroupMeshData* group); // GPU-upload a captured group's textures
     void DiscardOlderCaptures(BatchMeshData* batch); // keep only the newest captured group
