@@ -16,3 +16,6 @@ meshtool_search.kml
 meshtool_view.kml
 *.mtscene
 *.ini
+
+# README images
+!docs/*.png

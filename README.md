@@ -14,6 +14,59 @@ position, stitches overlapping captures into one scene, splits it into objects
 
 Built with GLFW + Dear ImGui + Vulkan (the old Qt6/OpenGL UI was replaced).
 
+![Downtown San Francisco captured from Google Earth and segmented: buildings, trees, roads, cars, plants and water each in their class colour](docs/segmentation.png)
+
+*Several live captures of downtown San Francisco stitched into one scene and
+segmented (Tools > Segment Scene): buildings orange, trees dark green, plants
+light green, road grey, cars pink, water blue.*
+
+## Guide
+
+A typical session, from an empty scene to an exported model:
+
+1. **One-time setup.** Build (see below), then run `deploy_hook.bat` as
+   administrator and pick option 2. This puts the capture hook
+   (`opengl32.dll`) next to Google Earth Pro. Redeploy after pulling hook
+   changes, with Google Earth closed.
+2. **Start.** `run.bat` starts MeshTool with an empty scene. To continue
+   earlier work, File > Open Scene (Ctrl+O).
+3. **Open Google Earth.** Capture > Navigate & Capture (Ctrl+N) flies Google
+   Earth to an address or GPS coordinate. Capture > Launch Google Earth just
+   opens it. A Google Earth you started yourself: Live Capture panel >
+   **Connect Google Earth**.
+4. **Check GPS.** Move Google Earth once and let it stop. The Live Capture
+   panel shows *GPS view link: lat, lon* with your location. Captures taken
+   before that have no GPS and are set aside from the rest.
+5. **Capture.** Frame the area in Google Earth and press **F12** there (or
+   F5 / Capture > Capture Frame in MeshTool). Move on to a neighbouring or
+   overlapping spot and capture again: captures stitch into one scene, at any
+   zoom or camera angle.
+6. **Drive from MeshTool (optional).** Press **G**: Google Earth now flies to
+   wherever you leave the MeshTool viewport camera. Its overlay shows
+   *F12: WAIT - SETTLING* while it flies and loads, then *F12: CAPTURE READY*.
+   Press F12 then.
+7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
+   draws the camera path; click any mesh for its details (T toggles
+   highlighted / as captured).
+8. **Segment.** Tools > Segment Scene (AI) splits the scene into buildings,
+   trees, cars, road, plants, water (needs Ollama for best results; see
+   below).
+9. **Save and export.** File > Save Scene (Ctrl+S) keeps everything in
+   `.mtscene`; File > Export Mesh writes `.glb` / `.gltf` / `.ma`.
+
+**If something looks wrong**
+
+| Symptom | Check |
+|---|---|
+| GPS view link shows None or 0, 0 | Google Earth lacks MeshTool's links: Connect Google Earth, or restart it from MeshTool. Remove old "MeshTool ..." entries under Temporary Places. |
+| A capture lands beside the scene, not in it | It had no GPS and shared no tiles with the scene (see the capture log's `placement` lines). |
+| Overlay stays on *WAIT - SETTLING* | `[gate]` lines in the capture log show which condition holds it. |
+| Flicker or holes where captures overlap | Capture log `LOD filter` lines; Captures (debug) shows which capture each tile came from. |
+| Captures arrive by themselves | Navigate & Capture > *Auto-capture after load* is on. |
+
+Logs: `C:\Users\Public\meshtool_capture.log` (MeshTool side) and
+`C:\Users\Public\meshtool_proxy.log` (inside Google Earth).
+
 ## Requirements
 
 - Windows 10+, Visual Studio 2022 (x64), CMake >= 3.16, git
