@@ -365,14 +365,15 @@ static void OnFrameBoundary()
         g_capturing_frame = false;
         g_ipc_writer.ClearStatus(GLCAPTURE_STATUS_CAPTURING);
 
-        uint32_t end = hdr ? hdr->write_offset : 0;
-        uint32_t start = g_capture_stats.capture_start_offset;
+        uint64_t end = hdr ? hdr->write_offset : 0;
+        uint64_t start = g_capture_stats.capture_start_offset;
         g_capture_stats.last_capture_bytes = end >= start ? end - start : GLCAPTURE_RING_SIZE - start + end;
         g_capture_stats.last_capture_draws = g_capture_stats.captured_draws;
         g_capture_stats.captures_done++;
-        ProxyLog("capture %u done: %u of %u draw calls recorded, %u buffers + %u textures sent, %u bytes%s\n",
+        ProxyLog("capture %u done: %u of %u draw calls recorded, %u buffers + %u textures sent, %llu bytes%s\n",
                  g_capture_stats.captures_done, g_capture_stats.captured_draws, g_capture_stats.last_frame_draws,
-                 (unsigned)g_sent_buffers.size(), (unsigned)g_sent_textures.size(), g_capture_stats.last_capture_bytes,
+                 (unsigned)g_sent_buffers.size(), (unsigned)g_sent_textures.size(),
+                 (unsigned long long)g_capture_stats.last_capture_bytes,
                  (hdr && (hdr->status_flags & GLCAPTURE_STATUS_OVERFLOW)) ? "  (RING OVERFLOW - data dropped)" : "");
     }
 
@@ -384,6 +385,7 @@ static void OnFrameBoundary()
         if (hdr) hdr->frame_count++;
         g_capture_stats.captured_draws = 0;
         g_capture_stats.capture_start_offset = hdr ? hdr->write_offset : 0;
+        g_ipc_writer.ClearStatus(GLCAPTURE_STATUS_OVERFLOW);   // judged per capture
         g_sent_buffers.clear();
         g_sent_textures.clear();
         g_ipc_writer.SetRecording(true);

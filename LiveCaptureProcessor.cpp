@@ -175,17 +175,17 @@ void LiveCaptureProcessor::processFrame(bool keepMeshes)
     }
 
     m_last = FrameResult();
-    uint32_t read_pos = m_header->read_offset;
-    const uint32_t write_pos = m_header->write_offset;
+    uint64_t read_pos = m_header->read_offset;
+    const uint64_t write_pos = m_header->write_offset;
 
     // Pass 1: find the end of the newest complete frame. More than one may be
     // queued (two captures can finish before we wake up: the ready event only
     // remembers one signal), and the newest is the one GE shows right now -
     // older ones would make every capture lag one behind. Records after the
     // last frame end belong to a capture still being written; leave them.
-    uint32_t last_end = 0;
+    uint64_t last_end = 0;
     int complete_frames = 0;
-    for (uint32_t p = read_pos; p != write_pos;)
+    for (uint64_t p = read_pos; p != write_pos;)
     {
         if (p >= GLCAPTURE_RING_SIZE) { p = 0; continue; }
         const GLCaptureRecord* rec = reinterpret_cast<const GLCaptureRecord*>(m_ring_base + p);
@@ -199,10 +199,28 @@ void LiveCaptureProcessor::processFrame(bool keepMeshes)
             complete_frames++;
         }
     }
-    CapLog("=== processFrame: read=%u write=%u status=0x%X, %d complete frame(s) queued\n",
-           read_pos, write_pos, m_header->status_flags, complete_frames);
+    CapLog("=== processFrame: read=%llu write=%llu status=0x%X, %d complete frame(s) queued\n",
+           (unsigned long long)read_pos, (unsigned long long)write_pos, m_header->status_flags, complete_frames);
+    const uint32_t status = m_header->status_flags;
     if (complete_frames == 0)
+    {
+        // A capture that overflowed without its frame end (hooks before the
+        // frame-end reserve) blocks the ring for good: nothing complete to
+        // read, no room to finish. Drop it; each capture resends what it needs.
+        if ((status & GLCAPTURE_STATUS_OVERFLOW) && !(status & GLCAPTURE_STATUS_CAPTURING))
+        {
+            CapLog("  ring full with an unfinished capture: dropped it\n");
+            m_header->read_offset = write_pos;
+            m_header->status_flags &= ~GLCAPTURE_STATUS_OVERFLOW;
+            m_last.dropped = true;
+        }
         return;
+    }
+    if (status & GLCAPTURE_STATUS_OVERFLOW)
+    {
+        CapLog("  capture overflowed the ring: partly recorded\n");
+        m_last.truncated = true;
+    }
 
     auto start_frame = [this]() {
         m_current_group = new GroupMeshData;
@@ -1890,10 +1908,11 @@ ProcessManager::~ProcessManager()
 
 bool ProcessManager::CreateSharedMemory()
 {
-    // Create shared memory
+    // Create shared memory (pagefile-backed; untouched pages use no RAM)
     m_mapping = CreateFileMappingA(
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
-        0, GLCAPTURE_SHARED_MEM_SIZE, GLCAPTURE_SHARED_MEM_NAME);
+        DWORD(GLCAPTURE_SHARED_MEM_SIZE >> 32), DWORD(GLCAPTURE_SHARED_MEM_SIZE & 0xFFFFFFFFull),
+        GLCAPTURE_SHARED_MEM_NAME);
 
     if (!m_mapping)
         return false;
@@ -1906,8 +1925,9 @@ bool ProcessManager::CreateSharedMemory()
         return false;
     }
 
-    // Initialize header
-    memset(m_shared_mem, 0, GLCAPTURE_SHARED_MEM_SIZE);
+    // Initialize header (a new mapping is zero-filled; clearing all 16 GB
+    // would make every page resident)
+    memset(m_shared_mem, 0, GLCAPTURE_HEADER_SIZE);
     m_header = reinterpret_cast<GLCaptureHeader*>(m_shared_mem);
 
     // Create events

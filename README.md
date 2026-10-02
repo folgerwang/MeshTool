@@ -14,11 +14,16 @@ position, stitches overlapping captures into one scene, splits it into objects
 
 Built with GLFW + Dear ImGui + Vulkan (the old Qt6/OpenGL UI was replaced).
 
-![Downtown San Francisco captured from Google Earth and segmented: buildings, trees, roads, cars, plants and water each in their class colour](docs/segmentation.png)
+![MeshTool: a live capture of downtown San Francisco from Google Earth, with Google Earth following the viewport and ready to capture](docs/meshtool.png)
 
-*Several live captures of downtown San Francisco stitched into one scene and
-segmented (Tools > Segment Scene): buildings orange, trees dark green, plants
-light green, road grey, cars pink, water blue.*
+*A live capture of downtown San Francisco. The Live Capture panel shows the
+GPS link to Google Earth, viewport follow on, and capture ready.*
+
+![The same scene segmented: every building, tree and car its own object, each building in its own colour](docs/meshtool-segmentation.png)
+
+*The same scene after Tools > Segment Scene: 296 buildings, 126 trees and 159
+cars as separate objects (here a distinct colour per building), plus road,
+plants, water and ground areas.*
 
 ## Guide
 
@@ -110,7 +115,7 @@ glm and stb are header-only. The compiled shaders are copied next to `MeshTool.e
 
 After pulling hook changes, redeploy the proxy (`deploy_hook.bat` as
 administrator, option 2): MeshTool and `opengl32.dll` share the capture buffer
-layout (256 MB) and must match.
+layout (16 GB, 64-bit offsets) and must match - an older hook shows "not connected".
 
 ## Live capture
 

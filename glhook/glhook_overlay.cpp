@@ -104,8 +104,8 @@ void OverlayRender(void* hdc)
         status.last_draws = int(g_capture_stats.last_capture_draws);
         status.last_mb = float(g_capture_stats.last_capture_bytes) / (1024.0f * 1024.0f);
 
-        uint32_t write = hdr->write_offset, read = hdr->read_offset;
-        uint32_t used = write >= read ? write - read : GLCAPTURE_RING_SIZE - read + write;
+        uint64_t write = hdr->write_offset, read = hdr->read_offset;
+        uint64_t used = write >= read ? write - read : GLCAPTURE_RING_SIZE - read + write;
         status.buffer_fill = float(used) / float(GLCAPTURE_RING_SIZE);
         status.overflow = (hdr->status_flags & GLCAPTURE_STATUS_OVERFLOW) != 0;
         status.capture_gate = hdr->capture_gate;

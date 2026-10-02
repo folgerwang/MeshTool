@@ -51,6 +51,10 @@ public:
         bool merged = false;
         GroupMeshData* group = nullptr;
         std::vector<GroupMeshData*> discarded;
+        // The capture was bigger than the shared ring: partly recorded
+        // (truncated) or, from an older hook that could not finish it, dropped.
+        bool truncated = false;
+        bool dropped = false;
         std::vector<MeshData*> modified;
         std::vector<MeshData*> removed;
     };

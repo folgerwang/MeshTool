@@ -1403,6 +1403,11 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->statusTimeout = 5.0f;
         }
         const LiveCaptureProcessor::FrameResult& result = m_ui->captureProcessor->LastResult();
+        if (result.dropped)
+        {
+            m_ui->statusMessage = "Capture dropped: it overflowed the capture buffer (old hook - run deploy_hook.bat).";
+            m_ui->statusTimeout = 8.0f;
+        }
 
         // Meshes the LOD filter emptied or trimmed may be on the GPU already.
         if (!result.removed.empty() || !result.modified.empty())
@@ -1444,7 +1449,8 @@ void MeshToolApp::ProcessPendingActions()
 
             m_ui->statusMessage = std::string(result.merged ? "Merged capture into the area it overlaps: "
                                               : batch->group_meshes.size() > 1 ? "Captured a new area: " : "Captured: ") +
-                                  std::to_string(result.group->meshes.size()) + " meshes.";
+                                  std::to_string(result.group->meshes.size()) + " meshes." +
+                                  (result.truncated ? "  (Partly recorded: the view overflowed the capture buffer.)" : "");
             m_ui->statusTimeout = 6.0f;
         }
     }

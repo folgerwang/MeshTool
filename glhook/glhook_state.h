@@ -57,9 +57,9 @@ struct CaptureStats
     uint32_t draws_this_frame;      // all draw calls since the last frame boundary
     uint32_t last_frame_draws;      // draw calls in the previous frame (progress estimate)
     uint32_t captured_draws;        // draw records written for the capture in progress
-    uint32_t capture_start_offset;  // ring write offset when the capture started
+    uint64_t capture_start_offset;  // ring write offset when the capture started
     uint32_t last_capture_draws;    // result of the last finished capture
-    uint32_t last_capture_bytes;
+    uint64_t last_capture_bytes;
     uint32_t captures_done;         // number of finished captures
 };
 extern CaptureStats g_capture_stats;

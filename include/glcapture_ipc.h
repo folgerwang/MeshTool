@@ -5,12 +5,16 @@
 // Shared memory IPC protocol between GLHookDLL and MeshTool.
 // Both the proxy DLL and MeshTool include this header.
 
-#define GLCAPTURE_SHARED_MEM_NAME   "Local\\MeshToolGLCapture"
+// "2": 64-bit ring offsets. A hook built for the old 32-bit layout opens the
+// old name, finds nothing and stays "not connected" instead of misreading this.
+#define GLCAPTURE_SHARED_MEM_NAME   "Local\\MeshToolGLCapture2"
 #define GLCAPTURE_EVENT_READY       "Local\\MeshToolCaptureReady"
 #define GLCAPTURE_EVENT_CONTROL     "Local\\MeshToolCaptureControl"
 
-#define GLCAPTURE_SHARED_MEM_SIZE   (256 * 1024 * 1024) // 256 MB: a dense city frame plus its textures
-#define GLCAPTURE_HEADER_SIZE       4096
+// 16 GB: a dense city frame with its textures passed 256 MB on a 4K screen.
+// Only pages actually written use memory; ring offsets are 64-bit.
+#define GLCAPTURE_SHARED_MEM_SIZE   (16ull * 1024 * 1024 * 1024)
+#define GLCAPTURE_HEADER_SIZE       4096ull
 #define GLCAPTURE_RING_SIZE         (GLCAPTURE_SHARED_MEM_SIZE - GLCAPTURE_HEADER_SIZE)
 
 // Capture control flags (set by MeshTool in header)
@@ -26,15 +30,14 @@
 struct GLCaptureHeader
 {
     // Written by producer (hook DLL)
-    volatile uint32_t   write_offset;       // Current write position in ring buffer
+    volatile uint64_t   write_offset;       // Current write position in ring buffer
     volatile uint32_t   frame_count;        // Total frames seen
     volatile uint32_t   status_flags;       // GLCAPTURE_STATUS_*
-    uint32_t            _pad0;
 
     // Written by consumer (MeshTool)
-    volatile uint32_t   read_offset;        // Current read position in ring buffer
+    volatile uint64_t   read_offset;        // Current read position in ring buffer
     volatile uint32_t   capture_flags;      // GLCAPTURE_FLAG_*
-    uint32_t            _pad1[2];
+    uint32_t            _pad1;
 
     // Info (written once by hook DLL on init)
     uint32_t            gl_version_major;

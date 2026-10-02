@@ -108,10 +108,10 @@ void IPCWriter::ClearFrameRequest()
     }
 }
 
-uint32_t IPCWriter::AvailableSpace() const
+uint64_t IPCWriter::AvailableSpace() const
 {
-    uint32_t write = m_header->write_offset;
-    uint32_t read = m_header->read_offset;
+    uint64_t write = m_header->write_offset;
+    uint64_t read = m_header->read_offset;
 
     if (write >= read)
         return GLCAPTURE_RING_SIZE - (write - read) - 1;
@@ -127,13 +127,17 @@ void* IPCWriter::BeginRecord(GLCaptureCmd cmd, uint32_t payload_size)
     // Align to 4 bytes
     total_size = (total_size + 3) & ~3;
 
-    if (AvailableSpace() < total_size + 8)  // Extra margin
+    // Keep room for the frame-end record: without it a capture that fills the
+    // ring never completes, MeshTool (which reads whole frames) never frees
+    // anything, and every later capture is lost too.
+    const uint64_t reserve = (cmd == CMD_FRAME_END) ? 8 : 8 + 4096;
+    if (AvailableSpace() < total_size + reserve)
     {
         m_header->status_flags |= GLCAPTURE_STATUS_OVERFLOW;
         return nullptr;
     }
 
-    uint32_t write = m_header->write_offset;
+    uint64_t write = m_header->write_offset;
     m_current_record_offset = write;
     m_current_record_size = total_size;
 
@@ -151,7 +155,7 @@ void* IPCWriter::BeginRecord(GLCaptureCmd cmd, uint32_t payload_size)
         write = 0;
         m_current_record_offset = 0;
 
-        if (AvailableSpace() < total_size + 8)
+        if (AvailableSpace() < total_size + reserve)
         {
             m_header->status_flags |= GLCAPTURE_STATUS_OVERFLOW;
             return nullptr;
@@ -170,7 +174,7 @@ void* IPCWriter::BeginRecord(GLCaptureCmd cmd, uint32_t payload_size)
 void IPCWriter::EndRecord()
 {
     // Advance write offset atomically
-    uint32_t new_offset = m_current_record_offset + m_current_record_size;
+    uint64_t new_offset = m_current_record_offset + m_current_record_size;
     if (new_offset >= GLCAPTURE_RING_SIZE)
         new_offset = 0;
 

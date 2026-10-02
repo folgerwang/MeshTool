@@ -50,11 +50,11 @@ private:
     HANDLE              m_event_ready;
     HANDLE              m_event_control;
 
-    uint32_t            m_current_record_offset;
+    uint64_t            m_current_record_offset;
     uint32_t            m_current_record_size;
     bool                m_recording = false;
 
-    uint32_t AvailableSpace() const;
+    uint64_t AvailableSpace() const;
 };
 
 extern IPCWriter g_ipc_writer;
