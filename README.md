@@ -1,10 +1,18 @@
 # MeshTool
 
-Mesh tool for Google Earth mesh capture.
+Captures Google Earth Pro's 3D meshes live, places them at their real GPS
+position, stitches overlapping captures into one scene, splits it into objects
+(buildings, trees, cars, road, ...) and exports glTF / Maya.
+
+- **Live capture** through a GL hook (`opengl32.dll` proxy / injectable
+  `meshtool_hook.dll`), georeferenced through a KML link with Google Earth
+- **Stitching** of any number of captures: exact placement from shared tiles,
+  duplicate and level-of-detail cleanup, any zoom or camera angle
+- **Google Earth follows the viewport**: move in MeshTool, Google Earth flies along
+- **AI segmentation** into objects with a local vision model (Ollama)
+- **Export** to glTF 2.0 (`.glb` / `.gltf`) and Maya ASCII
 
 Built with GLFW + Dear ImGui + Vulkan (the old Qt6/OpenGL UI was replaced).
-Includes a GL hook (`opengl32.dll` proxy / injectable `meshtool_hook.dll`) for
-live capture from Google Earth Pro.
 
 ## Requirements
 
@@ -53,21 +61,43 @@ layout (256 MB) and must match.
 
 ## Live capture
 
+MeshTool starts with an empty scene; open a saved scene (Ctrl+O) or capture.
 Launch Google Earth from MeshTool (Capture > Launch Google Earth, or Navigate &
 Capture), then Capture Frame or F12 inside Google Earth.
 
-- **GPS.** MeshTool opens a KML NetworkLink in Google Earth that reports the
-  view to `http://127.0.0.1:47321/view` whenever the camera stops. Captures are
-  placed in East/North/Up metres at a GPS origin (the first capture's look-at
-  point); the viewport corner shows the pivot's latitude/longitude. Heights are
-  GE's (above sea level). Without the link, a camera-based frame is used.
-- **Merging.** A capture next to or overlapping the current one is merged into
-  it (placed through tiles both contain, or else GPS); any other capture
-  replaces it. Tiles already captured are dropped.
-- **Levels of detail.** Google Earth draws coarse tiles under finer ones; the
-  covered coarse triangles are removed.
-- Diagnostics: `C:\Users\Public\meshtool_capture.log` (placement, GPS checks,
-  LOD filter) and `C:\Users\Public\meshtool_proxy.log` (hook side).
+- **GPS.** MeshTool loads a KML into Google Earth with two NetworkLinks to its
+  local server (`http://127.0.0.1:47321`): `/view` reports Google Earth's view
+  when its camera comes to rest, `/follow` is polled for viewport follow. For a
+  Google Earth started some other way, Live Capture > **Connect Google Earth**
+  loads the links into it. The Live Capture panel shows the last GPS view
+  received and its age - capture only once it shows your location. Captures
+  are placed in East/North/Up metres at a GPS origin (the first capture's
+  look-at point); heights are GE's (above sea level).
+- **Merging.** Each capture is matched against every captured area. Tiles
+  both contain give the exact camera-to-camera transform (checked per tile in
+  the log), whatever the zoom or tilt; without shared tiles, GPS places it if
+  it borders an area at a comparable level of detail. Any other capture starts
+  a new area beside the others - nothing is replaced. An area captured without
+  GPS has no true location and is set to the east of the rest. Overview
+  captures (Google Earth zoomed far out, finest tile over 1 km) are dropped by
+  the next capture.
+- **Duplicates and levels of detail.** Tiles already captured are dropped; a
+  quadtree tile captured twice with different data keeps the older copy. Google
+  Earth draws coarse tiles under finer ones: coarse triangles that finer tiles
+  cover completely are removed, and the rest are drawn slightly behind the finer
+  ones (pushed back along the view rays, so their pixels stay put) instead of
+  z-fighting them.
+- **Google Earth follows the viewport** (G, or the Live Capture checkbox):
+  whenever the viewport camera comes to rest, Google Earth flies to the same
+  position and direction. Needs a GPS-referenced scene. While following, new
+  captures don't reframe the viewport.
+- **Capture debug view** (Scene panel > Captures (debug)): colours tiles by the
+  capture that produced them and draws each capture's camera, view direction,
+  footprint and the path between captures; lists each area's captures with
+  placement method and tile counts. Clicking a tile shows its capture.
+- **Diagnostics:** `C:\Users\Public\meshtool_capture.log` (placement, shared-tile
+  residuals, GPS checks, LOD filter, area moves) and
+  `C:\Users\Public\meshtool_proxy.log` (hook side).
 
 ## Segmentation
 
@@ -133,6 +163,10 @@ lossless native format - meshes, textures as captured, GPS origin.
 | Fly | | RMB + W/A/S/D, Q/E down/up; wheel = speed, Shift = faster |
 
 Wheel zooms to the pivot, F frames everything.
+
+Click a mesh to select it (Scene panel > Selected Object: class, size, GPS,
+capture; Isolate / Frame / Clear); T switches the selection between highlighted
+and as captured. G toggles Google Earth following the viewport.
 
 ## Export
 
