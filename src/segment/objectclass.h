@@ -41,3 +41,24 @@ inline bool IsInstanceClass(ObjectClass cls)
 {
     return cls == kObjBuilding || cls == kObjCar || cls == kObjTree;
 }
+
+// A colour per index (building, capture, ...): hues a golden-ratio step
+// apart, so neighbouring indices never look alike.
+inline void DistinctColor(int32_t index, float rgb[3])
+{
+    float h = float(index) * 0.618034f;
+    h = (h - float(int(h))) * 6.0f;
+    const float s = (index & 1) ? 0.55f : 0.75f, v = (index & 2) ? 0.80f : 0.95f;
+    int i = int(h);
+    float f = h - float(i);
+    float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i % 6)
+    {
+    case 0: rgb[0] = v; rgb[1] = t; rgb[2] = p; break;
+    case 1: rgb[0] = q; rgb[1] = v; rgb[2] = p; break;
+    case 2: rgb[0] = p; rgb[1] = v; rgb[2] = t; break;
+    case 3: rgb[0] = p; rgb[1] = q; rgb[2] = v; break;
+    case 4: rgb[0] = t; rgb[1] = p; rgb[2] = v; break;
+    default: rgb[0] = v; rgb[1] = p; rgb[2] = q; break;
+    }
+}

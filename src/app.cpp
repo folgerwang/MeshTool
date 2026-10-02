@@ -228,7 +228,9 @@ void MeshToolApp::MainLoop()
         m_camera->Update(m_window, m_input->GetState().scrollDelta, vpRect,
                          ImGui::GetIO().WantCaptureMouse, dt);
         UpdateGeoReadout();
+        UpdateGeFollow();
         UpdateSelection();
+        DrawCaptureOverlay();
 
         ImGui::Render();
 
@@ -287,6 +289,7 @@ void MeshToolApp::MainLoop()
         }
         drawFrame.classColors = m_shotStage == 1 ? true : m_shotStage == 2 ? false : m_ui->classColors;
         drawFrame.buildingColors = m_ui->buildingColors;
+        drawFrame.captureColors = m_ui->debugCaptures;
         drawFrame.selGroup = m_selGroup;
         drawFrame.selObject = m_selObject;
         drawFrame.selMesh = m_selMesh;
@@ -444,17 +447,28 @@ void MeshToolApp::OpenOnStart(const std::string& path)
         m_ui->pendingOpenScenePath = path;   // opened on the first frame
 }
 
-void MeshToolApp::UpdateGeoReadout()
+const BatchMeshData* MeshToolApp::GeoreferencedBatch() const
 {
     // The scene's georeferenced batches share East/North/Up metres at their
-    // reference point; convert the camera pivot back to WGS84.
-    const BatchMeshData* geo = nullptr;
+    // reference point.
     for (const BatchMeshData* b : g_world.mesh_data_batches)
-        if (b && b->is_georeferenced && !b->group_meshes.empty()) { geo = b; break; }
+        if (b && b->is_georeferenced && !b->group_meshes.empty())
+            return b;
+    return nullptr;
+}
+
+void MeshToolApp::UpdateGeoReadout()
+{
+    // Convert the camera pivot back to WGS84.
+    const BatchMeshData* geo = GeoreferencedBatch();
 
     std::string linkState;
     if (m_geoServer)
         linkState = m_geoServer->Latest().valid ? "   |   GE view link: receiving" : "   |   GE view link: waiting";
+    if (m_geoServer && m_ui->geFollowViewport)
+        linkState += glfwGetTime() - m_geoServer->LastFollowPoll() < 3.0
+                         ? "   |   GE follow: on"
+                         : "   |   GE follow: GE not polling (start GE from MeshTool)";
 
     if (!geo)
     {
@@ -469,18 +483,63 @@ void MeshToolApp::UpdateGeoReadout()
     m_ui->geoText = std::string(buf) + linkState;
 }
 
-void MeshToolApp::DiscardOlderCaptures(BatchMeshData* batch)
+void MeshToolApp::UpdateGeFollow()
 {
-    if (!batch || batch->group_meshes.size() < 2)
+    const bool on = m_ui->geFollowViewport && m_geoServer;
+    if (on && !m_followWasOn)
+        m_followSent = false;   // just switched on: send the current view
+    m_followWasOn = on;
+    if (!on)
         return;
 
-    // Earlier frames may still be in flight on the GPU.
-    vkDeviceWaitIdle(m_renderer->GetContext().device);
+    const double now = glfwGetTime();
+    const core::vec3d eye = m_camera->Eye(), fwd = m_camera->Forward();
+    auto moved = [](const core::vec3d& e0, const core::vec3d& f0, const core::vec3d& e1, const core::vec3d& f1,
+                    double metres, double cosAngle) {
+        core::vec3d d = e1 - e0;
+        return dot(d, d) > metres * metres || dot(f0, f1) < cosAngle;
+    };
+    if (moved(m_followPrevEye, m_followPrevFwd, eye, fwd, 1e-4, 1.0 - 1e-12))
+        m_followMoveTime = now;
+    m_followPrevEye = eye;
+    m_followPrevFwd = fwd;
 
-    GroupMeshData* latest = batch->group_meshes.back();
-    for (size_t g = 0; g + 1 < batch->group_meshes.size(); g++)
-        ReleaseGroup(batch->group_meshes[g]);
-    batch->group_meshes.assign(1, latest);
+    // Like GE's own onStop: send once the camera rests, so GE flies once per
+    // move instead of restarting its flight every frame.
+    const double kRest = 0.25;   // seconds
+    if (now - m_followMoveTime < kRest)
+        return;
+    if (m_followSent && !moved(m_followSentEye, m_followSentFwd, eye, fwd, 0.05, cos(0.05 * 3.14159265358979323846 / 180.0)))
+        return;
+
+    const BatchMeshData* geo = GeoreferencedBatch();
+    if (!geo)
+        return;   // no GPS frame: nothing to tell GE
+
+    // Eye to WGS84; heading and tilt in the eye's own East/North/Up (the
+    // scene's axes drift from it away from the reference point).
+    GeographicLib::LocalCartesian scene(geo->reference_pos.y, geo->reference_pos.x, 0.0);
+    double lat, lon, h;
+    scene.Reverse(eye.x, eye.y, eye.z, lat, lon, h);
+    const core::vec3d ahead = eye + fwd * 10.0;
+    double lat2, lon2, h2;
+    scene.Reverse(ahead.x, ahead.y, ahead.z, lat2, lon2, h2);
+    GeographicLib::LocalCartesian at(lat, lon, h);
+    double fe, fn, fu;
+    at.Forward(lat2, lon2, h2, fe, fn, fu);
+    const double kDeg = 180.0 / 3.14159265358979323846;
+    const double len = sqrt(fe * fe + fn * fn + fu * fu);
+    const double heading = atan2(fe, fn) * kDeg;
+    const double tilt = acos((std::max)(-1.0, (std::min)(1.0, -fu / len))) * kDeg;   // 0 = straight down
+
+    m_geoServer->SetFollowCamera(lon, lat, h, heading, tilt);
+    char msg[160];
+    snprintf(msg, sizeof(msg), "GE follow: camera %.7f, %.7f  %.0f m  heading %.1f  tilt %.1f", lat, lon, h, heading, tilt);
+    m_ui->statusMessage = msg;
+    m_ui->statusTimeout = 3.0f;
+    m_followSentEye = eye;
+    m_followSentFwd = fwd;
+    m_followSent = true;
 }
 
 void MeshToolApp::ReleaseGroup(GroupMeshData* group)
@@ -937,7 +996,7 @@ void MeshToolApp::PickAt(float mouseX, float mouseY)
     }
     const core::vec3d hit = eye + dir * best;
     info.hit[0] = hit.x; info.hit[1] = hit.y; info.hit[2] = hit.z;
-    if (bestBatch->is_georeferenced)
+    if (bestBatch->is_georeferenced && !bestGroup->no_gps)
     {
         GeographicLib::LocalCartesian local(bestBatch->reference_pos.y, bestBatch->reference_pos.x, 0.0);
         double lat, lon, h;
@@ -946,6 +1005,9 @@ void MeshToolApp::PickAt(float mouseX, float mouseY)
         snprintf(buf, sizeof(buf), "%.7f, %.7f   %.1f m", lat, lon, h);
         info.gpsText = buf;
     }
+    if (bestMesh->capture_id >= 0 && size_t(bestMesh->capture_id) < bestGroup->captures.size())
+        info.captureText = "#" + std::to_string(bestMesh->capture_id + 1) + "  " +
+                           bestGroup->captures[size_t(bestMesh->capture_id)].placement;
 }
 
 void MeshToolApp::UpdateSelection()
@@ -999,38 +1061,52 @@ void MeshToolApp::UpdateSelection()
     DrawSelectionOverlay();
 }
 
-void MeshToolApp::DrawSelectionOverlay()
+// Scene point -> viewport pixels, for overlays drawn with ImGui over the 3D
+// view (background list: over the scene, under the UI windows).
+struct MeshToolApp::OverlayView
 {
-    core::bounds3d box;
-    if (!SelectionBounds(box))
-        return;
-
-    const float vx = m_ui->viewportX, vy = m_ui->viewportY;
-    const float vw = (std::max)(m_ui->viewportW, 1.0f), vh = (std::max)(m_ui->viewportH, 1.0f);
+    float vx, vy, vw, vh;
     float vp[16];
-    m_camera->BuildViewProj(vw / vh, vp);
-    const core::vec3d eye = m_camera->Eye();
+    core::vec3d eye;
+    ImDrawList* dl;
+    static constexpr double kNearW = 1e-3;
+
+    struct Clip { double x, y, z, w; };
+
+    OverlayView(const MeshToolUI& ui, ViewCamera& camera)
+        : vx(ui.viewportX), vy(ui.viewportY),
+          vw((std::max)(ui.viewportW, 1.0f)), vh((std::max)(ui.viewportH, 1.0f)),
+          eye(camera.Eye()), dl(ImGui::GetBackgroundDrawList())
+    {
+        camera.BuildViewProj(vw / vh, vp);
+        dl->PushClipRect(ImVec2(vx, vy), ImVec2(vx + vw, vy + vh), true);
+    }
+    ~OverlayView() { dl->PopClipRect(); }
 
     // Camera-relative point -> clip space (column-major matrix).
-    struct Clip { double x, y, z, w; };
-    auto toClip = [&](const core::vec3d& p) {
+    Clip ToClip(const core::vec3d& p) const
+    {
         const double v[3] = { p.x - eye.x, p.y - eye.y, p.z - eye.z };
         double out[4];
         for (int r = 0; r < 4; r++)
             out[r] = vp[r] * v[0] + vp[4 + r] * v[1] + vp[8 + r] * v[2] + vp[12 + r];
         return Clip{ out[0], out[1], out[2], out[3] };
-    };
-    auto toScreen = [&](const Clip& c) {
+    }
+    ImVec2 ToScreen(const Clip& c) const
+    {
         return ImVec2(vx + float((c.x / c.w * 0.5 + 0.5) * vw), vy + float((c.y / c.w * 0.5 + 0.5) * vh));
-    };
-
-    // Background list: over the 3D scene, under the UI windows.
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    dl->PushClipRect(ImVec2(vx, vy), ImVec2(vx + vw, vy + vh), true);
-    const ImU32 lineCol = IM_COL32(255, 220, 30, 230);
-    const double kNearW = 1e-3;
-    auto line = [&](const core::vec3d& a, const core::vec3d& b) {
-        Clip ca = toClip(a), cb = toClip(b);
+    }
+    // False if the point is behind the camera.
+    bool Project(const core::vec3d& p, ImVec2& out) const
+    {
+        Clip c = ToClip(p);
+        if (c.w < kNearW) return false;
+        out = ToScreen(c);
+        return true;
+    }
+    void Line(const core::vec3d& a, const core::vec3d& b, ImU32 col, float thickness) const
+    {
+        Clip ca = ToClip(a), cb = ToClip(b);
         if (ca.w < kNearW && cb.w < kNearW) return;
         if (ca.w < kNearW || cb.w < kNearW)
         {
@@ -1039,8 +1115,27 @@ void MeshToolApp::DrawSelectionOverlay()
             Clip m{ ca.x + (cb.x - ca.x) * t, ca.y + (cb.y - ca.y) * t, ca.z + (cb.z - ca.z) * t, kNearW };
             (ca.w < kNearW ? ca : cb) = m;
         }
-        dl->AddLine(toScreen(ca), toScreen(cb), lineCol, 2.0f);
-    };
+        dl->AddLine(ToScreen(ca), ToScreen(cb), col, thickness);
+    }
+    // Text in a dark box centred above `p`.
+    void Label(ImVec2 p, ImU32 col, const char* text) const
+    {
+        ImVec2 ts = ImGui::CalcTextSize(text);
+        p.x -= ts.x * 0.5f;
+        p.y -= ts.y + 10.0f;
+        dl->AddRectFilled(ImVec2(p.x - 6, p.y - 3), ImVec2(p.x + ts.x + 6, p.y + ts.y + 3), IM_COL32(15, 15, 22, 210), 4.0f);
+        dl->AddText(p, col, text);
+    }
+};
+
+void MeshToolApp::DrawSelectionOverlay()
+{
+    core::bounds3d box;
+    if (!SelectionBounds(box))
+        return;
+
+    const OverlayView view(*m_ui, *m_camera);
+    const ImU32 lineCol = IM_COL32(255, 220, 30, 230);
 
     const core::vec3d lo = box.bb_min, hi = box.bb_max;
     core::vec3d c[8];
@@ -1048,25 +1143,71 @@ void MeshToolApp::DrawSelectionOverlay()
         c[i] = core::vec3d((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, (i & 4) ? hi.z : lo.z);
     const int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
     for (const auto& e : edges)
-        line(c[e[0]], c[e[1]]);
+        view.Line(c[e[0]], c[e[1]], lineCol, 2.0f);
 
     // Label above the box.
-    Clip top = toClip(core::vec3d((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, hi.z));
-    if (top.w > kNearW)
+    ImVec2 top;
+    if (view.Project(core::vec3d((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, hi.z), top))
     {
         const MeshToolUI::SelectionInfo& info = m_ui->selection;
         char text[192];
         snprintf(text, sizeof(text), "%s  [%s]  %.1f x %.1f x %.1f m  (%s)", info.name.c_str(), info.className.c_str(),
                  info.size[0], info.size[1], info.size[2],
                  m_ui->selectionView == MeshToolUI::kSelActual ? "actual" : "segment");
-        ImVec2 ts = ImGui::CalcTextSize(text);
-        ImVec2 p = toScreen(top);
-        p.x -= ts.x * 0.5f;
-        p.y -= ts.y + 10.0f;
-        dl->AddRectFilled(ImVec2(p.x - 6, p.y - 3), ImVec2(p.x + ts.x + 6, p.y + ts.y + 3), IM_COL32(15, 15, 22, 210), 4.0f);
-        dl->AddText(p, IM_COL32(255, 225, 60, 255), text);
+        view.Label(top, IM_COL32(255, 225, 60, 255), text);
     }
-    dl->PopClipRect();
+}
+
+void MeshToolApp::DrawCaptureOverlay()
+{
+    if (!m_ui->debugCaptures)
+        return;
+
+    const OverlayView view(*m_ui, *m_camera);
+    auto color = [](size_t k, int alpha) {
+        float rgb[3];
+        DistinctColor(int32_t(k), rgb);
+        return IM_COL32(int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255), alpha);
+    };
+
+    for (const BatchMeshData* batch : g_world.mesh_data_batches)
+        for (const GroupMeshData* group : batch->group_meshes)
+        {
+            const std::vector<CaptureInfo>& caps = group->captures;
+            for (size_t k = 0; k < caps.size(); k++)
+            {
+                const CaptureInfo& c = caps[k];
+                const ImU32 col = color(k, 235);
+
+                // Footprint outline at the capture's base height.
+                if (c.footprint.b_valid)
+                {
+                    const core::vec3d& lo = c.footprint.bb_min;
+                    const core::vec3d& hi = c.footprint.bb_max;
+                    const core::vec3d r[4] = { core::vec3d(lo.x, lo.y, lo.z), core::vec3d(hi.x, lo.y, lo.z),
+                                               core::vec3d(hi.x, hi.y, lo.z), core::vec3d(lo.x, hi.y, lo.z) };
+                    for (int e = 0; e < 4; e++)
+                        view.Line(r[e], r[(e + 1) % 4], color(k, 150), 1.5f);
+                }
+
+                // Path from the previous camera, then this camera's view ray.
+                if (k > 0)
+                    view.Line(caps[k - 1].eye, c.eye, IM_COL32(235, 235, 245, 200), 2.0f);
+                view.Line(c.eye, c.target, col, 1.5f);
+
+                ImVec2 p;
+                if (view.Project(c.target, p))
+                    view.dl->AddCircle(p, 4.0f, col, 0, 1.5f);
+                if (view.Project(c.eye, p))
+                {
+                    view.dl->AddCircleFilled(p, 6.0f, col);
+                    view.dl->AddCircle(p, 6.0f, IM_COL32(15, 15, 22, 255), 0, 1.5f);
+                    char text[96];
+                    snprintf(text, sizeof(text), "#%zu %s", k + 1, c.placement.c_str());
+                    view.Label(p, col, text);
+                }
+            }
+        }
 }
 
 void MeshToolApp::ProcessPendingActions()
@@ -1082,6 +1223,8 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->ActionSaveScene();
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
             m_ui->wantFrameAll = true;
+        else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false))
+            m_ui->geFollowViewport = !m_ui->geFollowViewport;
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && m_ui->selection.active)
             m_ui->selectionView = m_ui->selectionView == MeshToolUI::kSelActual ? MeshToolUI::kSelSegment
                                                                                 : MeshToolUI::kSelActual;
@@ -1156,25 +1299,34 @@ void MeshToolApp::ProcessPendingActions()
                 m_meshRenderer->ReleaseMesh(mesh);   // re-uploaded on next draw
         }
 
-        // Show the capture right away, centred in the viewport. A capture next
-        // to the previous one was merged into it; any other replaces it.
-        if (batch && result.new_data && !batch->group_meshes.empty())
+        // Overview captures (GE zoomed far out) the next capture replaced.
+        if (!result.discarded.empty())
+        {
+            vkDeviceWaitIdle(m_renderer->GetContext().device);
+            for (GroupMeshData* group : result.discarded)
+                ReleaseGroup(group);
+        }
+
+        // Show the capture right away, centred in the viewport. A capture that
+        // overlaps or borders an area was merged into it; any other is a new
+        // area beside the others.
+        if (batch && result.new_data && result.group)
         {
             auto& batches = g_world.mesh_data_batches;
             if (std::find(batches.begin(), batches.end(), batch) == batches.end())
                 batches.push_back(batch);
 
-            if (!result.merged)
-                DiscardOlderCaptures(batch);
-            UploadGroupTextures(batch->group_meshes.back());
+            UploadGroupTextures(result.group);
 
-            batch->bbox_ws = batch->group_meshes.back()->bbox_ws;
-            batch->bbox_gps = batch->group_meshes.back()->bbox_gps;
             RecomputeWorldBounds();
-            FrameBounds(batch->bbox_ws);
+            // With GE following the viewport, reframing would fly GE away
+            // from where the user is capturing: keep the camera.
+            if (!m_ui->geFollowViewport)
+                FrameBounds(result.group->bbox_ws);
 
-            m_ui->statusMessage = std::string(result.merged ? "Merged capture into the neighbouring one: " : "Captured: ") +
-                                  std::to_string(batch->group_meshes.back()->meshes.size()) + " meshes.";
+            m_ui->statusMessage = std::string(result.merged ? "Merged capture into the area it overlaps: "
+                                              : batch->group_meshes.size() > 1 ? "Captured a new area: " : "Captured: ") +
+                                  std::to_string(result.group->meshes.size()) + " meshes.";
             m_ui->statusTimeout = 6.0f;
         }
     }

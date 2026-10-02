@@ -17,5 +17,8 @@ void main(void)
 {
     vPositionWS = (uModelMatrix * vec4(aPosition, 1.0)).xyz;
     vTextureCoord = aTexcoord;
-    gl_Position = uViewProjMatrix * vec4(vPositionWS, 1.0);
+    // Positions are camera-relative, so scaling them moves the mesh along the
+    // view rays only: same pixels, later depth (LOD depth order; 0 = off).
+    float depthScale = uScreenPosition.x > 0.0 ? uScreenPosition.x : 1.0;
+    gl_Position = uViewProjMatrix * vec4(vPositionWS * depthScale, 1.0);
 }

@@ -14,6 +14,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <GLFW/glfw3.h>
 #include "nfd.h"
 #include "vk_texture_manager.h"
 
@@ -512,6 +513,7 @@ void MeshToolUI::DrawScenePanel()
 
     DrawObjectsSection();
     DrawSelectionSection();
+    DrawCapturesSection();
 
     // --- Batch list ---
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.40f, 0.28f, 0.18f, 1.0f));
@@ -572,6 +574,30 @@ void MeshToolUI::DrawScenePanel()
                            running ? "Google Earth: Running" : "Google Earth: Not running");
         ImGui::TextColored(hooked ? ImVec4(0.3f, 0.9f, 0.3f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
                            hooked ? "Hook DLL: Connected" : "Hook DLL: Not connected");
+        if (geoViewServer)
+        {
+            const GeoView view = geoViewServer->Latest();
+            if (view.valid)
+                ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "GPS view link: %.5f, %.5f (%.0f s ago)",
+                                   view.laLat, view.laLon, glfwGetTime() - view.time);
+            else
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "GPS view link: None");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Google Earth's view in GPS coordinates, which places captures and\n"
+                                  "drives viewport follow. Google Earth reports it when its camera\n"
+                                  "comes to rest, so the age grows while you don't move it there.");
+            if (ImGui::SmallButton("Connect Google Earth"))
+                ActionConnectGoogleEarth();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Loads MeshTool's GPS view and follow links into Google Earth, also a\n"
+                                  "Google Earth you started yourself. Use when the link shows None/Stale.");
+        }
+        ImGui::Spacing();
+        ImGui::Checkbox("Google Earth follows viewport (G)", &geFollowViewport);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Whenever the viewport camera comes to rest, Google Earth flies to the same\n"
+                              "position and direction. Needs a GPS-referenced scene, and Google Earth\n"
+                              "started from MeshTool (its KML carries the follow link).");
         ImGui::Unindent(8);
     }
 
@@ -620,7 +646,7 @@ void MeshToolUI::DrawViewport()
 
     // Navigation hint (bottom-left)
     {
-        const char* nav = "Click select  T segment/actual  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
+        const char* nav = "Click select  T segment/actual  G GE follow  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
         float lineH = ImGui::GetTextLineHeight();
         dl->AddText(ImVec2(x + 10, y + h - lineH - 8), IM_COL32(110, 118, 145, 170), nav);
     }
@@ -743,6 +769,8 @@ void MeshToolUI::DrawSelectionSection()
         ImGui::Text("Hit:       %.2f, %.2f, %.2f", selection.hit[0], selection.hit[1], selection.hit[2]);
         if (!selection.gpsText.empty())
             ImGui::TextDisabled("%s", selection.gpsText.c_str());
+        if (!selection.captureText.empty())
+            ImGui::Text("Capture:   %s", selection.captureText.c_str());
         ImGui::Spacing();
         ImGui::TextUnformatted("View:");
         ImGui::SameLine();
@@ -758,6 +786,91 @@ void MeshToolUI::DrawSelectionSection()
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear"))
             wantClearSelection = true;
+        ImGui::Unindent(8);
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::Spacing();
+}
+
+// ---------------------------------------------------------------------------
+// Google Earth links
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::ActionConnectGoogleEarth()
+{
+    if (!geoViewServer || !geoViewServer->Port() || !processManager)
+    {
+        ShowMessage("Connect Google Earth", "The GPS view server is not running.");
+        return;
+    }
+    std::string kml = geoViewServer->WriteKml("meshtool_view.kml");
+    if (kml.empty() || !processManager->OpenKmlInGoogleEarth(kml))
+    {
+        ShowMessage("Connect Google Earth", "Could not open the link KML in Google Earth Pro.");
+        return;
+    }
+    statusMessage = "Opened the MeshTool links in Google Earth; the GPS view link turns Live within a second.";
+    statusTimeout = 6.0f;
+}
+
+// ---------------------------------------------------------------------------
+// Live captures merged into the scene (scene panel, debug)
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawCapturesSection()
+{
+    std::vector<const GroupMeshData*> areas;   // groups with capture records, oldest first
+    for (const BatchMeshData* batch : g_world.mesh_data_batches)
+        for (const GroupMeshData* g : batch->group_meshes)
+            if (!g->captures.empty())
+                areas.push_back(g);
+    if (areas.empty())
+        return;
+
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.30f, 0.30f, 0.34f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.38f, 0.38f, 0.43f, 1.0f));
+    if (ImGui::CollapsingHeader("Captures (debug)"))
+    {
+        ImGui::Indent(8);
+        ImGui::Checkbox("Show capture path, colour tiles by capture", &debugCaptures);
+        for (size_t a = 0; a < areas.size(); a++)
+        {
+            const GroupMeshData* group = areas[a];
+            std::vector<int> tiles(group->captures.size(), 0);   // tiles of each capture still in the scene
+            int unknown = 0;
+            for (const MeshData* m : group->meshes)
+            {
+                if (m->capture_id >= 0 && size_t(m->capture_id) < tiles.size())
+                    tiles[size_t(m->capture_id)]++;
+                else
+                    unknown++;
+            }
+
+            ImGui::Spacing();
+            if (areas.size() > 1 || group->no_gps)
+                ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Area %zu%s", a + 1,
+                                   group->no_gps ? "  (no GPS: set beside the others, not at its real place)" : "");
+            for (size_t k = 0; k < group->captures.size(); k++)
+            {
+                const CaptureInfo& c = group->captures[k];
+                float rgb[3];
+                DistinctColor(int32_t(k), rgb);
+                ImGui::PushID(int(a * 10000 + k));
+                ImGui::ColorButton("##col", ImVec4(rgb[0], rgb[1], rgb[2], 1.0f),
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, ImVec2(16, 16));
+                ImGui::SameLine();
+                ImGui::Text("#%zu  %s", k + 1, c.placement.c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Tiles added %d, now %d (rest hidden by finer or copied tiles)\n"
+                                      "Duplicates skipped %d\nCamera %.1f, %.1f, %.1f m",
+                                      c.tiles_added, tiles[k], c.duplicates, c.eye.x, c.eye.y, c.eye.z);
+                ImGui::SameLine();
+                ImGui::TextDisabled("%d/%d tiles", tiles[k], c.tiles_added);
+                ImGui::PopID();
+            }
+            if (unknown > 0)
+                ImGui::TextDisabled("%d tiles of unknown capture (grey)", unknown);
+        }
         ImGui::Unindent(8);
     }
     ImGui::PopStyleColor(2);

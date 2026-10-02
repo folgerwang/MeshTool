@@ -27,6 +27,7 @@ struct MeshDrawFrame {
     // skip classes switched off (indexed by ObjectClass; nullptr = all shown).
     bool        classColors = false;
     bool        buildingColors = false;   // with classColors: one colour per building
+    bool        captureColors = false;    // debug: colour tiles by the live capture that produced them
     const bool* classVisible = nullptr;
 
     // Debug view of a clicked object: its meshes in selColor; with

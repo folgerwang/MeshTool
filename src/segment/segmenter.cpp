@@ -1829,6 +1829,8 @@ std::vector<MeshData*> ApplySegmentation(const SegmentResult& result)
             p->translation = m->translation;
             p->dumpped_matrix = m->dumpped_matrix;
             p->object_id = local;
+            p->capture_id = m->capture_id;
+            p->lod_size = m->lod_size;
             p->vertex_list = std::make_unique<core::vec3f[]>(used.size());
             if (m->uv_list) p->uv_list = std::make_unique<core::vec2f[]>(used.size());
             if (m->color_list) p->color_list = std::make_unique<uint32_t[]>(used.size());

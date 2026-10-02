@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include "coremath.h"
 
 class VulkanRenderer;
 class VulkanMeshRenderer;
@@ -84,6 +85,16 @@ private:
     int  m_shotRect[4] = {};       // viewport in framebuffer pixels: x, y, w, h
 
     void UpdateGeoReadout();   // GPS of the camera pivot -> m_ui->geoText
+    const BatchMeshData* GeoreferencedBatch() const;   // the batch whose GPS frame the scene uses, or null
+
+    // Google Earth follows the viewport camera (m_ui->geFollowViewport): the
+    // camera is sent once it has rested briefly and differs from the last sent.
+    void UpdateGeFollow();
+    core::vec3d m_followPrevEye, m_followPrevFwd;   // last frame's camera
+    core::vec3d m_followSentEye, m_followSentFwd;   // camera last sent to GE
+    double      m_followMoveTime = 0.0;             // glfwGetTime() of the last camera change
+    bool        m_followSent = false;
+    bool        m_followWasOn = false;
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet
@@ -101,9 +112,10 @@ private:
     void ClearSelection();
     bool SelectionBounds(core::bounds3d& box, int* meshes = nullptr, size_t* triangles = nullptr) const;
     void DrawSelectionOverlay();
+    struct OverlayView;                       // scene -> viewport pixels for ImGui overlays
+    void DrawCaptureOverlay();                // debug: each capture's camera, view ray, footprint, path
     void FrameBounds(const core::bounds3d& bbox);   // point the planar camera at bbox
     void UploadGroupTextures(GroupMeshData* group); // GPU-upload a captured group's textures
-    void DiscardOlderCaptures(BatchMeshData* batch); // keep only the newest captured group
     void RecomputeWorldBounds();
     void ReleaseGroup(GroupMeshData* group);         // free GPU data and delete (GPU must be idle)
     void ClearScene();

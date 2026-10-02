@@ -7,6 +7,7 @@
 #include "objectclass.h"
 #include "coremath.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -164,25 +165,8 @@ bool MeshDrawFrame::IsSelected(const GroupMeshData* group, const MeshData* mesh)
     return selMesh ? mesh == selMesh : (selObject >= 0 && mesh->object_id == selObject);
 }
 
-// A colour per building: hues a golden-ratio step apart, so buildings with
-// neighbouring indices (found next to each other) never look alike.
-static void BuildingColor(int32_t objectId, float rgb[3])
-{
-    float h = fmodf(float(objectId) * 0.618034f, 1.0f) * 6.0f;
-    const float s = (objectId & 1) ? 0.55f : 0.75f, v = (objectId & 2) ? 0.80f : 0.95f;
-    int i = int(h);
-    float f = h - float(i);
-    float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
-    switch (i % 6)
-    {
-    case 0: rgb[0] = v; rgb[1] = t; rgb[2] = p; break;
-    case 1: rgb[0] = q; rgb[1] = v; rgb[2] = p; break;
-    case 2: rgb[0] = p; rgb[1] = v; rgb[2] = t; break;
-    case 3: rgb[0] = p; rgb[1] = q; rgb[2] = v; break;
-    case 4: rgb[0] = t; rgb[1] = p; rgb[2] = v; break;
-    default: rgb[0] = v; rgb[1] = p; rgb[2] = q; break;
-    }
-}
+// Debug capture view: tiles of unknown origin (loaded from a scene file).
+static const float kNoCaptureColor[3] = { 0.45f, 0.45f, 0.48f };
 
 void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           const std::vector<BatchMeshData*>& batches,
@@ -209,12 +193,21 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                 float instanceColor[3];
                 if (selected)
                     flat = frame.selActual ? nullptr : frame.selColor;
+                else if (frame.captureColors)
+                {
+                    flat = kNoCaptureColor;
+                    if (mesh->capture_id >= 0)
+                    {
+                        DistinctColor(mesh->capture_id, instanceColor);
+                        flat = instanceColor;
+                    }
+                }
                 else if (frame.classColors)
                 {
                     flat = GetObjectClassInfo(cls).color;
                     if (frame.buildingColors && cls == kObjBuilding)
                     {
-                        BuildingColor(mesh->object_id, instanceColor);
+                        DistinctColor(mesh->object_id, instanceColor);
                         flat = instanceColor;
                     }
                 }
@@ -257,6 +250,14 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     pc.boxColor[1] = flatColor ? flatColor[1] : 0.75f;
     pc.boxColor[2] = flatColor ? flatColor[2] : 0.75f;
     pc.boxColor[3] = hasTexture ? 1.0f : 0.0f;
+
+    // LOD depth order (basiclight.vert reads screenPosition.x as a depth
+    // scale): GE draws coarse tiles under finer ones and stencils the overlap
+    // away; here a coarser tile is pushed back along the view rays by 0.2% per
+    // level, which leaves its pixels in place, so where both remain the finer
+    // one is in front instead of z-fighting it.
+    if (mesh->lod_size > 0.0f)
+        pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

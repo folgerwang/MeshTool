@@ -15,6 +15,7 @@
 
 struct MeshData;
 struct GroupMeshData;
+struct CaptureInfo;
 struct BatchMeshData;
 
 // LiveCaptureProcessor: reads captured GL commands from shared memory,
@@ -38,18 +39,22 @@ public:
     // What the last processFrame() did to the scene. Meshes in `removed` were
     // taken out of the output batch and must be freed (GPU data + delete) by
     // the caller; meshes in `modified` changed their index lists, so cached GPU
-    // data must be dropped. When `merged` is false the newest group replaces
-    // the previous capture; when true it was folded into the existing group.
+    // data must be dropped. `group` is the group the capture went into: an
+    // existing area when `merged`, else a new one appended to the batch.
+    // Groups in `discarded` (overview captures) were taken out of the batch
+    // and must be freed by the caller.
     struct FrameResult
     {
         bool new_data = false;
         bool merged = false;
+        GroupMeshData* group = nullptr;
+        std::vector<GroupMeshData*> discarded;
         std::vector<MeshData*> modified;
         std::vector<MeshData*> removed;
     };
     const FrameResult& LastResult() const { return m_last; }
 
-    // Forget the capture being merged into (it was deleted by the app).
+    // Forget the areas being merged into (the app deleted or rebuilt them).
     void ResetMerge();
 
     // Google Earth's view (from the KML view link) for the next processFrame():
@@ -97,10 +102,10 @@ private:
     // scale: Google Earth draws coarse parent tiles under finer children and
     // hides the overlap with the stencil buffer, so both end up captured.
     std::map<MeshData*, double> m_tile_size;
-
-    // Drops coarse-tile triangles whose ground footprint finer tiles cover,
-    // which is what GE's stencil masking does on screen.
-    void RemoveCoveredLods(GroupMeshData* group);
+    // Scene position (metres) of each GE tile's origin, set when the tile is
+    // placed. All meshes GE draws for one quadtree node (one per texture)
+    // share its modelview, so origin + size identify the node across captures.
+    std::map<MeshData*, core::vec3d> m_tile_origin;
 
     // Eye space -> ground frame: metres, Z up, Y pointing away from the GE
     // camera, centred on the first capture of a merged area.
@@ -110,7 +115,6 @@ private:
         bool valid = false;
         bool geo = false;       // x/y/up are East/North/Up at the batch's GPS reference
     };
-    GroundFrame         m_ref_frame;           // frame of the capture being merged into
 
     // GE view at capture time (invalid if the KML view link never reported).
     GeoView             m_geo_view;
@@ -119,12 +123,32 @@ private:
     static core::matrix4d FrameMatrix(const GroundFrame& f);   // row-vector [p,1] -> [ground / metres-per-unit, 1]
     // Logs how far the GE look-at point is from the captured surface at screen centre.
     void CheckLookAt(const GroupMeshData* group) const;
-    GroupMeshData*      m_merged_group = nullptr;
 
     // Tile identity across captures: hash of a tile's vertex + index data.
     std::map<MeshData*, uint64_t>       m_tile_key;
-    std::map<uint64_t, core::matrix4d>  m_ref_tile_mv;   // key -> modelview into the reference eye space
-    std::map<uint64_t, MeshData*>       m_key_mesh;      // tiles present in m_merged_group
+
+    // A captured area: one group of the output batch that later captures
+    // merge into. Its first capture's eye space is the area's reference.
+    struct Area
+    {
+        GroupMeshData*                      group = nullptr;
+        GroundFrame                         frame;        // reference eye space -> scene
+        std::map<uint64_t, core::matrix4d>  ref_tile_mv;  // key -> modelview into the reference eye space
+        std::map<uint64_t, MeshData*>       key_mesh;     // tiles present in the group
+    };
+    std::vector<Area>   m_areas;   // oldest first
+
+    // Drops coarse-tile triangles whose ground footprint finer tiles cover,
+    // which is what GE's stencil masking does on screen, and same-level tiles
+    // that are copies of one already kept (merged captures overlap).
+    void RemoveCoveredLods(Area& area);
+    // Smallest tile edge (metres) among the meshes: the level of detail a
+    // capture or area reaches, unaffected by tilt (horizon tiles are coarse).
+    double FinestTile(const std::vector<MeshData*>& meshes) const;
+    // Moves an area by d metres in the scene, its frame included.
+    void ShiftArea(Area& area, const core::vec3d& d);
+    // Moves areas captured without GPS off the others (they have no true place).
+    void SeparateNoGpsAreas();
 
     FrameResult         m_last;
 
@@ -132,9 +156,14 @@ private:
     // Moves a group's meshes from this frame's eye space (optionally via the
     // eye-to-reference-eye transform X) into ground frame `f`.
     void ApplyGroundFrame(GroupMeshData* group, const core::matrix4d* X, const GroundFrame& f);
-    // Finds X (this frame's eye space -> reference eye space) from tiles both
-    // captures contain; false if fewer than 3 agree.
-    bool RegisterToReference(const GroupMeshData* group, core::matrix4d& X, int& support) const;
+    static core::vec3d ToGround(const core::vec3d& p_eye, const core::matrix4d* X, const GroundFrame& f);
+    // Debug record of this frame's capture (camera, footprint) once its
+    // meshes are in ground frame `f`; tags the meshes with `capture_id`.
+    CaptureInfo DescribeCapture(const std::vector<MeshData*>& meshes, const core::matrix4d* X,
+                                const GroundFrame& f, int32_t capture_id, const std::string& placement) const;
+    // Finds X (this frame's eye space -> the area's reference eye space) from
+    // tiles both contain; false if fewer than 3 agree.
+    bool RegisterToReference(const GroupMeshData* group, const Area& area, core::matrix4d& X, int& support) const;
     void HandOutTextures(GroupMeshData* group, uint32_t index_offset);
 
     void ProcessRecord(const GLCaptureRecord* record, const char* payload);
@@ -167,6 +196,10 @@ public:
     bool StartGoogleEarth(const std::string& ge_path = "", const std::string& kml_path = "");
     // Launch Google Earth and fly to a KML file
     bool StartGoogleEarthWithKML(const std::string& kml_path);
+    // Opens a KML in Google Earth: a running Google Earth (started by MeshTool
+    // or not) loads it into its session, otherwise GE starts. Not tracked as
+    // MeshTool's GE process and nothing is injected.
+    bool OpenKmlInGoogleEarth(const std::string& kml_path);
     void StopGoogleEarth();
     bool IsRunning() const;
 

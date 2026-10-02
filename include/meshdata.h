@@ -161,6 +161,8 @@ struct MeshData : public core::Primitive
     unique_ptr<uint32_t[]> color_list;
     vector<DrawCallInfo> draw_call_list;
     int32_t         object_id = -1;     // index into the owning group's objects, -1 = none
+    int32_t         capture_id = -1;    // index into the owning group's captures, -1 = unknown
+    float           lod_size = 0.0f;    // GE tile edge (metres): coarser draws behind finer; 0 = not a GE tile
 
     MeshData() : num_vertex(0),
                  idx_in_texture_list(INVALID_VALUE),
@@ -218,6 +220,18 @@ struct SceneObject
     core::bounds3d  bbox_ws;
 };
 
+// One live capture merged into a group (debug view): where GE's camera was
+// and how the capture was placed. Its tiles are the meshes with this capture_id.
+struct CaptureInfo
+{
+    core::vec3d     eye;                // GE camera, scene coordinates
+    core::vec3d     target;             // where the camera looked, on the captured ground
+    core::bounds3d  footprint;          // the capture's tiles as placed
+    string          placement;          // "first capture", "shared tiles (12)", "GPS"
+    int             tiles_added = 0;    // tiles this capture brought in
+    int             duplicates = 0;     // tiles it had that the group already held
+};
+
 struct GroupMeshData
 {
     core::bounds3d          bbox_ws;
@@ -226,6 +240,8 @@ struct GroupMeshData
     vector<core::Texture2DInfo*> loaded_textures;
     vector<shared_ptr<string>> texture_names;
     vector<SceneObject>     objects;    // filled by segmentation
+    vector<CaptureInfo>     captures;   // filled by live capture, in capture order
+    bool                    no_gps = false;   // captured without GPS: set beside the GPS areas, not at its true place
 
     void remove_item(uint32_t index)
     {

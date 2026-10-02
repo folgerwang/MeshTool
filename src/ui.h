@@ -46,6 +46,12 @@ public:
     bool  classColors = false;
     bool  buildingColors = true;   // with classColors: a distinct colour per building
     bool  classVisible[kObjClassCount] = { true, true, true, true, true, true, true, true };
+    // Debug: colour tiles by the live capture that produced them and draw
+    // each capture's camera, look direction and footprint, joined in order.
+    bool  debugCaptures = false;
+    // Google Earth flies to the viewport camera whenever it comes to rest (G).
+    bool  geFollowViewport = false;
+    void  ActionConnectGoogleEarth();   // load MeshTool's view/follow links into Google Earth
 
     // Object clicked in the viewport (filled by the app; active = something selected).
     struct SelectionInfo
@@ -58,6 +64,7 @@ public:
         double      size[3] = {};   // bounding box extent, metres
         double      hit[3] = {};    // clicked point, scene coordinates
         std::string gpsText;        // clicked point in WGS84 when georeferenced
+        std::string captureText;    // live capture that produced the clicked tile
     };
     SelectionInfo selection;
     bool  isolateSelection = false;
@@ -100,7 +107,7 @@ private:
     double navRange = 500.0;    // 500m viewing distance
     char   navAddress[256] = "San Francisco, CA";
     int    navCaptureDelay = 15; // seconds to wait for GE to load before capture
-    bool   navAutoCapture = true;
+    bool   navAutoCapture = false;
 
     // Scene info panel
     bool showScenePanel = true;
@@ -112,6 +119,7 @@ private:
     void DrawSegmentDialog();
     void DrawObjectsSection();
     void DrawSelectionSection();
+    void DrawCapturesSection();
 
     // Icon textures
     VulkanTextureManager* m_texMgr = nullptr;

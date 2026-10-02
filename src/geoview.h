@@ -45,6 +45,15 @@ public:
 
     GeoView Latest() const;
 
+    // Makes GE fly to this camera (degrees; altitude in metres above sea
+    // level; tilt 0 = looking straight down, 90 = at the horizon). GE polls
+    // /follow twice a second and gets each new camera once, so it never
+    // fights the user's own navigation in GE.
+    void SetFollowCamera(double lon, double lat, double alt, double heading, double tilt);
+    // glfwGetTime() of GE's last /follow poll (0 = never: GE was started with
+    // a KML from before this link existed).
+    double LastFollowPoll() const;
+
     // KML that makes GE report its view here. `extraKml` is inserted into the
     // Document (e.g. a fly-to LookAt). Returns the absolute file path, or "".
     std::string WriteKml(const std::string& fileName, const std::string& extraKml = "") const;
@@ -55,4 +64,8 @@ private:
     int                 m_port = 0;
     mutable std::mutex  m_mutex;
     GeoView             m_latest;
+    std::string         m_followKml;          // <Camera> element of the newest follow camera
+    unsigned            m_followSeq = 0;      // bumped by SetFollowCamera
+    unsigned            m_followServed = 0;   // the camera GE was last given
+    double              m_followPollTime = 0.0;
 };
