@@ -18,12 +18,15 @@
 //      surface height and the triangle under every pixel.
 //   2. Ground model by morphological opening of the height map; height above
 //      ground per pixel.
-//   3. Regions: raised areas split into instances by height continuity, ground
-//      split into colour superpixels (SLIC) and merged.
+//   3. Regions: raised areas split into instances by height continuity (step
+//      allowed grows with height), building parts merged (tiers standing on a
+//      lower part, slender facade pieces); ground split into colour
+//      superpixels (SLIC) and merged.
 //   4. Qwen (vision model via Ollama) labels numbered regions tile by tile
 //      ("set of marks"), told which regions are raised and which are ground.
-//   5. Each triangle takes the object of the region under it (walls join
-//      their building via height above ground); meshes are then split.
+//   5. Triangles seen from above take the region under them; walls inherit
+//      their roof's object down the mesh, or (unstitched tiles) look behind
+//      themselves for a roof reaching their top; meshes are then split.
 
 struct SegmentSettings
 {
@@ -35,6 +38,7 @@ struct SegmentSettings
     int         tileSize = 768;          // px per model request (Qwen3.x vision input)
     bool        useModel = true;         // false: geometry/colour fallback only (no Qwen)
     std::string debugDir = "C:\\Users\\Public\\meshtool_segment";
+    bool        dumpRaw = false;         // also write top.f32 / object.i32 rasters (offline analysis)
 };
 
 struct SegmentResult

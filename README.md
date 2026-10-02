@@ -80,13 +80,38 @@ colour and height only.
 1. The mesh is rendered top-down (0.25 m/pixel): colour, height, coverage.
 2. A ground model (lowest points flooded across max-35% slopes, local plane
    fits) gives height above ground - exact on slopes and hills.
-3. Raised areas split into instances at height breaks; ground split into
-   colour regions.
+3. Raised areas split into instances at height breaks (1.5 m, or 8% of the
+   height for towers, so terraced crowns stay whole); steep facade pixels join
+   the highest roof they hang from. Tiers / towers / rooftop structures that
+   stand on a lower part holding most of their outline are merged into it, and
+   so are pieces too slender to stand alone (facade ledges and fins: footprint
+   under 3% of height squared) into the taller part they touch. Ground split
+   into colour regions.
 4. The model labels numbered regions on 768 px tiles, told which are raised;
    answers are schema-constrained JSON.
-5. Triangles join the object under them (walls via height above ground) and
-   meshes are split per object. Objects are saved in `.mtscene` and name the
+5. Triangles seen from above join the object under them; walls inherit
+   their roof's object along the mesh, flowing only downward (so ground never
+   climbs a wall); walls in tiles not stitched to their roof look behind
+   themselves (against the normal) for a roof that reaches their top; stray
+   triangles take the object of their mesh neighbours,
+   and meshes are split per object. Objects are saved in `.mtscene` and name the
    glTF nodes.
+
+When segmentation finishes, the 3D viewport is saved twice for checking -
+class colours and original textures - as
+`screenshots\check_<time>_segment.png` / `_original.png` in the MeshTool folder.
+Tools > Save Check Screenshots takes the pair again from the current view.
+Each run also saves its input as `last_input.mtscene` in the debug folder, so it
+can be re-run and checked offline:
+
+```
+MeshTool --segment last_input.mtscene out.mtscene [--no-model] [--debug-dir d] [--dump]
+MeshTool out.mtscene --shots prefix [--frame building_012] [--yaw 30] [--pitch -20] [--zoom 0.85]
+```
+
+`--dump` adds raw rasters (`top.f32`, `object.i32`), `objects.txt` and per-triangle
+labels (`tris.bin`) to the debug folder; `--shots` opens a scene, aims at an
+object, saves the check-screenshot pair and exits.
 
 Scene panel > Objects: colour by class, show/hide classes. Debug images
 (orthophoto, regions, classes, marked tiles) and a log go to

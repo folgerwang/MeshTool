@@ -281,6 +281,8 @@ void MeshToolUI::DrawMenuBar()
         {
             if (ImGui::MenuItem("Segment Scene (AI)...", nullptr, false, !g_world.mesh_data_batches.empty()))
                 showSegmentDialog = true;
+            if (ImGui::MenuItem("Save Check Screenshots", nullptr, false, !g_world.mesh_data_batches.empty()))
+                wantCheckScreenshots = true;
             ImGui::EndMenu();
         }
 

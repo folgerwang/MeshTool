@@ -32,6 +32,7 @@ public:
     bool captureWaiting = false;    // set by the app while a requested capture hasn't arrived
     bool wantStopCapture = false;
     bool wantFrameAll = false;      // point the camera at everything loaded
+    bool wantCheckScreenshots = false;   // Tools > Save Check Screenshots
 
     // Segmentation (Tools > Segment Scene): settings and requests for the app,
     // progress reported back by it.

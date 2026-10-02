@@ -32,6 +32,19 @@ public:
 
     bool Init();
     void OpenOnStart(const std::string& path);   // scene file given on the command line
+
+    // Unattended check screenshots (MeshTool scene.mtscene --shots prefix ...):
+    // once the scene is open, aim the camera (frame the named object, or the
+    // whole scene), save <prefix>_segment.png / _original.png and exit.
+    struct AutoShots
+    {
+        std::string prefix;
+        std::string frameObject;     // object name, e.g. "building_012"; empty = everything
+        double      yawDeg = 30.0;   // view direction (0 looks north, +90 east)
+        double      pitchDeg = -35.0;
+        double      zoom = 1.0;      // < 1 moves the camera closer than the framing distance
+    };
+    void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     void MainLoop();
     void Shutdown();
 
@@ -56,6 +69,19 @@ private:
     // Background scene segmentation (Tools > Segment Scene).
     std::unique_ptr<class Segmenter> m_segmenter;
     void UpdateSegmentation();
+
+    // Check screenshots: the 3D viewport saved twice - class colours, then
+    // original textures - to .\screenshots\check_<time>_*.png.
+    // Taken when segmentation finishes and from Tools > Save Check Screenshots.
+    void StartCheckScreenshots(const std::string& base = std::string());
+    AutoShots m_auto;
+    int  m_autoStage = 0;          // 0 off, 1 wait for scene, 2 settle, 3 shooting
+    int  m_autoFrames = 0;
+    void UpdateAutoShots();
+    int  m_shotStage = 0;          // 0 idle, 1 class colours, 2 original colours
+    bool m_shotPending = false;    // readback requested for this frame
+    std::string m_shotBase;        // path prefix
+    int  m_shotRect[4] = {};       // viewport in framebuffer pixels: x, y, w, h
 
     void UpdateGeoReadout();   // GPS of the camera pivot -> m_ui->geoText
     ProcessManager*        m_processManager = nullptr;

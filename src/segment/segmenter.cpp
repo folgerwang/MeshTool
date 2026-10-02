@@ -14,6 +14,7 @@
 #include <limits>
 #include <map>
 #include <queue>
+#include <unordered_map>
 
 #include "objectclass.h"
 #include "qwen_client.h"
@@ -733,27 +734,54 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
             }
         }
 
-        const float step = 1.5f;   // max height jump between neighbours of one object
+        // Wall pixels: on a steep ramp, strictly between a lower and a higher
+        // neighbour. Photogrammetric facades lean, so from above they are
+        // ramps whose pixels link along height contours into thin rings - one
+        // "object" per storey band. They take no part in region growing and
+        // join the roof they hang from afterwards. Roof edges (one neighbour
+        // at roof height) are not walls.
+        const float ramp = 0.75f;
+        std::vector<uint8_t> wall(N, 0);
+        for (int y = 1; y + 1 < H; y++)
+            for (int x = 1; x + 1 < W; x++)
+            {
+                size_t i = size_t(y) * W + x;
+                if (!raised[i]) continue;
+                auto between = [&](size_t a, size_t b) {
+                    float lo = std::min(top[a], top[b]), hi = std::max(top[a], top[b]);
+                    return lo > -kInf && top[i] > lo + ramp && top[i] < hi - ramp;
+                };
+                wall[i] = between(i - 1, i + 1) || between(i - W, i + W) ||
+                          between(i - W - 1, i + W + 1) || between(i - W + 1, i + W - 1);
+            }
+
+        // Max height jump between neighbouring pixels of one object: 1.5 m,
+        // or 8% of the height above ground. A house's 2 m step is a different
+        // house; a tower's terraced or faceted crown steps 5-10 m at 120 m and
+        // is still one tower.
+        auto same_object = [&](size_t i, size_t j) {
+            if (!raised[j] || wall[j] || veg[i] != veg[j]) return false;
+            float step = std::max(1.5f, 0.08f * std::min(hag[i], hag[j]));
+            return fabs(top[i] - top[j]) < step;
+        };
         UnionFind uf(N);
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++)
             {
                 size_t i = size_t(y) * W + x;
-                if (!raised[i]) continue;
-                if (x + 1 < W && raised[i + 1] && veg[i] == veg[i + 1] && fabs(top[i] - top[i + 1]) < step)
-                    uf.Union(int32_t(i), int32_t(i + 1));
-                if (y + 1 < H && raised[i + W] && veg[i] == veg[i + W] && fabs(top[i] - top[i + W]) < step)
-                    uf.Union(int32_t(i), int32_t(i + W));
+                if (!raised[i] || wall[i]) continue;
+                if (x + 1 < W && same_object(i, i + 1)) uf.Union(int32_t(i), int32_t(i + 1));
+                if (y + 1 < H && same_object(i, i + W)) uf.Union(int32_t(i), int32_t(i + W));
             }
         std::map<int32_t, int64_t> sizes;
-        for (size_t i = 0; i < N; i++) if (raised[i]) sizes[uf.Find(int32_t(i))]++;
+        for (size_t i = 0; i < N; i++) if (raised[i] && !wall[i]) sizes[uf.Find(int32_t(i))]++;
         const int64_t min_px = std::max<int64_t>(4, int64_t(3.0 / m2PerPixel));   // < 3 m^2: noise
         std::map<int32_t, int32_t> root_to_region;
         for (size_t i = 0; i < N; i++)
         {
-            if (!raised[i]) continue;
+            if (!raised[i] || wall[i]) continue;
             int32_t root = uf.Find(int32_t(i));
-            if (sizes[root] < min_px) continue;   // left as ground
+            if (sizes[root] < min_px) continue;   // fragment: joins a neighbour below, else ground
             auto it = root_to_region.find(root);
             if (it == root_to_region.end())
             {
@@ -763,6 +791,128 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
             }
             region[i] = it->second;
         }
+
+        // Walls and small fragments join the touching region; through
+        // raised pixels only, so nothing crosses the street.
+        // Highest edges spread first: a wall pixel belongs to the roof it hangs
+        // from, so a tower claims its whole facade before a podium at its foot
+        // does (plain nearest-first gave the podium half the tower's walls).
+        {
+            std::priority_queue<std::pair<float, size_t>> q;
+            auto unclaimed_next_to = [&](size_t i, int64_t nb[4]) {
+                int x = int(i % W), y = int(i / W);
+                nb[0] = x > 0 ? int64_t(i) - 1 : -1;      nb[1] = x + 1 < W ? int64_t(i) + 1 : -1;
+                nb[2] = y > 0 ? int64_t(i) - W : -1;      nb[3] = y + 1 < H ? int64_t(i) + W : -1;
+                for (int k = 0; k < 4; k++)
+                    if (nb[k] >= 0 && (!raised[size_t(nb[k])] || region[size_t(nb[k])] >= 0)) nb[k] = -1;
+                return nb[0] >= 0 || nb[1] >= 0 || nb[2] >= 0 || nb[3] >= 0;
+            };
+            int64_t nb[4];
+            for (size_t i = 0; i < N; i++)
+                if (region[i] >= 0 && unclaimed_next_to(i, nb)) q.push({ top[i], i });
+            while (!q.empty())
+            {
+                size_t i = q.top().second; q.pop();
+                if (!unclaimed_next_to(i, nb)) continue;
+                for (int64_t n : nb)
+                    if (n >= 0) { region[size_t(n)] = region[i]; q.push({ top[size_t(n)], size_t(n) }); }
+            }
+        }
+
+        // Parts of one building: a tier, tower on a podium, crown or rooftop
+        // structure is split off at its height break, but stands on the other
+        // part, which holds most of its outline. Separate buildings in a row touch
+        // along one party wall and face the street elsewhere. Merge a region
+        // into the neighbour that holds most of its outline - whatever their
+        // sizes (a thin crown ring is smaller than the block it encloses) -
+        // and repeat: once the innermost tier has joined, the combined outline
+        // lies against the next tier out.
+        int merged = 0;
+        for (int pass = 0; pass < 6; pass++)
+        {
+            const size_t R = regions.size();
+            std::vector<int64_t> area(R, 0), outline(R, 0), veg_px(R, 0);
+            std::vector<double> sum_top(R, 0.0), sum_hag(R, 0.0);
+            std::map<std::pair<int32_t, int32_t>, int64_t> shared;
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                {
+                    size_t i = size_t(y) * W + x;
+                    int32_t a = region[i];
+                    if (a < 0) continue;
+                    area[size_t(a)]++;
+                    sum_top[size_t(a)] += top[i];
+                    sum_hag[size_t(a)] += hag[i];
+                    if (veg[i]) veg_px[size_t(a)]++;
+                    const int64_t nb[4] = { x > 0 ? int64_t(i) - 1 : -1, x + 1 < W ? int64_t(i) + 1 : -1,
+                                            y > 0 ? int64_t(i) - W : -1, y + 1 < H ? int64_t(i) + W : -1 };
+                    for (int64_t n : nb)
+                    {
+                        int32_t b = n >= 0 ? region[size_t(n)] : -1;
+                        if (b == a) continue;
+                        outline[size_t(a)]++;
+                        if (b >= 0) shared[{ a, b }]++;
+                    }
+                }
+            auto is_veg = [&](size_t r) { return veg_px[r] * 2 > area[r]; };
+            auto mean_top = [&](size_t r) { return sum_top[r] / double(std::max<int64_t>(area[r], 1)); };
+            std::vector<int32_t> best(R, -1), best_taller(R, -1);
+            std::vector<int64_t> best_len(R, 0), best_taller_len(R, 0);
+            for (auto& e : shared)
+            {
+                size_t a = size_t(e.first.first);
+                int32_t b = e.first.second;
+                if (e.second > best_len[a]) { best_len[a] = e.second; best[a] = b; }
+                if (mean_top(size_t(b)) > mean_top(a) && e.second > best_taller_len[a])
+                { best_taller_len[a] = e.second; best_taller[a] = b; }
+            }
+            // Too slender to stand alone: a ledge, fin or balcony band on a
+            // tower's facade (14 m2 at 96 m) is split off below the roof and
+            // would otherwise claim the facade under it. Footprint under 3%
+            // of height squared (12 m2 at 20 m, 280 m2 at 96 m).
+            auto slender = [&](size_t r) {
+                double h = sum_hag[r] / double(std::max<int64_t>(area[r], 1));
+                return double(area[r]) * m2PerPixel < 0.03 * h * h;
+            };
+            UnionFind parts(R);
+            int pass_merged = 0;
+            for (size_t r = 0; r < R; r++)
+            {
+                if (best_taller[r] >= 0 && !is_veg(r) && slender(r) &&
+                    parts.Find(int32_t(r)) != parts.Find(best_taller[r]))
+                {
+                    parts.Union(int32_t(r), best_taller[r]);
+                    pass_merged++;
+                    continue;
+                }
+                int32_t b = best[r];
+                if (b < 0 || is_veg(r) || is_veg(size_t(b)) || best_len[r] * 2 <= outline[r]) continue;
+                // Only a part that stands on the other one: higher on average
+                // (penthouse, crown, tower on its podium). A lower neighbour -
+                // an annex, or a block merged earlier - stays apart, so merges
+                // cannot chain through a dense city block.
+                if (mean_top(r) <= mean_top(size_t(b))) continue;
+                if (parts.Find(int32_t(r)) == parts.Find(b)) continue;
+                parts.Union(int32_t(r), b);
+                pass_merged++;
+            }
+            if (!pass_merged) break;
+            merged += pass_merged;
+            std::vector<int32_t> remap(R, -1);
+            int32_t next = 0;
+            for (size_t r = 0; r < R; r++)
+            {
+                int32_t root = parts.Find(int32_t(r));
+                if (remap[size_t(root)] < 0) remap[size_t(root)] = next++;
+                remap[r] = remap[size_t(root)];
+            }
+            for (size_t i = 0; i < N; i++) if (region[i] >= 0) region[i] = remap[size_t(region[i])];
+            regions.resize(size_t(next));
+        }
+        size_t wall_px = 0, raised_px = 0;
+        for (size_t i = 0; i < N; i++) { wall_px += wall[i]; raised_px += raised[i]; }
+        SegLog("  %.1f%% of raised pixels are walls; %d building parts merged\n",
+               100.0 * double(wall_px) / double(std::max<size_t>(1, raised_px)), merged);
     }
     const int32_t num_raised = int32_t(regions.size());
     SegLog("  %d raised regions\n", num_raised);
@@ -943,6 +1093,7 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
     const int tiles_x = (W + T - 1) / T, tiles_y = (H + T - 1) / T;
     int tiles_done = 0, tiles_asked = 0, tiles_failed = 0;
     double model_seconds = 0.0;
+    bool model_gave_up = false;
     if (st.useModel)
     {
         std::vector<int64_t> tile_count(regions.size(), 0);
@@ -950,8 +1101,8 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
         std::vector<uint8_t> img(size_t(T) * T * 3), marked(size_t(T) * T * 3);
         std::vector<int32_t> mark_of(regions.size(), 0);
 
-        for (int ty = 0; ty < tiles_y && !m_cancel; ty++)
-            for (int tx = 0; tx < tiles_x && !m_cancel; tx++)
+        for (int ty = 0; ty < tiles_y && !m_cancel && !model_gave_up; ty++)
+            for (int tx = 0; tx < tiles_x && !m_cancel && !model_gave_up; tx++)
             {
                 tiles_done++;
                 char status[128];
@@ -1105,10 +1256,13 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
                 {
                     tiles_failed++;
                     SegLog("  %s: %zu marks, model error after %.1f s: %s\n", buf, marks.size(), secs, err.c_str());
-                    if (tiles_failed >= 3 && tiles_failed == tiles_asked)
+                    // Model unusable (server down, out of GPU memory): stop
+                    // asking and finish with colour/height classes instead of
+                    // throwing the whole run away.
+                    if (tiles_failed >= 2 && tiles_failed == tiles_asked)
                     {
-                        for (int32_t r : touched) { tile_count[size_t(r)] = 0; mark_of[size_t(r)] = 0; }
-                        return finish(false, "The model keeps failing: " + err);
+                        model_gave_up = true;
+                        SegLog("  model keeps failing - continuing without it (classes from colour and height)\n");
                     }
                 }
                 else
@@ -1292,56 +1446,242 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
 
     // ---------------------------------------------------------------------
     // 7. Every triangle -> object
+    //
+    //    a. Triangles seen from above (on the top surface at their centre)
+    //       take the region under them - exact for roofs, canopies, ground.
+    //    b. The rest - walls, mostly - inherit along the mesh, flowing only
+    //       down or level: a roof's label runs down its own walls until it
+    //       meets the ground or a lower roof, and ground never climbs a wall.
+    //       A tall facade triangle has no pixel of its own from above, so
+    //       any raster lookup for it is a guess; the mesh knows its roof.
+    //    c. Whatever the flow did not reach falls back to the raster.
+    //    d. Speckle: a triangle whose edge neighbours mostly agree on another
+    //       object joins it.
     // ---------------------------------------------------------------------
     SetStatus("Assigning triangles...", 0.97f);
     const float lift = float(st.raisedHeight * 0.4);
     const int search = std::max(2, int(round(1.5 / res)));
+    const int wall_search = std::max(4, int(round(4.0 / res)));   // leaning facades: roof edge a few metres off
     size_t counts[kObjClassCount] = {};
-    for (SegmentResult::MeshAssign& a : result->assignments)
+
+    std::vector<size_t> tri_base(result->assignments.size() + 1, 0);
+    for (size_t ai = 0; ai < result->assignments.size(); ai++)
+        tri_base[ai + 1] = tri_base[ai] + result->assignments[ai].triangleObject.size();
+    const size_t TT = tri_base.back();
+    std::vector<int32_t> label(TT, -1), fallback(TT, -1), nbr(TT * 3, -1);
+    std::vector<float> tri_z(TT, 0.0f);
+    std::vector<uint8_t> no_flow(TT, 0);
+    // How each triangle got its object (debug dump): 1 seen from above,
+    // 2 mesh flow, 3 inward wall search, 4 ring wall search, 5 near outline,
+    // 6 ground; +16 when the speckle pass changed it.
+    std::vector<uint8_t> how(TT, 0), fb_how(TT, 0);
+    std::vector<float> tri_px(TT, 0.0f), tri_py(TT, 0.0f), tri_up(TT, 0.0f);
     {
-        const MeshData* m = a.mesh;
-        const DrawCallInfo& dc = m->draw_call_list[0];
-        for (size_t t = 0; t < a.triangleObject.size(); t++)
+        // Vertices welded by position (2 cm), so walls connect to roofs
+        // across duplicated vertices and capture tiles.
+        struct QKey { int64_t x, y, z; bool operator==(const QKey& o) const { return x == o.x && y == o.y && z == o.z; } };
+        struct QHash { size_t operator()(const QKey& k) const {
+            return size_t(k.x * 73856093LL) ^ size_t(k.y * 19349663LL) ^ size_t(k.z * 83492791LL); } };
+        std::unordered_map<QKey, uint32_t, QHash> weld;
+        weld.reserve(TT);
+        std::vector<uint32_t> tri_v(TT * 3, 0);
+        std::unordered_map<uint64_t, int32_t> edge_first;
+        edge_first.reserve(TT * 2);
+
+        for (size_t ai = 0; ai < result->assignments.size(); ai++)
         {
-            uint32_t vi[3] = { dc.get_index(int(t * 3)), dc.get_index(int(t * 3 + 1)), dc.get_index(int(t * 3 + 2)) };
-            if (vi[0] >= uint32_t(m->num_vertex) || vi[1] >= uint32_t(m->num_vertex) || vi[2] >= uint32_t(m->num_vertex))
-                continue;
-            core::vec3d p0 = world(m, vi[0]), p1 = world(m, vi[1]), p2 = world(m, vi[2]);
-            core::vec3d c = (p0 + p1 + p2) * (1.0 / 3.0);
-            int px = std::clamp(int((c.x - minX) / res), 0, W - 1);
-            int py = std::clamp(int((maxY - c.y) / res), 0, H - 1);
-            size_t i = size_t(py) * W + px;
-            float h = float(c.z) - ground[i];
-            // Terrain hidden under an object (no ground samples there, so the
-            // ground model is interpolated and may sit a little low): flat,
-            // occluded from above and near the ground -> ground, not the object.
-            core::vec3d n = cross(p1 - p0, p2 - p0);
-            double nlen = length(n);
-            bool flat = nlen > 0.0 && fabs(n.z) / nlen > 0.7;
-            bool occluded = c.z < top[i] - 1.0;
-            bool hidden_ground = flat && occluded && h < 2.0f;
-            // Walls reach up even when their centre is low (car sides): judge
-            // steep triangles by their highest corner.
-            if (!flat)
-                h = std::max({ h, float(p0.z) - ground[i], float(p1.z) - ground[i], float(p2.z) - ground[i] });
-            int32_t r = -1;
-            if (h > lift && !hidden_ground)
+            if (m_cancel) return finish(false, "Cancelled.");
+            const SegmentResult::MeshAssign& a = result->assignments[ai];
+            const MeshData* m = a.mesh;
+            const DrawCallInfo& dc = m->draw_call_list[0];
+            for (size_t t = 0; t < a.triangleObject.size(); t++)
             {
-                r = raised_map[i];
-                for (int rad = 1; r < 0 && rad <= search; rad++)   // walls just outside the outline
-                    for (int dy = -rad; dy <= rad && r < 0; dy++)
-                        for (int dx = -rad; dx <= rad && r < 0; dx++)
+                const size_t g = tri_base[ai] + t;
+                uint32_t vi[3] = { dc.get_index(int(t * 3)), dc.get_index(int(t * 3 + 1)), dc.get_index(int(t * 3 + 2)) };
+                if (vi[0] >= uint32_t(m->num_vertex) || vi[1] >= uint32_t(m->num_vertex) || vi[2] >= uint32_t(m->num_vertex))
+                    continue;
+                core::vec3d p[3] = { world(m, vi[0]), world(m, vi[1]), world(m, vi[2]) };
+                core::vec3d c = (p[0] + p[1] + p[2]) * (1.0 / 3.0);
+                tri_z[g] = float(c.z);
+                int px = std::clamp(int((c.x - minX) / res), 0, W - 1);
+                int py = std::clamp(int((maxY - c.y) / res), 0, H - 1);
+                size_t i = size_t(py) * W + px;
+                float h = float(c.z) - ground[i];
+                core::vec3d n = cross(p[1] - p[0], p[2] - p[0]);
+                double nlen = length(n);
+                double up = nlen > 0.0 ? fabs(n.z) / nlen : 0.0;
+                bool flat = up > 0.7;
+                // Terrain hidden under an object (no ground samples there, so the
+                // ground model is interpolated and may sit a little low): flat,
+                // occluded from above and near the ground -> ground, not the object.
+                bool occluded = c.z < top[i] - 1.0;
+                bool hidden_ground = flat && occluded && h < 2.0f;
+                no_flow[g] = hidden_ground;
+
+                // a. Seen from above: the region at its centre is its own.
+                if (up > 0.3 && fabs(c.z - top[i]) < 0.5)
+                {
+                    int32_t r = region[i] >= 0 ? region[i] : ground_map[i];
+                    if (r >= 0) { label[g] = regions[size_t(r)].object; how[g] = 1; }
+                }
+
+                // c. Raster fallback. Walls reach up even when their centre is
+                // low (car sides): judge steep triangles by their highest corner.
+                if (!flat)
+                    h = std::max({ h, float(p[0].z) - ground[i], float(p[1].z) - ground[i], float(p[2].z) - ground[i] });
+                int32_t r = -1;
+                if (h > lift && !hidden_ground && !flat)
+                {
+                    // A wall the flow cannot reach (its tile is not stitched
+                    // to the roof's): the nearest raised pixel whose roof
+                    // reaches the wall's top, not a lower neighbour.
+                    const float wall_top = float(std::max({ p[0].z, p[1].z, p[2].z })) - 1.0f;
+                    // First look straight into the building: a facade faces
+                    // out, so its roof lies behind it (against the normal);
+                    // a neighbour across the gap lies in front.
+                    double hx = n.x, hy = n.y, hl = sqrt(hx * hx + hy * hy);
+                    if (nlen > 0.0 && hl > 0.5 * nlen)
+                    {
+                        // Raster rows run north to south: pixel y = -world y.
+                        double dx = -hx / hl, dy = hy / hl;
+                        for (int step = 0; r < 0 && step <= wall_search; step++)
                         {
-                            int x = px + dx, y = py + dy;
-                            if (x >= 0 && y >= 0 && x < W && y < H) r = raised_map[size_t(y) * W + x];
+                            int x = int(floor(px + 0.5 + dx * step)), y = int(floor(py + 0.5 + dy * step));
+                            if (x < 0 || y < 0 || x >= W || y >= H) break;
+                            size_t j = size_t(y) * W + x;
+                            if (raised_map[j] >= 0 && region[j] == raised_map[j] && top[j] >= wall_top)
+                                r = raised_map[j];
                         }
+                    }
+                    if (r >= 0) fb_how[g] = 3;
+                    for (int rad = 0; r < 0 && rad <= wall_search; rad++)
+                        for (int dy = -rad; dy <= rad && r < 0; dy++)
+                            for (int dx = -rad; dx <= rad && r < 0; dx++)
+                            {
+                                if (std::max(abs(dx), abs(dy)) != rad) continue;
+                                int x = px + dx, y = py + dy;
+                                if (x < 0 || y < 0 || x >= W || y >= H) continue;
+                                size_t j = size_t(y) * W + x;
+                                if (raised_map[j] >= 0 && region[j] == raised_map[j] && top[j] >= wall_top)
+                                    r = raised_map[j];
+                            }
+                }
+                if (r >= 0 && !fb_how[g]) fb_how[g] = 4;
+                if (r < 0 && h > lift && !hidden_ground)
+                {
+                    r = raised_map[i];
+                    for (int rad = 1; r < 0 && rad <= search; rad++)   // walls just outside the outline
+                        for (int dy = -rad; dy <= rad && r < 0; dy++)
+                            for (int dx = -rad; dx <= rad && r < 0; dx++)
+                            {
+                                int x = px + dx, y = py + dy;
+                                if (x >= 0 && y >= 0 && x < W && y < H) r = raised_map[size_t(y) * W + x];
+                            }
+                }
+                if (r >= 0 && !fb_how[g]) fb_how[g] = 5;
+                if (r < 0) { r = ground_map[i]; fb_how[g] = 6; }
+                fallback[g] = r >= 0 ? regions[size_t(r)].object : object_for_class(kObjGround);
+                tri_px[g] = float((c.x - minX) / res);
+                tri_py[g] = float((maxY - c.y) / res);
+                tri_up[g] = float(up);
+
+                for (int k = 0; k < 3; k++)
+                {
+                    QKey q{ int64_t(floor(p[k].x * 50.0)), int64_t(floor(p[k].y * 50.0)), int64_t(floor(p[k].z * 50.0)) };
+                    tri_v[g * 3 + k] = weld.try_emplace(q, uint32_t(weld.size())).first->second;
+                }
+                for (int k = 0; k < 3; k++)
+                {
+                    uint32_t u = tri_v[g * 3 + k], v = tri_v[g * 3 + (k + 1) % 3];
+                    if (u == v) continue;
+                    uint64_t key = (uint64_t(std::min(u, v)) << 32) | std::max(u, v);
+                    auto it = edge_first.try_emplace(key, int32_t(g));
+                    if (it.second) continue;
+                    // Second triangle on this edge: link both ways (a third on
+                    // a non-manifold edge links to the first only).
+                    int32_t o = it.first->second;
+                    nbr[g * 3 + k] = o;
+                    for (int ko = 0; ko < 3; ko++)
+                    {
+                        uint32_t ou = tri_v[size_t(o) * 3 + ko], ov = tri_v[size_t(o) * 3 + (ko + 1) % 3];
+                        if (nbr[size_t(o) * 3 + ko] < 0 && ((ou == u && ov == v) || (ou == v && ov == u)))
+                        { nbr[size_t(o) * 3 + ko] = int32_t(g); break; }
+                    }
+                }
             }
-            if (r < 0) r = ground_map[i];
-            int32_t obj = r >= 0 ? regions[size_t(r)].object : object_for_class(kObjGround);
-            a.triangleObject[t] = obj;
-            counts[result->objects[size_t(obj)].cls]++;
         }
     }
+    if (m_cancel) return finish(false, "Cancelled.");
+
+    // b. Flow labels downhill, highest labelled triangles first.
+    size_t seeded = 0, flowed = 0, fell_back = 0;
+    {
+        std::priority_queue<std::pair<float, int32_t>> pq;
+        for (size_t g = 0; g < TT; g++)
+            if (label[g] >= 0) { pq.push({ tri_z[g], int32_t(g) }); seeded++; }
+        while (!pq.empty())
+        {
+            int32_t g = pq.top().second; pq.pop();
+            for (int k = 0; k < 3; k++)
+            {
+                int32_t u = nbr[size_t(g) * 3 + k];
+                if (u < 0 || label[size_t(u)] >= 0 || no_flow[size_t(u)] || fallback[size_t(u)] < 0) continue;
+                if (tri_z[size_t(u)] > tri_z[size_t(g)] + 0.5f) continue;   // never uphill
+                label[size_t(u)] = label[size_t(g)];
+                how[size_t(u)] = 2;
+                pq.push({ tri_z[size_t(u)], u });
+                flowed++;
+            }
+        }
+    }
+    for (size_t g = 0; g < TT; g++)
+        if (label[g] < 0 && fallback[g] >= 0) { label[g] = fallback[g]; how[g] = fb_how[g]; fell_back++; }
+
+    // d. Speckle.
+    for (int iter = 0; iter < 3; iter++)
+    {
+        std::vector<int32_t> next = label;
+        bool changed = false;
+        for (size_t g = 0; g < TT; g++)
+        {
+            int32_t own = label[g];
+            if (own < 0) continue;
+            int32_t o[3];
+            for (int k = 0; k < 3; k++) o[k] = nbr[g * 3 + k] >= 0 ? label[size_t(nbr[g * 3 + k])] : -1;
+            for (int k = 0; k < 3; k++)
+                if (o[k] >= 0 && o[k] != own && (o[k] == o[(k + 1) % 3] || o[k] == o[(k + 2) % 3]))
+                { next[g] = o[k]; changed = true; how[g] |= 16; break; }
+        }
+        label.swap(next);
+        if (!changed) break;
+    }
+    for (size_t ai = 0; ai < result->assignments.size(); ai++)
+    {
+        SegmentResult::MeshAssign& a = result->assignments[ai];
+        for (size_t t = 0; t < a.triangleObject.size(); t++)
+        {
+            int32_t obj = label[tri_base[ai] + t];
+            a.triangleObject[t] = obj;
+            if (obj >= 0) counts[result->objects[size_t(obj)].cls]++;
+        }
+    }
+    SegLog("  triangles: %zu seen from above, %zu via mesh from above, %zu by raster fallback\n",
+           seeded, flowed, fell_back);
+
+    // Per-triangle debug dump: raster x, y (px), z (m), |normal.z|, object, how.
+    if (st.dumpRaw)
+        if (FILE* f = fopen((fs::path(st.debugDir) / "tris.bin").string().c_str(), "wb"))
+        {
+            for (size_t g = 0; g < TT; g++)
+            {
+                if (fallback[g] < 0) continue;
+                float rec[4] = { tri_px[g], tri_py[g], tri_z[g], tri_up[g] };
+                int32_t lh[2] = { label[g], int32_t(how[g]) };
+                fwrite(rec, sizeof(rec), 1, f);
+                fwrite(lh, sizeof(lh), 1, f);
+            }
+            fclose(f);
+        }
 
     // Debug images: orthophoto and class map (downsampled to <= 4096 px).
     {
@@ -1381,6 +1721,32 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
         WritePngRgb((fs::path(st.debugDir) / "height_above_ground.png").string(), dw, dh, heights.data());
     }
 
+    // Raw full-resolution rasters: int32 W, H, then W*H values, row-major from
+    // the north-west corner. top.f32 = surface height (m, -inf = empty),
+    // object.i32 = object id per pixel (-1 = none).
+    if (st.dumpRaw)
+    {
+        auto dump = [&](const char* name, const void* data, size_t bytes) {
+            FILE* f = fopen((fs::path(st.debugDir) / name).string().c_str(), "wb");
+            if (!f) return;
+            int32_t wh[2] = { W, H };
+            fwrite(wh, sizeof(wh), 1, f);
+            fwrite(data, 1, bytes, f);
+            fclose(f);
+        };
+        std::vector<int32_t> obj(N, -1);
+        for (size_t i = 0; i < N; i++)
+            if (region[i] >= 0) obj[i] = regions[size_t(region[i])].object;
+        dump("top.f32", top.data(), N * sizeof(float));
+        dump("object.i32", obj.data(), N * sizeof(int32_t));
+        if (FILE* f = fopen((fs::path(st.debugDir) / "objects.txt").string().c_str(), "w"))
+        {
+            for (size_t o = 0; o < result->objects.size(); o++)
+                fprintf(f, "%zu %s\n", o, result->objects[o].name.c_str());
+            fclose(f);
+        }
+    }
+
     char summary[512];
     int instances[kObjClassCount] = {};
     for (const SceneObject& o : result->objects) instances[o.cls]++;
@@ -1388,7 +1754,8 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
              "Segmented %zu objects: %d buildings, %d trees, %d cars + road/plants/water/ground areas "
              "(%d tiles, %.0f s in the model%s)",
              result->objects.size(), instances[kObjBuilding], instances[kObjTree], instances[kObjCar],
-             tiles_asked, model_seconds, tiles_failed ? ", some tiles failed - see segment.log" : "");
+             tiles_asked, model_seconds, model_gave_up ? ", model failed - classes from colour/height, see segment.log"
+             : tiles_failed ? ", some tiles failed - see segment.log" : "");
     result->summary = summary;
     SegLog("  triangles: ground %zu, road %zu, building %zu, car %zu, tree %zu, plants %zu, water %zu\n",
            counts[kObjGround], counts[kObjRoad], counts[kObjBuilding], counts[kObjCar], counts[kObjTree],

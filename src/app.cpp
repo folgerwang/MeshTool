@@ -11,6 +11,8 @@
 #include <set>
 #include <cmath>
 #include <limits>
+#include <ctime>
+#include <filesystem>
 
 #include <vulkan/vulkan.h>
 #include "imgui.h"
@@ -24,6 +26,7 @@
 #include "scenefile.h"
 #include "geoview.h"
 #include "segmenter.h"
+#include "qwen_client.h"   // WritePngRgb
 #include "objectclass.h"
 #include <GeographicLib/LocalCartesian.hpp>
 #include "coregeographic.h"
@@ -268,7 +271,21 @@ void MeshToolApp::MainLoop()
         drawFrame.refPos[1] = eyePos.y;
         drawFrame.refPos[2] = eyePos.z;
         drawFrame.scale = 1.0f;
-        drawFrame.classColors = m_ui->classColors;
+        // Check screenshots: one frame per colour mode, viewport only.
+        UpdateAutoShots();
+        if (m_ui->wantCheckScreenshots)
+        {
+            m_ui->wantCheckScreenshots = false;
+            StartCheckScreenshots();
+        }
+        if (m_shotStage > 0 && !m_shotPending)
+        {
+            m_shotRect[0] = int(vx0); m_shotRect[1] = int(vy0);
+            m_shotRect[2] = int(vx1 - vx0); m_shotRect[3] = int(vy1 - vy0);
+            m_renderer->RequestReadback();
+            m_shotPending = true;
+        }
+        drawFrame.classColors = m_shotStage == 1 ? true : m_shotStage == 2 ? false : m_ui->classColors;
         drawFrame.buildingColors = m_ui->buildingColors;
         drawFrame.selGroup = m_selGroup;
         drawFrame.selObject = m_selObject;
@@ -285,13 +302,136 @@ void MeshToolApp::MainLoop()
         drawFrame.classVisible = m_ui->classVisible;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
-        // Render ImGui draw data
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        // Render ImGui draw data - not on check-screenshot frames: dialogs,
+        // their dimming and overlays would cover the scene being checked.
+        if (!m_shotPending)
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
         m_renderer->EndFrame();
+
+        if (m_shotPending)
+        {
+            m_shotPending = false;
+            std::vector<uint8_t> rgb;
+            int fw = 0, fh = 0;
+            if (m_renderer->TakeReadback(rgb, fw, fh))
+            {
+                int x0 = std::clamp(m_shotRect[0], 0, fw - 1), y0 = std::clamp(m_shotRect[1], 0, fh - 1);
+                int w = std::clamp(m_shotRect[2], 1, fw - x0), h = std::clamp(m_shotRect[3], 1, fh - y0);
+                std::vector<uint8_t> crop(size_t(w) * h * 3);
+                for (int y = 0; y < h; y++)
+                    memcpy(&crop[size_t(y) * w * 3], &rgb[(size_t(y0 + y) * fw + x0) * 3], size_t(w) * 3);
+                std::string path = m_shotBase + (m_shotStage == 1 ? "_segment.png" : "_original.png");
+                if (!WritePngRgb(path, w, h, crop.data()))
+                {
+                    m_ui->statusMessage = "Could not write " + path;
+                    m_ui->statusTimeout = 8.0f;
+                    m_shotStage = 0;
+                }
+                else if (m_shotStage == 1)
+                    m_shotStage = 2;
+                else
+                {
+                    m_shotStage = 0;
+                    // Keep the segmentation summary when it is still showing.
+                    std::string saved = "check screenshots: " + m_shotBase + "_segment.png / _original.png";
+                    m_ui->statusMessage = m_ui->statusTimeout > 0.0f && !m_ui->statusMessage.empty()
+                                              ? m_ui->statusMessage + "  |  " + saved : saved;
+                    m_ui->statusTimeout = 15.0f;
+                }
+            }
+            else
+            {
+                m_shotStage = 0;
+                m_ui->statusMessage = "Screenshots are not supported by this display driver.";
+                m_ui->statusTimeout = 8.0f;
+            }
+        }
     }
 
     vkDeviceWaitIdle(m_renderer->GetContext().device);
+}
+
+void MeshToolApp::StartCheckScreenshots(const std::string& base)
+{
+    if (m_shotStage > 0)
+        return;
+    if (!m_renderer->ReadbackSupported())
+    {
+        m_ui->statusMessage = "Screenshots are not supported by this display driver.";
+        m_ui->statusTimeout = 8.0f;
+        return;
+    }
+    // .\screenshots next to mesh_tool.cfg (run.bat starts MeshTool there).
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::absolute("screenshots", ec);
+    std::filesystem::create_directories(dir, ec);
+    char stamp[32];
+    time_t now = time(nullptr);
+    struct tm lt;
+    localtime_s(&lt, &now);
+    strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &lt);
+    m_shotBase = base.empty() ? (dir / (std::string("check_") + stamp)).string() : base;
+    m_shotStage = 1;
+}
+
+void MeshToolApp::UpdateAutoShots()
+{
+    if (m_autoStage == 0)
+        return;
+    m_autoFrames++;
+    if (m_autoStage == 1)
+    {
+        // Scene open (first frames) and drawn once.
+        if (g_world.mesh_data_batches.empty() || m_autoFrames < 3)
+        {
+            if (m_autoFrames > 600)
+            {
+                fprintf(stderr, "--shots: no scene loaded\n");
+                glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+                m_autoStage = 0;
+            }
+            return;
+        }
+        core::bounds3d box;
+        for (const BatchMeshData* b : g_world.mesh_data_batches)
+            if (b)
+                for (const GroupMeshData* g : b->group_meshes)
+                {
+                    if (!g) continue;
+                    if (m_auto.frameObject.empty())
+                        box += g->bbox_ws;
+                    else
+                        for (const SceneObject& o : g->objects)
+                            if (o.name == m_auto.frameObject && o.bbox_ws.b_valid)
+                                box += o.bbox_ws;
+                }
+        if (!box.b_valid)
+            fprintf(stderr, "--shots: object %s not found, framing everything\n", m_auto.frameObject.c_str());
+        if (!box.b_valid)
+            for (const BatchMeshData* b : g_world.mesh_data_batches)
+                if (b)
+                    for (const GroupMeshData* g : b->group_meshes)
+                        if (g) box += g->bbox_ws;
+        m_camera->yaw = m_auto.yawDeg * 3.14159265358979 / 180.0;
+        m_camera->pitch = m_auto.pitchDeg * 3.14159265358979 / 180.0;
+        FrameBounds(box);
+        m_camera->distance *= m_auto.zoom;
+        m_ui->classColors = true;
+        m_autoStage = 2;
+        m_autoFrames = 0;
+    }
+    else if (m_autoStage == 2 && m_autoFrames >= 3)
+    {
+        StartCheckScreenshots(m_auto.prefix);
+        m_autoStage = 3;
+    }
+    else if (m_autoStage == 3 && m_shotStage == 0 && !m_shotPending)
+    {
+        printf("Saved %s_segment.png / _original.png\n", m_auto.prefix.c_str());
+        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        m_autoStage = 0;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +561,7 @@ void MeshToolApp::UpdateSegmentation()
             if (n > best) { best = n; primary = b; }
         }
         std::vector<GroupMeshData*> groups;
+        std::vector<BatchMeshData*> input;
         for (BatchMeshData* b : g_world.mesh_data_batches)
         {
             if (!b || !primary || b->is_spline_mesh) continue;
@@ -428,13 +569,24 @@ void MeshToolApp::UpdateSegmentation()
                 (b->is_georeferenced && primary->is_georeferenced &&
                  b->reference_pos.x == primary->reference_pos.x && b->reference_pos.y == primary->reference_pos.y);
             if (same_frame)
+            {
                 groups.insert(groups.end(), b->group_meshes.begin(), b->group_meshes.end());
+                input.push_back(b);
+            }
         }
         if (groups.empty())
         {
             m_ui->statusMessage = "Nothing to segment.";
             m_ui->statusTimeout = 5.0f;
             return;
+        }
+        // The exact input, for re-running offline:
+        //   MeshTool --segment <debugDir>\last_input.mtscene out.mtscene
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(m_ui->segSettings.debugDir, ec);
+            std::string err;
+            SaveScene((std::filesystem::path(m_ui->segSettings.debugDir) / "last_input.mtscene").string(), input, err);
         }
         m_segmenter->Start(groups, m_ui->segSettings);
     }
@@ -478,6 +630,7 @@ void MeshToolApp::UpdateSegmentation()
     m_ui->classColors = true;
     m_ui->statusMessage = result->summary;
     m_ui->statusTimeout = 15.0f;
+    StartCheckScreenshots();
 }
 
 void MeshToolApp::OpenScene(const std::string& path)

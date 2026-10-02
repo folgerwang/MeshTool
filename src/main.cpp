@@ -19,7 +19,7 @@ static int RunSegmentCommand(int argc, char* argv[])
 {
     if (argc < 4)
     {
-        fprintf(stderr, "usage: MeshTool --segment in.mtscene out.mtscene [--no-model] [--res m] [--model name] [--server url]\n");
+        fprintf(stderr, "usage: MeshTool --segment in.mtscene out.mtscene [--no-model] [--res m] [--model name] [--server url] [--debug-dir dir] [--dump]\n");
         return 2;
     }
     SegmentSettings settings;
@@ -29,6 +29,8 @@ static int RunSegmentCommand(int argc, char* argv[])
         else if (!strcmp(argv[i], "--res") && i + 1 < argc) settings.metresPerPixel = atof(argv[++i]);
         else if (!strcmp(argv[i], "--model") && i + 1 < argc) settings.model = argv[++i];
         else if (!strcmp(argv[i], "--server") && i + 1 < argc) settings.server = argv[++i];
+        else if (!strcmp(argv[i], "--debug-dir") && i + 1 < argc) settings.debugDir = argv[++i];
+        else if (!strcmp(argv[i], "--dump")) settings.dumpRaw = true;
     }
 
     std::vector<BatchMeshData*> batches;
@@ -89,6 +91,20 @@ int main(int argc, char* argv[])
         // MeshTool.exe scene.mtscene (e.g. double-clicked) opens that scene.
         if (argc >= 2 && argv[1][0] != '-')
             app.OpenOnStart(argv[1]);
+
+        // MeshTool.exe scene.mtscene --shots prefix [--frame object] [--yaw deg]
+        //   [--pitch deg] [--zoom k]: check screenshots, then exit.
+        MeshToolApp::AutoShots shots;
+        for (int i = 2; i < argc; i++)
+        {
+            if (!strcmp(argv[i], "--shots") && i + 1 < argc) shots.prefix = argv[++i];
+            else if (!strcmp(argv[i], "--frame") && i + 1 < argc) shots.frameObject = argv[++i];
+            else if (!strcmp(argv[i], "--yaw") && i + 1 < argc) shots.yawDeg = atof(argv[++i]);
+            else if (!strcmp(argv[i], "--pitch") && i + 1 < argc) shots.pitchDeg = atof(argv[++i]);
+            else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) shots.zoom = atof(argv[++i]);
+        }
+        if (!shots.prefix.empty())
+            app.SetAutoShots(shots);
 
         app.MainLoop();
         app.Shutdown();

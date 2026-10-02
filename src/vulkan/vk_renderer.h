@@ -60,6 +60,12 @@ public:
     VulkanContext& GetContext() { return m_ctx; }
     VkCommandBuffer GetCurrentCommandBuffer() { return m_ctx.commandBuffers[m_ctx.currentFrame]; }
 
+    // Screenshot: the next EndFrame copies the finished frame (UI included)
+    // to memory; TakeReadback returns it as tightly packed RGB rows.
+    void RequestReadback() { m_readbackRequested = true; }
+    bool ReadbackSupported() const { return m_readbackSupported; }
+    bool TakeReadback(std::vector<uint8_t>& rgb, int& width, int& height);
+
     // Utility
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     VkCommandBuffer BeginSingleTimeCommands();
@@ -69,6 +75,11 @@ private:
     VulkanContext m_ctx;
     GLFWwindow* m_window = nullptr;
     bool m_framebufferResized = false;
+    bool m_readbackRequested = false;
+    bool m_readbackSupported = false;
+    bool m_readbackReady = false;
+    std::vector<uint8_t> m_readbackRgb;
+    int m_readbackW = 0, m_readbackH = 0;
 
     void CreateInstance();
     void CreateSurface(GLFWwindow* window);

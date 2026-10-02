@@ -176,6 +176,58 @@ void VulkanRenderer::EndFrame()
     VkCommandBuffer cmd = m_ctx.commandBuffers[m_ctx.currentFrame];
 
     vkCmdEndRenderPass(cmd);
+
+    // Screenshot: copy the finished image into a host-visible buffer.
+    VkBuffer readBuf = VK_NULL_HANDLE;
+    VkDeviceMemory readMem = VK_NULL_HANDLE;
+    const bool readback = m_readbackRequested && m_readbackSupported;
+    m_readbackRequested = false;
+    if (readback)
+    {
+        const VkExtent2D ext = m_ctx.swapchainExtent;
+        VkBufferCreateInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bi.size = VkDeviceSize(ext.width) * ext.height * 4;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkCreateBuffer(m_ctx.device, &bi, nullptr, &readBuf);
+        VkMemoryRequirements req;
+        vkGetBufferMemoryRequirements(m_ctx.device, readBuf, &req);
+        VkMemoryAllocateInfo ai{};
+        ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        ai.allocationSize = req.size;
+        ai.memoryTypeIndex = FindMemoryType(req.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        vkAllocateMemory(m_ctx.device, &ai, nullptr, &readMem);
+        vkBindBufferMemory(m_ctx.device, readBuf, readMem, 0);
+
+        VkImage image = m_ctx.swapchainImages[m_ctx.imageIndex];
+        auto barrier = [&](VkImageLayout from, VkImageLayout to, VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                           VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = from;
+            b.newLayout = to;
+            b.srcAccessMask = srcAccess;
+            b.dstAccessMask = dstAccess;
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = image;
+            b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
+        };
+        barrier(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkBufferImageCopy region{};
+        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.imageExtent = { ext.width, ext.height, 1 };
+        vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readBuf, 1, &region);
+        barrier(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_READ_BIT, 0,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+
     vkEndCommandBuffer(cmd);
 
     VkSubmitInfo submitInfo{};
@@ -209,6 +261,30 @@ void VulkanRenderer::EndFrame()
 
     VkResult result = vkQueuePresentKHR(m_ctx.presentQueue, &presentInfo);
 
+    if (readback)
+    {
+        vkWaitForFences(m_ctx.device, 1, &m_ctx.inFlightFences[m_ctx.currentFrame], VK_TRUE, UINT64_MAX);
+        const VkExtent2D ext = m_ctx.swapchainExtent;
+        const bool bgr = m_ctx.swapchainFormat == VK_FORMAT_B8G8R8A8_UNORM ||
+                         m_ctx.swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB;
+        void* mapped = nullptr;
+        vkMapMemory(m_ctx.device, readMem, 0, VK_WHOLE_SIZE, 0, &mapped);
+        const uint8_t* src = static_cast<const uint8_t*>(mapped);
+        m_readbackW = int(ext.width);
+        m_readbackH = int(ext.height);
+        m_readbackRgb.resize(size_t(ext.width) * ext.height * 3);
+        for (size_t i = 0, n = size_t(ext.width) * ext.height; i < n; i++)
+        {
+            m_readbackRgb[i * 3 + 0] = src[i * 4 + (bgr ? 2 : 0)];
+            m_readbackRgb[i * 3 + 1] = src[i * 4 + 1];
+            m_readbackRgb[i * 3 + 2] = src[i * 4 + (bgr ? 0 : 2)];
+        }
+        vkUnmapMemory(m_ctx.device, readMem);
+        vkDestroyBuffer(m_ctx.device, readBuf, nullptr);
+        vkFreeMemory(m_ctx.device, readMem, nullptr);
+        m_readbackReady = true;
+    }
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized)
     {
         m_framebufferResized = false;
@@ -241,6 +317,18 @@ void VulkanRenderer::RecreateSwapchain(int width, int height)
     CreateImageViews();
     CreateDepthResources();
     CreateFramebuffers();
+}
+
+bool VulkanRenderer::TakeReadback(std::vector<uint8_t>& rgb, int& width, int& height)
+{
+    if (!m_readbackReady)
+        return false;
+    m_readbackReady = false;
+    rgb.swap(m_readbackRgb);
+    m_readbackRgb.clear();
+    width = m_readbackW;
+    height = m_readbackH;
+    return true;
 }
 
 // ---------- Utility ----------
@@ -563,6 +651,10 @@ void VulkanRenderer::CreateSwapchain()
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // Screenshots copy the presented image.
+    m_readbackSupported = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    if (m_readbackSupported)
+        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
     uint32_t queueFamilyIndices[] = {m_ctx.graphicsFamily, m_ctx.presentFamily};
     if (m_ctx.graphicsFamily != m_ctx.presentFamily)
