@@ -18,6 +18,7 @@ struct PushConstants {
     float modelMatrix[16];
     float boxColor[4];
     float screenPosition[4];
+    int32_t textureIndex[4];   // x = slot in the bindless texture array
 };
 
 class VulkanPipelineManager {

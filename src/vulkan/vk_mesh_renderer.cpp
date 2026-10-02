@@ -107,15 +107,18 @@ void VulkanMeshRenderer::DestroyMeshGPU(MeshGPUData& gpu)
     gpu.uploaded = false;
 }
 
-void VulkanMeshRenderer::BindTextureOrWhite(VkCommandBuffer cmd, uint32_t texHandle)
+int32_t VulkanMeshRenderer::TextureSlot(uint32_t texHandle) const
 {
-    VulkanTexture* tex = (texHandle != 0xFFFFFFFF) ? m_texMgr->GetTexture(texHandle) : nullptr;
-    if (!tex || tex->descriptorSet == VK_NULL_HANDLE)
-        tex = m_texMgr->GetTexture(m_whiteTex);
-    if (tex && tex->descriptorSet != VK_NULL_HANDLE)
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_pipeMgr->GetLayout(), 0, 1,
-                                &tex->descriptorSet, 0, nullptr);
+    uint32_t slot = (texHandle != 0xFFFFFFFF) ? m_texMgr->GetSlot(texHandle) : UINT32_MAX;
+    if (slot == UINT32_MAX)
+        slot = m_texMgr->GetSlot(m_whiteTex);
+    return slot == UINT32_MAX ? 0 : int32_t(slot);
+}
+
+void VulkanMeshRenderer::BindTextures(VkCommandBuffer cmd)
+{
+    VkDescriptorSet set = m_texMgr->GetBindlessSet();
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeMgr->GetLayout(), 0, 1, &set, 0, nullptr);
 }
 
 void VulkanMeshRenderer::Shutdown()
@@ -174,6 +177,7 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           const MeshDrawFrame& frame,
                                           bool culling)
 {
+    BindTextures(cmd);
     for (const auto* batch : batches) {
         if (!batch) continue;
         for (const auto* group : batch->group_meshes) {
@@ -258,12 +262,11 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     // one is in front instead of z-fighting it.
     if (mesh->lod_size > 0.0f)
         pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
+    pc.textureIndex[0] = TextureSlot(hasTexture ? mesh->tex_id : 0xFFFFFFFF);
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(PushConstants), &pc);
-
-    BindTextureOrWhite(cmd, hasTexture ? mesh->tex_id : 0xFFFFFFFF);
 
     if (gpu.vertexBuffer == VK_NULL_HANDLE)
         return;
@@ -316,18 +319,13 @@ void VulkanMeshRenderer::DrawQuad(VkCommandBuffer cmd, float x, float y, float w
     pc.screenPosition[1] = y;
     pc.screenPosition[2] = w;
     pc.screenPosition[3] = h;
+    pc.textureIndex[0] = TextureSlot(texHandle);
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    // Bind texture
-    VulkanTexture* tex = m_texMgr->GetTexture(texHandle);
-    if (tex && tex->descriptorSet != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_pipeMgr->GetLayout(), 0, 1,
-                                &tex->descriptorSet, 0, nullptr);
-    }
+    BindTextures(cmd);
 
     // Bind quad vertex buffer and draw
     VkDeviceSize offset = 0;

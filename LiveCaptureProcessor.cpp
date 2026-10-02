@@ -138,7 +138,7 @@ LiveCaptureProcessor::~LiveCaptureProcessor()
             delete pair.second;
 }
 
-void LiveCaptureProcessor::processFrame()
+void LiveCaptureProcessor::processFrame(bool keepMeshes)
 {
     // Open shared memory if not already open
     if (!m_shared_mem)
@@ -266,7 +266,7 @@ void LiveCaptureProcessor::processFrame()
 
     // Add captured meshes to output
     int mesh_count = (int)m_current_group->meshes.size();
-    if (mesh_count > 0 && m_output_batch)
+    if (keepMeshes && mesh_count > 0 && m_output_batch)
     {
         // Where this capture goes. Every capture is placed in one scene frame:
         // East/North/Up metres at the batch's GPS reference when GE reported

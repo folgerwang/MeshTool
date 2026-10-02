@@ -70,6 +70,7 @@ bool GeoViewServer::Start()
             if (m_followServed != m_followSeq)
             {
                 m_followServed = m_followSeq;
+                m_followDeliveredTime = m_followPollTime;
                 body = "<NetworkLink><name>MeshTool camera</name><flyToView>1</flyToView><Link><href>"
                        "http://127.0.0.1:" + std::to_string(m_port) + "/fly?seq=" + std::to_string(m_followSeq) +
                        "</href></Link></NetworkLink>";
@@ -134,6 +135,14 @@ void GeoViewServer::SetFollowCamera(double lon, double lat, double alt, double h
     std::lock_guard<std::mutex> lock(m_mutex);
     m_followKml = kml;
     m_followSeq++;
+}
+
+bool GeoViewServer::FollowPending(double* deliveredTime) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (deliveredTime)
+        *deliveredTime = m_followDeliveredTime;
+    return m_followServed != m_followSeq;
 }
 
 double GeoViewServer::LastFollowPoll() const

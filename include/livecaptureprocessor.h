@@ -34,7 +34,9 @@ public:
     std::function<void(const std::string&)> m_on_capture_error;
     std::function<void(bool)>               m_on_connection_changed;
 
-    void processFrame();
+    // keepMeshes = false still replays the frame (GL buffers and textures it
+    // uploads are needed by later frames) but adds nothing to the scene.
+    void processFrame(bool keepMeshes = true);
 
     // What the last processFrame() did to the scene. Meshes in `removed` were
     // taken out of the output batch and must be freed (GPU data + delete) by

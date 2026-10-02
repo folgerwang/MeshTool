@@ -106,7 +106,7 @@ bool MeshToolApp::Init()
 
     // ---- Pipeline manager ----
     m_pipeManager = new VulkanPipelineManager();
-    m_pipeManager->Init(&ctx, texLayout);
+    m_pipeManager->Init(&ctx, m_texManager->GetBindlessLayout());
 
     // ---- Mesh renderer ----
     m_meshRenderer = new VulkanMeshRenderer();
@@ -542,6 +542,35 @@ void MeshToolApp::UpdateGeFollow()
     m_followSent = true;
 }
 
+bool MeshToolApp::CaptureSettled()
+{
+    m_ui->captureGate.clear();
+    if (!m_ui->geFollowViewport || !m_geoServer || !GeoreferencedBatch())
+        return true;   // not following (no GPS scene yet: the first capture must be possible)
+
+    // GE needs time to stream the tiles of the new view after it stops.
+    const double kSettle = 1.5;   // seconds after GE reports its camera at rest
+    const double now = glfwGetTime();
+    double delivered = 0.0;
+    if (now - m_followMoveTime < 0.25 || !m_followSent || m_geoServer->FollowPending(&delivered))
+    {
+        m_ui->captureGate = "viewport camera moving";
+        return false;
+    }
+    const GeoView view = m_geoServer->Latest();
+    if (!view.valid || view.time <= delivered)
+    {
+        m_ui->captureGate = "Google Earth flying to the viewport camera";
+        return false;
+    }
+    if (now - view.time < kSettle)
+    {
+        m_ui->captureGate = "Google Earth loading the view";
+        return false;
+    }
+    return true;
+}
+
 void MeshToolApp::ReleaseGroup(GroupMeshData* group)
 {
     // Caller has waited for the GPU to go idle.
@@ -756,9 +785,17 @@ void MeshToolApp::UploadGroupTextures(GroupMeshData* group)
 
     // Upload each texture once (a merged group grows, so most may already be
     // on the GPU), then point meshes at the GPU handle.
+    // Only textures some mesh samples: the LOD filter and duplicate removal
+    // drop many captured meshes, and their textures need no GPU memory.
     std::vector<uint32_t> handles(group->loaded_textures.size(), UINT32_MAX);
+    std::vector<bool> used(group->loaded_textures.size(), false);
+    for (const MeshData* mesh : group->meshes)
+        if (mesh && mesh->idx_in_texture_list < used.size())
+            used[mesh->idx_in_texture_list] = true;
     for (size_t i = 0; i < group->loaded_textures.size(); i++)
     {
+        if (!used[i])
+            continue;
         const core::Texture2DInfo* info = group->loaded_textures[i];
         auto known = m_texHandles.find(info);
         if (known != m_texHandles.end())
@@ -1255,10 +1292,16 @@ void MeshToolApp::ProcessPendingActions()
         FrameBounds(all);
     }
 
+    const bool captureSettled = CaptureSettled();
     if (m_ui->wantCaptureFrame)
     {
         m_ui->wantCaptureFrame = false;
-        if (m_processManager && m_processManager->IsRunning())
+        if (!captureSettled)
+        {
+            m_ui->statusMessage = "Capture held back: " + m_ui->captureGate + " - try again in a moment.";
+            m_ui->statusTimeout = 4.0f;
+        }
+        else if (m_processManager && m_processManager->IsRunning())
         {
             // Non-blocking: the result is picked up below when the hook signals it.
             m_processManager->RequestFrameCapture();
@@ -1283,7 +1326,14 @@ void MeshToolApp::ProcessPendingActions()
         BatchMeshData* batch = m_ui->liveBatch;
         if (m_geoServer)
             m_ui->captureProcessor->SetGeoView(m_geoServer->Latest());
-        m_ui->captureProcessor->processFrame();
+        // While following, a capture (F12 in GE) taken before GE settled on
+        // the viewport camera is replayed but not kept.
+        m_ui->captureProcessor->processFrame(captureSettled);
+        if (!captureSettled)
+        {
+            m_ui->statusMessage = "Capture ignored: " + m_ui->captureGate + ". Press F12 once it settles.";
+            m_ui->statusTimeout = 5.0f;
+        }
         const LiveCaptureProcessor::FrameResult& result = m_ui->captureProcessor->LastResult();
 
         // Meshes the LOD filter emptied or trimmed may be on the GPU already.

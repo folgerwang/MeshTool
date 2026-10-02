@@ -18,11 +18,11 @@ void VulkanPipelineManager::Init(VulkanContext* ctx, VkDescriptorSetLayout texLa
 {
     m_ctx = ctx;
 
-    // --- Pipeline layout (push constants + one descriptor set for textures) ---
+    // --- Pipeline layout (push constants + the bindless texture set) ---
     VkPushConstantRange pushRange = {};
     pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
-    pushRange.size = sizeof(PushConstants); // 144 bytes (2 mat4 + 2 vec4)
+    pushRange.size = sizeof(PushConstants); // 176 bytes (2 mat4 + 3 vec4)
 
     VkPipelineLayoutCreateInfo layoutInfo = {};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

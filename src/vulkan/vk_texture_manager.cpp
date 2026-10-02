@@ -53,6 +53,126 @@ void VulkanTextureManager::Init(VulkanContext* ctx, VkDescriptorSetLayout texLay
 {
     m_ctx = ctx;
     m_textureLayout = texLayout;
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = 16.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    if (vkCreateSampler(m_ctx->device, &samplerInfo, nullptr, &m_repeatSampler) != VK_SUCCESS)
+        throw std::runtime_error("failed to create texture sampler");
+
+    VkSamplerCreateInfo clampInfo{};
+    clampInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    clampInfo.magFilter = VK_FILTER_LINEAR;
+    clampInfo.minFilter = VK_FILTER_LINEAR;
+    clampInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    clampInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    clampInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    if (vkCreateSampler(m_ctx->device, &clampInfo, nullptr, &m_clampSampler) != VK_SUCCESS)
+        throw std::runtime_error("failed to create UI sampler");
+
+    InitBindless();
+}
+
+void VulkanTextureManager::InitBindless()
+{
+    // As many slots as the device allows for an update-after-bind set, up to
+    // 256K (a long session holds tens of thousands of captured textures).
+    VkPhysicalDeviceVulkan12Properties props12{};
+    props12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
+    VkPhysicalDeviceProperties2 props{};
+    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props.pNext = &props12;
+    vkGetPhysicalDeviceProperties2(m_ctx->physicalDevice, &props);
+    m_bindlessCapacity = (std::min)({ uint32_t(1u << 18),
+                                      props12.maxDescriptorSetUpdateAfterBindSampledImages,
+                                      props12.maxDescriptorSetUpdateAfterBindSamplers,
+                                      props12.maxPerStageDescriptorUpdateAfterBindSampledImages,
+                                      props12.maxPerStageDescriptorUpdateAfterBindSamplers });
+
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = m_bindlessCapacity;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Unused slots may hold nothing (or a released texture); new slots are
+    // written while frames that don't use them are in flight.
+    VkDescriptorBindingFlags flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                                     VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flagsInfo.bindingCount = 1;
+    flagsInfo.pBindingFlags = &flags;
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.pNext = &flagsInfo;
+    layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &binding;
+    if (vkCreateDescriptorSetLayout(m_ctx->device, &layoutInfo, nullptr, &m_bindlessLayout) != VK_SUCCESS)
+        throw std::runtime_error("failed to create bindless texture layout");
+
+    VkDescriptorPoolSize size{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, m_bindlessCapacity };
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &size;
+    if (vkCreateDescriptorPool(m_ctx->device, &poolInfo, nullptr, &m_bindlessPool) != VK_SUCCESS)
+        throw std::runtime_error("failed to create bindless texture pool");
+
+    VkDescriptorSetAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc.descriptorPool = m_bindlessPool;
+    alloc.descriptorSetCount = 1;
+    alloc.pSetLayouts = &m_bindlessLayout;
+    if (vkAllocateDescriptorSets(m_ctx->device, &alloc, &m_bindlessSet) != VK_SUCCESS)
+        throw std::runtime_error("failed to allocate bindless texture set");
+}
+
+void VulkanTextureManager::AssignSlot(VulkanTexture& tex)
+{
+    uint32_t slot;
+    if (!m_freeSlots.empty())
+    {
+        slot = m_freeSlots.back();
+        m_freeSlots.pop_back();
+    }
+    else if (m_nextSlot < m_bindlessCapacity)
+        slot = m_nextSlot++;
+    else
+        throw std::runtime_error("bindless texture array full");
+
+    VkDescriptorImageInfo image{};
+    image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image.imageView = tex.view;
+    image.sampler = tex.sampler;
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_bindlessSet;
+    write.dstBinding = 0;
+    write.dstArrayElement = slot;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &image;
+    vkUpdateDescriptorSets(m_ctx->device, 1, &write, 0, nullptr);
+    tex.slot = slot;
+}
+
+uint32_t VulkanTextureManager::GetSlot(uint32_t handle) const
+{
+    if (handle >= static_cast<uint32_t>(m_textures.size()))
+        return UINT32_MAX;
+    return m_textures[handle].slot;
 }
 
 void VulkanTextureManager::Shutdown()
@@ -62,16 +182,23 @@ void VulkanTextureManager::Shutdown()
 
     for (auto& tex : m_textures)
     {
-        if (tex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(m_ctx->device, tex.sampler, nullptr);
-        if (tex.view != VK_NULL_HANDLE)
-            vkDestroyImageView(m_ctx->device, tex.view, nullptr);
-        if (tex.image != VK_NULL_HANDLE)
-            vkDestroyImage(m_ctx->device, tex.image, nullptr);
-        if (tex.memory != VK_NULL_HANDLE)
-            vkFreeMemory(m_ctx->device, tex.memory, nullptr);
+        tex.descriptorSet = VK_NULL_HANDLE;   // freed with their pools
+        DestroyTexture(tex);
     }
     m_textures.clear();
+    for (VkDescriptorPool pool : m_pools)
+        vkDestroyDescriptorPool(m_ctx->device, pool, nullptr);
+    m_pools.clear();
+    m_freeSlots.clear();
+    m_nextSlot = 0;
+    if (m_bindlessPool != VK_NULL_HANDLE)   vkDestroyDescriptorPool(m_ctx->device, m_bindlessPool, nullptr);
+    if (m_bindlessLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(m_ctx->device, m_bindlessLayout, nullptr);
+    m_bindlessPool = VK_NULL_HANDLE;
+    m_bindlessLayout = VK_NULL_HANDLE;
+    m_bindlessSet = VK_NULL_HANDLE;
+    if (m_repeatSampler != VK_NULL_HANDLE) vkDestroySampler(m_ctx->device, m_repeatSampler, nullptr);
+    if (m_clampSampler != VK_NULL_HANDLE)  vkDestroySampler(m_ctx->device, m_clampSampler, nullptr);
+    m_repeatSampler = m_clampSampler = VK_NULL_HANDLE;
 }
 
 VkFormat VulkanTextureManager::MapGLFormatToVulkan(uint32_t internalFormat, uint32_t format, uint32_t type)
@@ -280,57 +407,18 @@ uint32_t VulkanTextureManager::UploadTexture(const core::Texture2DInfo* info)
         throw std::runtime_error("failed to create texture image view");
     }
 
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    if (vkCreateSampler(m_ctx->device, &samplerInfo, nullptr, &tex.sampler) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create texture sampler");
-    }
+    tex.sampler = m_repeatSampler;
 
     // Create descriptor set
-    VkDescriptorSetAllocateInfo dsAllocInfo{};
-    dsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    dsAllocInfo.descriptorPool = m_ctx->descriptorPool;
-    dsAllocInfo.descriptorSetCount = 1;
-    dsAllocInfo.pSetLayouts = &m_textureLayout;
-
-    if (vkAllocateDescriptorSets(m_ctx->device, &dsAllocInfo, &tex.descriptorSet) != VK_SUCCESS)
+    try
     {
-        throw std::runtime_error("failed to allocate texture descriptor set");
+        AssignSlot(tex);
     }
-
-    VkDescriptorImageInfo imageDescInfo{};
-    imageDescInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageDescInfo.imageView = tex.view;
-    imageDescInfo.sampler = tex.sampler;
-
-    VkWriteDescriptorSet descriptorWrite{};
-    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrite.dstSet = tex.descriptorSet;
-    descriptorWrite.dstBinding = 0;
-    descriptorWrite.dstArrayElement = 0;
-    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorWrite.descriptorCount = 1;
-    descriptorWrite.pImageInfo = &imageDescInfo;
-
-    vkUpdateDescriptorSets(m_ctx->device, 1, &descriptorWrite, 0, nullptr);
+    catch (...)
+    {
+        DestroyTexture(tex);
+        throw;
+    }
 
     uint32_t handle = static_cast<uint32_t>(m_textures.size());
     m_textures.push_back(tex);
@@ -349,14 +437,55 @@ void VulkanTextureManager::ReleaseTexture(uint32_t handle)
 {
     if (handle >= static_cast<uint32_t>(m_textures.size()))
         return;
-    VulkanTexture& tex = m_textures[handle];
-    if (tex.descriptorSet != VK_NULL_HANDLE)
-        vkFreeDescriptorSets(m_ctx->device, m_ctx->descriptorPool, 1, &tex.descriptorSet);
-    if (tex.sampler != VK_NULL_HANDLE) vkDestroySampler(m_ctx->device, tex.sampler, nullptr);
+    DestroyTexture(m_textures[handle]);
+}
+
+void VulkanTextureManager::DestroyTexture(VulkanTexture& tex)
+{
+    if (tex.slot != UINT32_MAX)
+        m_freeSlots.push_back(tex.slot);   // caller made sure the GPU is idle
+    if (tex.descriptorSet != VK_NULL_HANDLE && tex.pool != VK_NULL_HANDLE)
+        vkFreeDescriptorSets(m_ctx->device, tex.pool, 1, &tex.descriptorSet);
     if (tex.view != VK_NULL_HANDLE)    vkDestroyImageView(m_ctx->device, tex.view, nullptr);
     if (tex.image != VK_NULL_HANDLE)   vkDestroyImage(m_ctx->device, tex.image, nullptr);
     if (tex.memory != VK_NULL_HANDLE)  vkFreeMemory(m_ctx->device, tex.memory, nullptr);
-    tex = VulkanTexture{};
+    tex = VulkanTexture{};   // the sampler is shared
+}
+
+VkDescriptorSet VulkanTextureManager::AllocateSet(VkDescriptorPool& pool)
+{
+    // Newest pool first (older ones are full or nearly so); a new pool when
+    // none has room.
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        if (attempt == 1 || m_pools.empty())
+        {
+            const uint32_t kSetsPerPool = 4096;
+            VkDescriptorPoolSize size{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSetsPerPool };
+            VkDescriptorPoolCreateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+            info.maxSets = kSetsPerPool;
+            info.poolSizeCount = 1;
+            info.pPoolSizes = &size;
+            VkDescriptorPool created = VK_NULL_HANDLE;
+            if (vkCreateDescriptorPool(m_ctx->device, &info, nullptr, &created) != VK_SUCCESS)
+                return VK_NULL_HANDLE;
+            m_pools.push_back(created);
+        }
+        VkDescriptorSetAllocateInfo alloc{};
+        alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc.descriptorPool = m_pools.back();
+        alloc.descriptorSetCount = 1;
+        alloc.pSetLayouts = &m_textureLayout;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(m_ctx->device, &alloc, &set) == VK_SUCCESS)
+        {
+            pool = m_pools.back();
+            return set;
+        }
+    }
+    return VK_NULL_HANDLE;
 }
 
 uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width, uint32_t height)
@@ -447,23 +576,11 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCreateImageView(m_ctx->device, &viewCI, nullptr, &tex.view);
 
-    // Sampler
-    VkSamplerCreateInfo samplerCI{};
-    samplerCI.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerCI.magFilter = VK_FILTER_LINEAR;
-    samplerCI.minFilter = VK_FILTER_LINEAR;
-    samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    vkCreateSampler(m_ctx->device, &samplerCI, nullptr, &tex.sampler);
+    tex.sampler = m_clampSampler;
 
     // Descriptor set
-    VkDescriptorSetAllocateInfo dsAlloc{};
-    dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    dsAlloc.descriptorPool = m_ctx->descriptorPool;
-    dsAlloc.descriptorSetCount = 1;
-    dsAlloc.pSetLayouts = &m_textureLayout;
-    vkAllocateDescriptorSets(m_ctx->device, &dsAlloc, &tex.descriptorSet);
+    AssignSlot(tex);
+    tex.descriptorSet = AllocateSet(tex.pool);
 
     VkDescriptorImageInfo descImgInfo{};
     descImgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

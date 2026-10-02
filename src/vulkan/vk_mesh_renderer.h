@@ -101,6 +101,8 @@ private:
 
     void UploadMesh(MeshData* mesh, MeshGPUData& gpu);
     void UploadQuadGeometry();
-    void BindTextureOrWhite(VkCommandBuffer cmd, uint32_t texHandle);
+    // Bindless slot of a texture, or of the white texture if it has none.
+    int32_t TextureSlot(uint32_t texHandle) const;
+    void BindTextures(VkCommandBuffer cmd);   // the bindless set, once per pass
     void DestroyMeshGPU(MeshGPUData& gpu);
 };

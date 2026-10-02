@@ -95,6 +95,9 @@ private:
     double      m_followMoveTime = 0.0;             // glfwGetTime() of the last camera change
     bool        m_followSent = false;
     bool        m_followWasOn = false;
+    // While following: may a capture be taken now? (GE has flown to the
+    // viewport camera and come to rest.) Reason in m_ui->captureGate when not.
+    bool        CaptureSettled();
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet

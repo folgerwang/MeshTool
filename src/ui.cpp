@@ -594,6 +594,13 @@ void MeshToolUI::DrawScenePanel()
         }
         ImGui::Spacing();
         ImGui::Checkbox("Google Earth follows viewport (G)", &geFollowViewport);
+        if (geFollowViewport)
+        {
+            if (captureGate.empty())
+                ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "Capture (F12): ready");
+            else
+                ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Capture (F12): wait - %s", captureGate.c_str());
+        }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Whenever the viewport camera comes to rest, Google Earth flies to the same\n"
                               "position and direction. Needs a GPS-referenced scene, and Google Earth\n"

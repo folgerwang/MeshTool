@@ -53,6 +53,9 @@ public:
     // glfwGetTime() of GE's last /follow poll (0 = never: GE was started with
     // a KML from before this link existed).
     double LastFollowPoll() const;
+    // True while a follow camera waits for GE's next poll; otherwise
+    // `deliveredTime` is the glfwGetTime() GE received the newest one (0 = none).
+    bool FollowPending(double* deliveredTime = nullptr) const;
 
     // KML that makes GE report its view here. `extraKml` is inserted into the
     // Document (e.g. a fly-to LookAt). Returns the absolute file path, or "".
@@ -68,4 +71,5 @@ private:
     unsigned            m_followSeq = 0;      // bumped by SetFollowCamera
     unsigned            m_followServed = 0;   // the camera GE was last given
     double              m_followPollTime = 0.0;
+    double              m_followDeliveredTime = 0.0;
 };

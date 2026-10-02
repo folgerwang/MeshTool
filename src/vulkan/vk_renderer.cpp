@@ -555,8 +555,26 @@ void VulkanRenderer::CreateLogicalDevice()
     deviceFeatures.textureCompressionBC = VK_TRUE;
     deviceFeatures.textureCompressionETC2 = VK_FALSE; // may not be available on desktop
 
+    // Bindless textures (vk_texture_manager): one descriptor array of all
+    // textures, written while earlier frames may still be in flight.
+    VkPhysicalDeviceVulkan12Features supported12{};
+    supported12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceFeatures2 supported{};
+    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    supported.pNext = &supported12;
+    vkGetPhysicalDeviceFeatures2(m_ctx.physicalDevice, &supported);
+    if (!supported12.runtimeDescriptorArray || !supported12.descriptorBindingPartiallyBound ||
+        !supported12.descriptorBindingSampledImageUpdateAfterBind)
+        throw std::runtime_error("GPU lacks descriptor indexing (bindless textures)");
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.runtimeDescriptorArray = VK_TRUE;
+    features12.descriptorBindingPartiallyBound = VK_TRUE;
+    features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext = &features12;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
