@@ -67,15 +67,19 @@ class SceneTris:
     tex: np.ndarray        # int32[t] texture index (-1 none)
     obj: np.ndarray        # int32[t] object id (-1 none)
     mesh: np.ndarray       # int32[t] mesh index in the group
+    dc: np.ndarray = None  # int32[t] draw call index in that mesh
+    local: np.ndarray = None  # int32[t] triangle index in that draw call
 
 
 def collect(group):
-    pos, uv, tex, obj, mesh = [], [], [], [], []
+    pos, uv, tex, obj, mesh, dcs, local = [], [], [], [], [], [], []
     for mi, m in enumerate(group.meshes):
-        for prim, idx in m.draw_calls:
+        for di, (prim, idx) in enumerate(m.draw_calls):
             if prim != GL_TRIANGLES or len(idx) < 3:
                 continue
             idx = idx[: len(idx) // 3 * 3].reshape(-1, 3)
+            dcs.append(np.full(len(idx), di, np.int32))
+            local.append(np.arange(len(idx), dtype=np.int32))
             pos.append(m.vertices[idx].astype(np.float64) + m.translation)
             uv.append(m.uvs[idx] if m.uvs is not None else np.zeros((len(idx), 3, 2), np.float32))
             t = m.tex_index if m.tex_index < len(group.textures) else -1
@@ -83,7 +87,7 @@ def collect(group):
             obj.append(np.full(len(idx), m.object_id, np.int32))
             mesh.append(np.full(len(idx), mi, np.int32))
     return SceneTris(np.concatenate(pos), np.concatenate(uv), np.concatenate(tex),
-                     np.concatenate(obj), np.concatenate(mesh))
+                     np.concatenate(obj), np.concatenate(mesh), np.concatenate(dcs), np.concatenate(local))
 
 
 def decode_textures(group):

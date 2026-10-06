@@ -28,6 +28,8 @@ class Params:
     min_outline_iou: float = 0.80     # below this (or height fit) the original mesh is kept
     min_height_fit: float = 0.70
     min_wall_fidelity: float = 0.65   # outer wall area that must sit on the captured facade
+    max_silhouette_miss: float = 0.05 # captured silhouette the model may leave uncovered (any view)
+    max_blank_wall_m2: float = 40.0   # visible wall area with nothing captured on it
 
 
 @dataclass

@@ -98,9 +98,11 @@ class Surroundings:
         self.top, self.obj_cls, self.oid, self.ground_z = top, obj_cls, oid, ground_z
 
     def faces_building(self, f, gap=1.0):
-        """Wall looks onto another building (a party wall nobody photographed)."""
+        """Wall looks onto another building at least as tall (a party wall
+        nobody photographed)."""
         a = f.origin[:2]
         u, n = f.u[:2], f.normal[:2]
+        wall_top = f.origin[2] + f.size[1]
         hits = 0
         k = max(2, int(f.size[0] / 1.0))
         for s in range(k):
@@ -109,10 +111,71 @@ class Surroundings:
             px, py = int(px), int(py)
             if not (0 <= py < self.top.obj.shape[0] and 0 <= px < self.top.obj.shape[1]):
                 continue
+            # Hidden only where the neighbour stands as high as the wall.
             if self.obj_cls[py, px] == CLS_BUILDING and self.top.obj[py, px] != self.oid and \
-                    self.top.height[py, px] > self.ground_z + 3.0:
+                    self.top.height[py, px] > max(self.ground_z + 3.0, wall_top - 2.0):
                 hits += 1
         return hits > k // 2
+
+
+def _silhouette(pos, R, lo, res, shape):
+    """Orthographic coverage mask of triangles pos[t, 3, 3] seen along rotation R."""
+    P = pos @ R.T
+    scr = np.empty_like(P)
+    scr[..., 0] = (P[..., 0] - lo[0]) / res
+    scr[..., 1] = (P[..., 1] - lo[1]) / res
+    scr[..., 2] = P[..., 2]
+    depth = np.full(shape, -np.inf)
+    color = np.zeros(shape + (3,), np.uint8)
+    ids = np.full(shape, -1, np.int32)
+    n = len(pos)
+    raster.rasterize(scr, np.zeros((n, 3, 2), np.float32), np.full(n, -1, np.int32), np.zeros(n, np.int32),
+                     np.zeros((1, 256, 256, 3), np.uint8), shape[1], shape[0], depth, color, ids, -1e30, 1e30)
+    return ids >= 0
+
+
+def silhouette_miss(faces, own_pos, kept_pos, res=0.5):
+    """Worst share, over five views (four oblique sides and straight down), of
+    the captured building's silhouette the model does not cover. Catches
+    missing walls you could see through, and gross shape errors."""
+    model_pos = np.concatenate([f.tris for f in faces] + ([kept_pos] if len(kept_pos) else []))
+    worst = 0.0
+    views = [(0.0, -90.0)] + [(yaw, -35.0) for yaw in (0, 90, 180, 270)]
+    for yaw, pitch in views:
+        a, b = math.radians(yaw), math.radians(pitch)
+        fwd = np.array([math.sin(a) * math.cos(b), math.cos(a) * math.cos(b), math.sin(b)])
+        right = np.cross(fwd, [0, 0, 1.0]) if abs(fwd[2]) < 0.99 else np.array([1.0, 0, 0])
+        right /= np.linalg.norm(right)
+        up = np.cross(right, fwd)
+        R = np.stack([right, up, -fwd])
+        P = own_pos.reshape(-1, 3) @ R.T
+        lo, hi = P.min(0) - 1.0, P.max(0) + 1.0
+        shape = (int((hi[1] - lo[1]) / res) + 1, int((hi[0] - lo[0]) / res) + 1)
+        orig = _silhouette(own_pos, R, lo, res, shape)
+        # Thin captured details (antennas, railings, fins) are not modelled.
+        orig = cv2.morphologyEx(orig.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)).astype(bool)
+        mod = _silhouette(model_pos, R, lo, res, shape)
+        mod = cv2.dilate(mod.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        if orig.sum():
+            worst = max(worst, float((orig & ~mod).sum() / orig.sum()))
+    return worst
+
+
+def blank_walls(faces, src, texs, around):
+    """Area (m2) of steps between roof parts and courtyard walls with almost
+    nothing captured to project onto them (would show as a flat fill colour,
+    e.g. a wall where the capture has an open canopy)."""
+    blank = 0.0
+    for f in faces:
+        if f.kind != "wall" or (f.exterior and f.edge >= 0) or around.faces_building(f):
+            continue                       # outer walls: wall_fidelity covers them
+        area = f.size[0] * f.size[1]
+        if area < 15.0:
+            continue
+        _, _, cov = project_face(f, src, texs, 0.5, WALL_BAND)
+        if cov.mean() < 0.3:
+            blank += area * (1.0 - cov.mean())
+    return blank
 
 
 def wall_fidelity(model, src, texs, around):
@@ -279,34 +342,67 @@ def model_meshes(model, faces, src, texs, texel, object_id, tex_base, classifier
     return meshes, textures, float(np.mean(coverage)) if coverage else 0.0, pages, glass_area
 
 
-def absorb_fragments(group, tris, tri_cls, buildings, models, tol=1.5, share=0.8):
-    """Unrefined building objects that lie (almost) entirely inside or against a
-    refined model - facade slivers the segmenter split off - are dropped: the
-    model's walls now stand where they were."""
+def inside_model(model, pos, tol=1.0):
+    """Triangles (float[t, 3, 3]) whose centre lies in a refined model's volume:
+    footprint grown by tol, between the ground and just above the roof."""
     import shapely
+    cen = pos.mean(1)
+    zone = model.footprint.buffer(tol, join_style="mitre")
+    hit = (cen[:, 2] > model.ground_z - 1.0) & (cen[:, 2] < model.top_z() + 1.5)
+    idx = np.flatnonzero(hit)
+    if len(idx):
+        hit[idx] = shapely.contains_xy(zone, cen[idx, 0], cen[idx, 1])
+    return hit
+
+
+def absorb_fragments(tris, buildings, models, share=0.8):
+    """Unrefined building objects that lie (almost) entirely inside or against a
+    refined model - facade slivers the segmenter split off. Returns
+    {object id: indices of its triangles inside a model} for those; the rest
+    of their triangles stay as captured."""
     if not models:
-        return []
-    zones = [(shapely.prepared.prep(m.footprint.buffer(tol)), m.ground_z - 1.0,
-              m.top_z() + 1.0, m) for m in models.values()]
-    out = []
+        return {}
+    out = {}
     for oid in buildings:
         if oid in models:
             continue
-        sel = tris.obj == oid
-        if not sel.any():
+        rows = np.flatnonzero(tris.obj == oid)
+        if not len(rows):
             continue
-        cen = tris.pos[sel].mean(1)
-        inside = np.zeros(len(cen), bool)
-        for prep, z0, z1, m in zones:
-            b = m.footprint.bounds
-            cand = (cen[:, 0] > b[0] - tol) & (cen[:, 0] < b[2] + tol) & (cen[:, 1] > b[1] - tol) &                    (cen[:, 1] < b[3] + tol) & (cen[:, 2] > z0) & ~inside
-            if not cand.any():
-                continue
-            idx = np.flatnonzero(cand)
-            hit = shapely.contains_xy(m.footprint.buffer(tol), cen[idx, 0], cen[idx, 1])
-            inside[idx[hit]] = True
+        inside = np.zeros(len(rows), bool)
+        for m in models.values():
+            inside |= inside_model(m, tris.pos[rows], tol=1.5)
         if inside.mean() >= share:
-            out.append(oid)
+            out[oid] = rows[inside]
+    return out
+
+
+def drop_triangles(group, tris, drop):
+    """The group's meshes without the triangles flagged in drop (rows of tris);
+    meshes left empty disappear."""
+    hit = {}
+    for row in np.flatnonzero(drop):
+        hit.setdefault(int(tris.mesh[row]), []).append((int(tris.dc[row]), int(tris.local[row])))
+    out = []
+    for mi, m in enumerate(group.meshes):
+        if mi not in hit:
+            out.append(m)
+            continue
+        gone = {}
+        for di, ti in hit[mi]:
+            gone.setdefault(di, set()).add(ti)
+        dcs = []
+        for di, (prim, idx) in enumerate(m.draw_calls):
+            if di in gone:
+                t = idx[: len(idx) // 3 * 3].reshape(-1, 3)
+                keep = np.ones(len(t), bool)
+                keep[list(gone[di])] = False
+                idx = t[keep].ravel()
+            if len(idx):
+                dcs.append((prim, idx))
+        if dcs:
+            m.draw_calls = dcs
+            out.append(m)
     return out
 
 
@@ -369,6 +465,7 @@ def main():
                   f"raster {top.color.shape[1]}x{top.color.shape[0]} ({time.time() - t0:.0f} s)", flush=True)
 
             replaced, models = {}, {}
+            drop = np.zeros(len(tris.obj), bool)          # captured triangles a model replaces
             visible = np.bincount(top.obj[top.obj >= 0].ravel(), minlength=len(group.objects)) * params.res ** 2
             fragment_ids = np.array([i for i, o in enumerate(group.objects)
                                      if o.cls == CLS_BUILDING and visible[i] < 20.0], np.int32)
@@ -444,11 +541,26 @@ def main():
                     print(f"  {name}: walls do not match the captured facades ({fid:.0%}), kept", flush=True)
                     continue
                 faces = building.model_faces(model)
+                own_rows = np.flatnonzero(sel)
+                own_inside = inside_model(model, tris.pos[own_rows])
+                # Captured triangles outside the model (pieces of neighbours the
+                # segmenter gave this object) stay as captured.
+                miss = silhouette_miss(faces, tris.pos[own_rows], tris.pos[own_rows[~own_inside]])
+                blank = blank_walls(faces, src, texs, around)
+                if os.environ.get("CHECK_DEBUG"):
+                    print(f"    check {name}: silhouette miss {miss:.3f}, blank walls {blank:.0f} m2", flush=True)
+                if miss > params.max_silhouette_miss:
+                    print(f"  {name}: model leaves gaps in the captured silhouette ({miss:.0%}), kept", flush=True)
+                    continue
+                if blank > params.max_blank_wall_m2:
+                    print(f"  {name}: {blank:.0f} m2 of walls with nothing captured on them, kept", flush=True)
+                    continue
                 meshes, textures, cov, pages, glass_m2 = model_meshes(
                     model, faces, src, texs, args.texel, oid, len(group.textures) + len(new_textures), classifier)
                 new_textures += textures
                 replaced[oid] = meshes
                 models[oid] = model
+                drop[own_rows[own_inside]] = True
                 done += 1
                 ntri = sum(len(m.vertices) // 3 for m in meshes)
                 print(f"  [{bi + 1}/{len(buildings)}] {name}: {len(model.parts)} roof parts, {ntri} triangles "
@@ -468,14 +580,13 @@ def main():
                                 cv2.resize(dbg, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST))
                     cv2.imwrite(os.path.join(args.debug_dir, f"{name}_atlas0.png"), pages[0][..., ::-1])
 
-            absorbed = absorb_fragments(group, tris, tri_cls, buildings, models)
-            for oid in absorbed:
-                replaced.setdefault(oid, [])
+            absorbed = absorb_fragments(tris, buildings, models)
+            for rows in absorbed.values():
+                drop[rows] = True
             if absorbed:
                 print(f"  absorbed {len(absorbed)} facade fragments into refined buildings", flush=True)
             if replaced:
-                group.meshes = [m for m in group.meshes if m.object_id not in replaced] + \
-                               [m for ms in replaced.values() for m in ms]
+                group.meshes = drop_triangles(group, tris, drop) + [m for ms in replaced.values() for m in ms]
                 group.textures += new_textures
 
     progress(1, 1, "Saving the refined scene...")
