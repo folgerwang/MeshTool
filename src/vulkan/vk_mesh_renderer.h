@@ -40,6 +40,12 @@ struct MeshDrawFrame {
     bool                 selActual = false;   // selection drawn as captured (textured), not highlighted
     float                selColor[3] = { 1.0f, 0.85f, 0.1f };
 
+    // Glass facades (MeshData::material == kMatGlass): translucent and
+    // reflective when enabled, otherwise drawn like any captured mesh.
+    bool  glass = true;
+    float glassOpacity = 0.6f;      // panes facing the viewer; grazing views turn mirror-like
+    float glassReflect = 0.6f;
+
     bool IsSelected(const GroupMeshData* group, const MeshData* mesh) const;
 };
 
@@ -79,7 +85,7 @@ public:
                          const float* viewProjMatrix, const MeshDrawFrame& frame, bool culling);
     // flatColor: draw untextured in this RGB colour instead (nullptr = textured).
     void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame,
-                  const float* flatColor = nullptr);
+                  const float* flatColor = nullptr, bool asGlass = false);
     void DrawQuad(VkCommandBuffer cmd, float x, float y, float w, float h, uint32_t texHandle);
 
 private:

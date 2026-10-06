@@ -10,6 +10,8 @@ position, stitches overlapping captures into one scene, splits it into objects
   duplicate and level-of-detail cleanup, any zoom or camera angle
 - **Google Earth follows the viewport**: move in MeshTool, Google Earth flies along
 - **AI segmentation** into objects with a local vision model (Ollama)
+- **Building refinement**: segmented buildings become clean models (straight
+  walls on the captured facades, planar roofs) with glass curtain walls
 - **Export** to glTF 2.0 (`.glb` / `.gltf`) and Maya ASCII
 
 Built with GLFW + Dear ImGui + Vulkan (the old Qt6/OpenGL UI was replaced).
@@ -76,6 +78,10 @@ Logs: `C:\Users\Public\meshtool_capture.log` (MeshTool side) and
 
 - Windows 10+, Visual Studio 2022 (x64), CMake >= 3.16, git
 - Vulkan SDK (provides `glslc` for shader compilation)
+- For Tools > Refine Buildings: Python 3.10+ with CUDA PyTorch and
+  `pip install -r tools/building_refine/requirements.txt`; the SAM2
+  (`facebook/sam2.1-hiera-small`) and CLIP (`openai/clip-vit-large-patch14`)
+  weights download from Hugging Face on first use
 
 ## Setup
 
@@ -206,10 +212,51 @@ Scene panel > Objects: colour by class, show/hide classes. Debug images
 `C:\Users\Public\meshtool_segment\`. Headless:
 `MeshTool.exe --segment in.mtscene out.mtscene [--no-model] [--res m]`.
 
+## Refine Buildings
+
+Tools > Refine Buildings (needs a segmented scene) replaces each building with a
+clean model and loads the result in place of the current scene (save it with
+File > Save Scene). The work is done by `toolsuilding_refine
+efine.py`, run
+with `python` from PATH (or `MESHTOOL_PYTHON`) on a copy of the scene.
+
+1. **Outline**: the building's top-down mask, sharpened by SAM2 on the orthophoto.
+2. **Roof**: split into planes (RANSAC + region growing); planes flatter than 4°
+   become level.
+3. **Walls**: for each roof part, a horizontal slice through the captured mesh
+   just below that roof gives where the facade really stands (not the roof edge,
+   which parapets, canopies and overhangs push off it); edges near the
+   building's main directions are straightened onto them.
+4. **Textures**: each new face is textured by projecting the original mesh onto
+   it (8 cm per texel), so the model keeps the captured look.
+5. **Glass**: CLIP classifies 3 m facade cells; curtain walls get the glass
+   material (darker texels are panes: translucent over a dark interior, sky
+   reflection with Fresnel; the frame stays opaque). Scene panel > Objects >
+   Glass facades sets opacity and reflection.
+
+A building is replaced only if its walls lie on the captured facades (at least
+65% of the street-facing wall area within 1.5 m); buildings at the edge of the
+capture, small ones and poor fits keep their captured mesh. Facade slivers the
+segmenter split off are absorbed into the refined building next to them.
+Progress and the log (`refine.log`) go to the segmentation debug folder.
+
+```
+MeshTool --refine in.mtscene out.mtscene [--no-glass]
+python toolsuilding_refine
+efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--debug-dir d]
+MeshTool --objects in.mtscene [out.mtscene] [--remove car]
+MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..]
+```
+
+`--objects` lists a segmented scene's objects (name, class, size, centre) and
+can drop a class; `--box` frames a fixed world box, so shots of two scenes line
+up for before/after comparison.
+
 ## Scene files
 
 File > Save Scene / Open Scene (Ctrl+S / Ctrl+O): `.mtscene`, MeshTool's
-lossless native format - meshes, textures as captured, GPS origin.
+lossless native format - meshes, textures as captured, GPS origin, segmented
+objects and (version 4) each mesh's material (captured, glass, interior).
 
 ## Viewport
 

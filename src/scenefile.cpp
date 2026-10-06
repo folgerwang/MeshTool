@@ -9,7 +9,7 @@
 namespace
 {
     const char     kMagic[8] = { 'M', 'T', 'S', 'C', 'E', 'N', 'E', '\0' };
-    const uint32_t kVersion = 3;          // 2: per-batch georeferenced flag, 3: segmented objects
+    const uint32_t kVersion = 4;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material
     const uint32_t kOldestVersion = 1;
 
     // Sanity limits so a corrupt file fails cleanly instead of allocating wildly.
@@ -92,6 +92,7 @@ namespace
         w.pod(n);
         w.pod(m->idx_in_texture_list);
         w.pod(m->object_id);
+        w.pod(m->material);
         w.pod(m->translation.x); w.pod(m->translation.y); w.pod(m->translation.z);
         uint8_t has_uv = (n && m->uv_list) ? 1 : 0;
         uint8_t has_color = (n && m->color_list) ? 1 : 0;
@@ -123,6 +124,8 @@ namespace
         m->idx_in_texture_list = r.pod<uint32_t>();
         if (version >= 3)
             m->object_id = r.pod<int32_t>();
+        if (version >= 4)
+            m->material = r.pod<uint8_t>();
         double t[3] = { r.pod<double>(), r.pod<double>(), r.pod<double>() };
         m->translation = core::vec3d(t[0], t[1], t[2]);
         uint8_t has_uv = r.pod<uint8_t>();

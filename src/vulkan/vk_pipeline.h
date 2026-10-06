@@ -10,6 +10,7 @@ enum PipelineType {
     PIPELINE_BASIC_NOLIGHT,
     PIPELINE_SCREEN_QUAD,
     PIPELINE_BASIC_LIGHT_STRIP,   // Same as BASIC_LIGHT but with triangle strip topology
+    PIPELINE_GLASS,               // Translucent, reflective facades: blended, no depth writes
     PIPELINE_COUNT
 };
 
@@ -36,6 +37,7 @@ private:
 
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
     void CreatePipeline(PipelineType type, const std::string& vertPath, const std::string& fragPath,
-                        VkPrimitiveTopology topology, bool enableBlend, bool enableDepth);
+                        VkPrimitiveTopology topology, bool enableBlend, bool enableDepth,
+                        bool depthWrite = true);
     std::vector<char> ReadSPIRV(const std::string& filename);
 };

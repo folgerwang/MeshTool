@@ -208,6 +208,9 @@ struct GltfBuilder
     vector<string>  meshes;
     vector<string>  nodes;
     map<string, int32_t> material_of_image;   // texture file -> material index (-1 = unusable)
+    map<int32_t, int32_t> texture_of_material;  // captured material -> its texture
+    map<int32_t, int32_t> glass_of_material;    // captured material -> glass variant
+    int32_t interior_material = -1;
 
     int32_t AddBufferView(const void* data, size_t size, int32_t target)
     {
@@ -230,8 +233,36 @@ struct GltfBuilder
         return int32_t(accessors.size() - 1);
     }
 
-    // Material for a texture file; creates image/texture/material on first use.
-    int32_t GetMaterial(const string& tex_file_name, bool embed, const string& gltf_dir, const string& textures_rel_dir)
+    // Material for a mesh: its texture as captured (unlit), or for refined
+    // buildings glass (PBR, alpha blended, smooth) or the dark interior behind it.
+    int32_t GetMaterial(const string& tex_file_name, uint8_t mesh_material, bool embed, const string& gltf_dir,
+                        const string& textures_rel_dir)
+    {
+        if (mesh_material == kMatInterior)
+        {
+            if (interior_material < 0)
+            {
+                materials.push_back("{\"name\":\"interior\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.1,0.11,0.12,1],"
+                                    "\"metallicFactor\":0,\"roughnessFactor\":1},\"doubleSided\":true,"
+                                    "\"extensions\":{\"KHR_materials_unlit\":{}}}");
+                interior_material = int32_t(materials.size() - 1);
+            }
+            return interior_material;
+        }
+        const int32_t base = GetCapturedMaterial(tex_file_name, embed, gltf_dir, textures_rel_dir);
+        if (mesh_material != kMatGlass || base < 0)
+            return base;
+        auto g = glass_of_material.find(base);
+        if (g != glass_of_material.end())
+            return g->second;
+        materials.push_back("{\"name\":\"glass_" + JsonEscape(fs::path(tex_file_name).stem().string()) + "\","
+                            "\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":" + to_string(texture_of_material[base]) + "},"
+                            "\"baseColorFactor\":[1,1,1,0.75],\"metallicFactor\":0,\"roughnessFactor\":0.05},"
+                            "\"alphaMode\":\"BLEND\",\"doubleSided\":true}");
+        return glass_of_material[base] = int32_t(materials.size() - 1);
+    }
+
+    int32_t GetCapturedMaterial(const string& tex_file_name, bool embed, const string& gltf_dir, const string& textures_rel_dir)
     {
         auto it = material_of_image.find(tex_file_name);
         if (it != material_of_image.end())
@@ -278,6 +309,7 @@ struct GltfBuilder
                                     "\"metallicFactor\":0,\"roughnessFactor\":1},"
                                     "\"doubleSided\":true,\"extensions\":{\"KHR_materials_unlit\":{}}}");
                 material_idx = int32_t(materials.size() - 1);
+                texture_of_material[material_idx] = int32_t(textures.size() - 1);
             }
         }
         else
@@ -526,7 +558,9 @@ bool ExportGltfMeshFile(const string& file_name, const vector<BatchMeshData*>& b
                 {
                     tex_file_name = *mesh_data->tex_file_name;
                 }
-                int32_t material_idx = tex_file_name.empty() ? -1 : gltf.GetMaterial(tex_file_name, embed, gltf_dir, textures_rel_dir);
+                int32_t material_idx = mesh_data->material == kMatInterior
+                    ? gltf.GetMaterial("", kMatInterior, embed, gltf_dir, textures_rel_dir)
+                    : tex_file_name.empty() ? -1 : gltf.GetMaterial(tex_file_name, mesh_data->material, embed, gltf_dir, textures_rel_dir);
 
                 string mesh_idx_string = to_string(iMeshBatch) + "_" + to_string(iMeshGroup) + "_" + to_string(iMesh);
                 // Segmented scenes: name parts after their object (building_012_...).

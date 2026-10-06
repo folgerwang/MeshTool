@@ -171,6 +171,9 @@ bool MeshDrawFrame::IsSelected(const GroupMeshData* group, const MeshData* mesh)
 // Debug capture view: tiles of unknown origin (loaded from a scene file).
 static const float kNoCaptureColor[3] = { 0.45f, 0.45f, 0.48f };
 
+// Behind glass: a dim room interior.
+static const float kInteriorColor[3] = { 0.10f, 0.11f, 0.12f };
+
 void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           const std::vector<BatchMeshData*>& batches,
                                           const float* viewProjMatrix,
@@ -178,6 +181,7 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                                           bool culling)
 {
     BindTextures(cmd);
+    std::vector<std::pair<double, MeshData*>> glass;   // drawn last, back to front
     for (const auto* batch : batches) {
         if (!batch) continue;
         for (const auto* group : batch->group_meshes) {
@@ -215,14 +219,32 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
                         flat = instanceColor;
                     }
                 }
+                if (mesh->material == kMatInterior)
+                {
+                    if (!frame.glass)
+                        continue;                       // glass drawn opaque: nothing to see behind it
+                    if (!flat)
+                        flat = kInteriorColor;
+                }
+                if (!flat && frame.glass && mesh->material == kMatGlass)
+                {
+                    const core::vec3d c = mesh->bbox_ws.b_valid ? mesh->bbox_ws.GetCentroid() : mesh->translation;
+                    const double dx = c.x - frame.refPos[0], dy = c.y - frame.refPos[1], dz = c.z - frame.refPos[2];
+                    glass.emplace_back(dx * dx + dy * dy + dz * dz, mesh);
+                    continue;
+                }
                 DrawMesh(cmd, mesh, viewProjMatrix, frame, flat);
             }
         }
     }
+    std::sort(glass.begin(), glass.end(),
+              [](const std::pair<double, MeshData*>& a, const std::pair<double, MeshData*>& b) { return a.first > b.first; });
+    for (const auto& g : glass)
+        DrawMesh(cmd, g.second, viewProjMatrix, frame, nullptr, true);
 }
 
 void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix,
-                                  const MeshDrawFrame& frame, const float* flatColor)
+                                  const MeshDrawFrame& frame, const float* flatColor, bool asGlass)
 {
     if (!mesh) return;
 
@@ -263,6 +285,11 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     if (mesh->lod_size > 0.0f)
         pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
     pc.textureIndex[0] = TextureSlot(hasTexture ? mesh->tex_id : 0xFFFFFFFF);
+    if (asGlass)
+    {
+        pc.screenPosition[1] = frame.glassOpacity;     // glass.frag
+        pc.screenPosition[2] = frame.glassReflect;
+    }
 
     vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -286,7 +313,9 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
 
         // Select pipeline based on primitive type
         PipelineType pipeType;
-        if (dcInfo.get_primitive_type() == kGlTriangleStrip)
+        if (asGlass && dcInfo.get_primitive_type() == kGlTriangles)
+            pipeType = PIPELINE_GLASS;
+        else if (dcInfo.get_primitive_type() == kGlTriangleStrip)
             pipeType = PIPELINE_BASIC_LIGHT_STRIP;
         else
             pipeType = PIPELINE_BASIC_LIGHT;

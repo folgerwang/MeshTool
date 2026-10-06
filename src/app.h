@@ -44,6 +44,9 @@ public:
         double      yawDeg = 30.0;   // view direction (0 looks north, +90 east)
         double      pitchDeg = -35.0;
         double      zoom = 1.0;      // < 1 moves the camera closer than the framing distance
+        bool        hasBox = false;  // frame this world box instead (same camera across scenes)
+        double      box[6] = {};     // min x, y, z, max x, y, z
+        bool        glass = true;    // draw glass facades as glass (false: as captured)
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     void MainLoop();
@@ -67,6 +70,9 @@ private:
     // Receives Google Earth's view (GPS) through a KML NetworkLink.
     std::unique_ptr<class GeoViewServer> m_geoServer;
 
+    // Tools > Refine Buildings: refine.py on a saved copy of the scene.
+    std::unique_ptr<class BuildingRefiner> m_refiner;
+    void UpdateRefine();
     // Background scene segmentation (Tools > Segment Scene).
     std::unique_ptr<class Segmenter> m_segmenter;
     void UpdateSegmentation();
@@ -127,7 +133,7 @@ private:
     void RecomputeWorldBounds();
     void ReleaseGroup(GroupMeshData* group);         // free GPU data and delete (GPU must be idle)
     void ClearScene();
-    void OpenScene(const std::string& path);         // replaces the scene with a .mtscene file
+    void OpenScene(const std::string& path, bool keepCamera = false);         // replaces the scene with a .mtscene file
     void SaveSceneTo(const std::string& path);
     void LoadConfig();
     void SaveConfig();

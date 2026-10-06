@@ -1,0 +1,9 @@
+# Tools > Refine Buildings (refine.py). PyTorch with CUDA: install the build
+# for your GPU from https://pytorch.org first, then: pip install -r requirements.txt
+numpy
+numba
+opencv-python
+shapely>=2.1
+transformers
+sam2
+huggingface_hub

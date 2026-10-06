@@ -62,6 +62,16 @@ void VulkanPipelineManager::Init(VulkanContext* ctx, VkDescriptorSetLayout texLa
                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
                    /*enableBlend=*/false,
                    /*enableDepth=*/true);
+
+    // Drawn after everything opaque, back to front: tests depth so buildings
+    // in front hide it, but does not write it, so what is behind still shows.
+    CreatePipeline(PIPELINE_GLASS,
+                   "shaders/basiclight.vert.spv",
+                   "shaders/glass.frag.spv",
+                   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   /*enableBlend=*/true,
+                   /*enableDepth=*/true,
+                   /*depthWrite=*/false);
 }
 
 void VulkanPipelineManager::Shutdown()
@@ -149,7 +159,8 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
                                            const std::string& fragPath,
                                            VkPrimitiveTopology topology,
                                            bool enableBlend,
-                                           bool enableDepth)
+                                           bool enableDepth,
+                                           bool depthWrite)
 {
     // --- Shader stages ---
     auto vertCode = ReadSPIRV(vertPath);
@@ -262,7 +273,7 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
     VkPipelineDepthStencilStateCreateInfo depthStencil = {};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = enableDepth ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = enableDepth ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = enableDepth && depthWrite ? VK_TRUE : VK_FALSE;
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;

@@ -163,6 +163,7 @@ struct MeshData : public core::Primitive
     int32_t         object_id = -1;     // index into the owning group's objects, -1 = none
     int32_t         capture_id = -1;    // index into the owning group's captures, -1 = unknown
     float           lod_size = 0.0f;    // GE tile edge (metres): coarser draws behind finer; 0 = not a GE tile
+    uint8_t         material = 0;       // MeshMaterial
 
     MeshData() : num_vertex(0),
                  idx_in_texture_list(INVALID_VALUE),
@@ -195,6 +196,15 @@ struct MeshData : public core::Primitive
 
         draw_call_list.push_back(move(*lastest_draw_call));
     }
+};
+
+// Surface material of a mesh. Captured meshes are kCaptured; Refine Buildings
+// marks curtain-wall facades as kGlass (translucent, reflective).
+enum MeshMaterial : uint8_t
+{
+    kMatCaptured = 0,
+    kMatGlass = 1,
+    kMatInterior = 2,   // dark backing just behind glass, so it never shows an empty shell
 };
 
 // Semantic class of a segmented scene object.

@@ -46,6 +46,17 @@ public:
     bool  classColors = false;
     bool  buildingColors = true;   // with classColors: a distinct colour per building
     bool  classVisible[kObjClassCount] = { true, true, true, true, true, true, true, true };
+    // Refine Buildings (Tools menu): requests for the app, and its progress.
+    bool  wantStartRefine = false;
+    bool  wantCancelRefine = false;
+    bool  refineRunning = false;
+    bool  refineGlass = true;
+    float refineProgress = 0.0f;
+    std::string refineStatus;
+    // Glass facades of refined buildings.
+    bool  glass = true;
+    float glassOpacity = 0.6f;
+    float glassReflect = 0.6f;
     // Debug: colour tiles by the live capture that produced them and draw
     // each capture's camera, look direction and footprint, joined in order.
     bool  debugCaptures = false;
@@ -112,6 +123,15 @@ private:
 
     // Scene info panel
     bool showScenePanel = true;
+
+    // Refine Buildings dialog
+
+    bool showRefineDialog = false;
+
+    void DrawRefineDialog();
+
+    bool SceneHasBuildings() const;
+
 
     // Segment Scene dialog
     bool showSegmentDialog = false;

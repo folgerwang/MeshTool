@@ -52,6 +52,7 @@ set(NEW_SOURCES
     src/geoview.cpp
     src/segment/segmenter.cpp
     src/segment/qwen_client.cpp
+    src/segment/refiner.cpp
     src/file_downloader.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp

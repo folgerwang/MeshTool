@@ -26,6 +26,7 @@
 #include "scenefile.h"
 #include "geoview.h"
 #include "segmenter.h"
+#include "refiner.h"
 #include "qwen_client.h"   // WritePngRgb
 #include "objectclass.h"
 #include <GeographicLib/LocalCartesian.hpp>
@@ -303,6 +304,9 @@ void MeshToolApp::MainLoop()
             drawFrame.selColor[2] = 0.05f + 0.75f * k;
         }
         drawFrame.classVisible = m_ui->classVisible;
+        drawFrame.glass = m_ui->glass;
+        drawFrame.glassOpacity = m_ui->glassOpacity;
+        drawFrame.glassReflect = m_ui->glassReflect;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
         // Render ImGui draw data - not on check-screenshot frames: dialogs,
@@ -397,8 +401,13 @@ void MeshToolApp::UpdateAutoShots()
             return;
         }
         core::bounds3d box;
+        if (m_auto.hasBox)
+        {
+            box += core::vec3d(m_auto.box[0], m_auto.box[1], m_auto.box[2]);
+            box += core::vec3d(m_auto.box[3], m_auto.box[4], m_auto.box[5]);
+        }
         for (const BatchMeshData* b : g_world.mesh_data_batches)
-            if (b)
+            if (b && !m_auto.hasBox)
                 for (const GroupMeshData* g : b->group_meshes)
                 {
                     if (!g) continue;
@@ -421,6 +430,7 @@ void MeshToolApp::UpdateAutoShots()
         FrameBounds(box);
         m_camera->distance *= m_auto.zoom;
         m_ui->classColors = true;
+        m_ui->glass = m_auto.glass;
         m_autoStage = 2;
         m_autoFrames = 0;
     }
@@ -784,11 +794,68 @@ void MeshToolApp::UpdateSegmentation()
     StartCheckScreenshots();
 }
 
-void MeshToolApp::OpenScene(const std::string& path)
+void MeshToolApp::UpdateRefine()
 {
-    if (m_segmenter && m_segmenter->Running())
+    if (!m_refiner)
+        m_refiner = std::make_unique<BuildingRefiner>();
+
+    if (m_ui->wantCancelRefine)
     {
-        m_ui->statusMessage = "Wait for segmentation to finish (or cancel it) before opening a scene.";
+        m_ui->wantCancelRefine = false;
+        m_refiner->Cancel();
+    }
+
+    if (m_ui->wantStartRefine)
+    {
+        m_ui->wantStartRefine = false;
+        if (m_refiner->Running() || (m_segmenter && m_segmenter->Running()))
+            return;
+        RefineSettings settings;
+        settings.glass = m_ui->refineGlass;
+        settings.workDir = m_ui->segSettings.debugDir;
+        std::error_code ec;
+        std::filesystem::create_directories(settings.workDir, ec);
+        const std::string input = (std::filesystem::path(settings.workDir) / "refine_input.mtscene").string();
+        std::string err;
+        if (!SaveScene(input, g_world.mesh_data_batches, err))
+        {
+            m_ui->statusMessage = "Refine Buildings: cannot save the scene for refine.py: " + err;
+            m_ui->statusTimeout = 10.0f;
+            return;
+        }
+        m_refiner->Start(input, settings);
+    }
+
+    m_ui->refineRunning = m_refiner->Running();
+    if (m_ui->refineRunning)
+    {
+        m_ui->refineProgress = m_refiner->Progress();
+        m_ui->refineStatus = m_refiner->Status();
+        return;
+    }
+
+    std::unique_ptr<RefineResult> result = m_refiner->TakeResult();
+    if (!result)
+        return;
+    if (!result->ok)
+    {
+        m_ui->statusMessage = "Refine Buildings: " + result->error;
+        m_ui->statusTimeout = 15.0f;
+        return;
+    }
+    vkDeviceWaitIdle(m_renderer->GetContext().device);
+    ClearSelection();
+    OpenScene(result->outputPath, /*keepCamera=*/true);
+    m_ui->classColors = false;
+    m_ui->statusMessage = result->summary + " - save it with File > Save Scene.";
+    m_ui->statusTimeout = 15.0f;
+}
+
+void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
+{
+    if ((m_segmenter && m_segmenter->Running()) || (m_refiner && m_refiner->Running()))
+    {
+        m_ui->statusMessage = "Wait for segmentation or refinement to finish (or cancel it) before opening a scene.";
         m_ui->statusTimeout = 6.0f;
         return;
     }
@@ -813,7 +880,8 @@ void MeshToolApp::OpenScene(const std::string& path)
         g_world.mesh_data_batches.push_back(batch);
     }
     RecomputeWorldBounds();
-    FrameBounds(g_world.bbox_ws);
+    if (!keepCamera)
+        FrameBounds(g_world.bbox_ws);
 
     m_ui->statusMessage = "Opened " + path + " (" + std::to_string(meshes) + " meshes).";
     m_ui->statusTimeout = 6.0f;
@@ -1381,6 +1449,8 @@ void MeshToolApp::ProcessPendingActions()
     }
 
     UpdateSegmentation();
+
+    UpdateRefine();
     const bool segmenting = m_segmenter && m_segmenter->Running();
 
     // A finished capture, requested here or with F12 inside Google Earth.

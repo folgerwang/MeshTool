@@ -174,6 +174,7 @@ void MeshToolUI::DrawUI()
     if (showRegionSelectDialog) DrawRegionSelectDialog();
     if (showNavCaptureDialog)   DrawNavCaptureDialog();
     if (showSegmentDialog)      DrawSegmentDialog();
+    if (showRefineDialog)       DrawRefineDialog();
     if (showMessageBox)         DrawMessageBox();
 
     // Auto-capture timer
@@ -282,6 +283,8 @@ void MeshToolUI::DrawMenuBar()
         {
             if (ImGui::MenuItem("Segment Scene (AI)...", nullptr, false, !g_world.mesh_data_batches.empty()))
                 showSegmentDialog = true;
+            if (ImGui::MenuItem("Refine Buildings (AI)...", nullptr, false, SceneHasBuildings()))
+                showRefineDialog = true;
             if (ImGui::MenuItem("Save Check Screenshots", nullptr, false, !g_world.mesh_data_batches.empty()))
                 wantCheckScreenshots = true;
             ImGui::EndMenu();
@@ -710,7 +713,22 @@ void MeshToolUI::DrawStatusBar()
     const float infoW = ImGui::CalcTextSize(info).x;
     const ImGuiStyle& style = ImGui::GetStyle();
 
-    if (segRunning || captureWaiting)
+    if (refineRunning && !segRunning)
+    {
+        const float barH = statusH - 8.0f;
+        const float cancelW = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f + style.ItemSpacing.x;
+        const float barW = ImGui::GetContentRegionAvail().x - infoW - cancelW - 24.0f;
+        char overlay[320];
+        snprintf(overlay, sizeof(overlay), "%s   %d%%", refineStatus.c_str(), int(refineProgress * 100.0f + 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
+        ImGui::ProgressBar(refineProgress, ImVec2(barW, barH), overlay);
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Cancel"))
+            wantCancelRefine = true;
+    }
+    else if (segRunning || captureWaiting)
     {
         // Full-width progress bar across the bottom of the window.
         const float barH = statusH - 8.0f;
@@ -891,14 +909,18 @@ void MeshToolUI::DrawCapturesSection()
 void MeshToolUI::DrawObjectsSection()
 {
     size_t instances[kObjClassCount] = {};
-    size_t total = 0;
+    size_t total = 0, glassMeshes = 0;
     for (const BatchMeshData* batch : g_world.mesh_data_batches)
         for (const GroupMeshData* group : batch->group_meshes)
+        {
             for (const SceneObject& o : group->objects)
             {
                 instances[o.cls < kObjClassCount ? o.cls : kObjUnknown]++;
                 total++;
             }
+            for (const MeshData* m : group->meshes)
+                if (m && m->material == kMatGlass) glassMeshes++;
+        }
     if (total == 0)
         return;
 
@@ -930,6 +952,16 @@ void MeshToolUI::DrawObjectsSection()
         ImGui::Checkbox("##vis0", &classVisible[kObjUnknown]);
         ImGui::SameLine();
         ImGui::TextDisabled("unassigned");
+        if (glassMeshes)
+        {
+            ImGui::Spacing();
+            ImGui::Checkbox("Glass facades", &glass);
+            if (glass)
+            {
+                ImGui::SliderFloat("Opacity", &glassOpacity, 0.1f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Reflection", &glassReflect, 0.0f, 1.0f, "%.2f");
+            }
+        }
         ImGui::Unindent(8);
     }
     ImGui::PopStyleColor(2);
@@ -939,6 +971,68 @@ void MeshToolUI::DrawObjectsSection()
 // ---------------------------------------------------------------------------
 // Dialogs
 // ---------------------------------------------------------------------------
+
+bool MeshToolUI::SceneHasBuildings() const
+{
+    for (const BatchMeshData* batch : g_world.mesh_data_batches)
+        for (const GroupMeshData* group : batch->group_meshes)
+            for (const SceneObject& o : group->objects)
+                if (o.cls == kObjBuilding)
+                    return true;
+    return false;
+}
+
+void MeshToolUI::DrawRefineDialog()
+{
+    ImGui::OpenPopup("Refine Buildings");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Refine Buildings", &showRefineDialog, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextColored(ImVec4(0.5f, 0.85f, 1.0f, 1.0f),
+            "Replace segmented buildings with clean models: straight walls, flat roofs.");
+        ImGui::TextDisabled("Walls follow the captured facades; textures are projected from the capture.");
+        ImGui::TextDisabled("Buildings the model cannot match stay as captured.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (refineRunning)
+        {
+            ImGui::ProgressBar(refineProgress, ImVec2(460, 0));
+            ImGui::TextUnformatted(refineStatus.c_str());
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                wantCancelRefine = true;
+            ImGui::SameLine();
+            if (ImGui::Button("Hide", ImVec2(120, 0)))
+            {
+                showRefineDialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        else
+        {
+            ImGui::Checkbox("Detect glass facades", &refineGlass);
+            ImGui::TextDisabled("Curtain walls get a translucent, reflective glass material.");
+            ImGui::Spacing();
+            ImGui::TextDisabled("Runs tools\\building_refine\\refine.py (Python with SAM2, CLIP; GPU).");
+            ImGui::TextDisabled("The refined scene replaces the current one; save it with File > Save Scene.");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            if (ImGui::Button("Refine", ImVec2(140, 0)))
+                wantStartRefine = true;
+            ImGui::SameLine();
+            if (ImGui::Button("Close", ImVec2(140, 0)))
+            {
+                showRefineDialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
 
 void MeshToolUI::DrawSegmentDialog()
 {
