@@ -51,6 +51,8 @@ public:
     bool  wantCancelRefine = false;
     bool  refineRunning = false;
     bool  refineGlass = true;
+    bool  refineClean = false;   // Refine Buildings: also rebuild the terrain, drop cars and clutter
+    bool  refineCull = true;     // Refine Buildings: remove hidden surfaces (z-fighting)
     float refineProgress = 0.0f;
     std::string refineStatus;
     // Glass facades of refined buildings.

@@ -1015,6 +1015,13 @@ void MeshToolUI::DrawRefineDialog()
         {
             ImGui::Checkbox("Detect glass facades", &refineGlass);
             ImGui::TextDisabled("Curtain walls get a translucent, reflective glass material.");
+            ImGui::Checkbox("Clean scene", &refineClean);
+            ImGui::TextDisabled("Removes cars and small surface clutter, rebuilds ground, roads, plants and");
+            ImGui::TextDisabled("water as one filled surface (holes under trees, cars and buildings filled");
+            ImGui::TextDisabled("from their surroundings) and sets refined walls down onto it. Trees stay.");
+            ImGui::Checkbox("Remove hidden surfaces", &refineCull);
+            ImGui::TextDisabled("Deletes triangles no view from above sees: terrain under buildings, walls");
+            ImGui::TextDisabled("against neighbours, duplicate tiles (the z-fighting). Always on with Clean scene.");
             ImGui::Spacing();
             ImGui::TextDisabled("Runs tools\\building_refine\\refine.py (Python with SAM2, CLIP; GPU).");
             ImGui::TextDisabled("The refined scene replaces the current one; save it with File > Save Scene.");

@@ -13,6 +13,8 @@
 struct RefineSettings
 {
     bool        glass = true;       // detect curtain-wall facades and give them the glass material
+    bool        clean = false;      // clean scene: remove cars/clutter, rebuild ground and roads under everything
+    bool        cull = false;       // remove hidden surfaces (always on with clean)
     std::string workDir = "C:\\Users\\Public\\meshtool_segment";   // input/output scenes and log
 };
 

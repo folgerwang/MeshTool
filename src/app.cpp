@@ -812,6 +812,8 @@ void MeshToolApp::UpdateRefine()
             return;
         RefineSettings settings;
         settings.glass = m_ui->refineGlass;
+        settings.clean = m_ui->refineClean;
+        settings.cull = m_ui->refineCull;
         settings.workDir = m_ui->segSettings.debugDir;
         std::error_code ec;
         std::filesystem::create_directories(settings.workDir, ec);

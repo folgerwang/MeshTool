@@ -21,6 +21,9 @@ import building
 import glass
 import mtscene
 import raster
+import terrain
+import cull
+import inpaint
 
 CLS_GROUND, CLS_ROAD, CLS_BUILDING, CLS_CAR, CLS_TREE, CLS_PLANTS, CLS_WATER = 1, 2, 3, 4, 5, 6, 7
 PAGE = 2048                     # atlas page size (px)
@@ -415,6 +418,16 @@ def main():
     ap.add_argument("--no-sam", action="store_true", help="outline from height only")
     ap.add_argument("--no-glass", action="store_true", help="do not detect glass facades")
     ap.add_argument("--texel", type=float, default=0.08, help="baked texture resolution (m per texel)")
+    ap.add_argument("--clean", action="store_true",
+                    help="clean scene: remove cars and surface clutter, rebuild ground/road/plants/water as a "
+                         "filled height field (holes under trees, cars and buildings filled from their "
+                         "surroundings), set refined walls down onto it; trees are kept")
+    ap.add_argument("--terrain-step", type=float, default=0.5, help="terrain grid step (m) with --clean")
+    ap.add_argument("--no-lama", action="store_true",
+                    help="with --clean: geometric hole fill instead of LaMa inpainting")
+    ap.add_argument("--cull", action="store_true",
+                    help="remove hidden surfaces: triangles no view from above the horizon sees (terrain under "
+                         "buildings, walls against neighbours, duplicate tiles); on with --clean")
     ap.add_argument("--debug-dir", help="write per-building debug images here")
     ap.add_argument("--progress", action="store_true",
                     help="print '@progress <done> <total> <message>' lines (for MeshTool)")
@@ -435,6 +448,12 @@ def main():
             predictor, torch = load_sam()
         except Exception as e:  # noqa: BLE001
             print(f"SAM2 unavailable ({e}); outlines from height only", flush=True)
+    inpainter = None
+    if args.clean and not args.no_lama:
+        try:
+            inpainter = inpaint.LamaInpainter(log=lambda s: print(s, flush=True))
+        except Exception as e:  # noqa: BLE001
+            print(f"LaMa unavailable ({e}); geometric hole fill", flush=True)
     classifier = None
     if not args.no_glass:
         try:
@@ -452,17 +471,47 @@ def main():
         for group in batch.groups:
             buildings = [i for i, o in enumerate(group.objects) if o.cls == CLS_BUILDING
                          and (only is None or o.name in only)]
-            if not buildings:
+            if not buildings and not args.clean:
                 continue
             progress(0, len(buildings), "Rendering the scene from above...")
             tris = raster.collect(group)
             texs = raster.decode_textures(group)
-            top = raster.top_down(tris, texs, params.res)
+            if args.clean:
+                terrain.relabel_vehicles(tris, group.objects, log=lambda s: print(s, flush=True))
+                buildings = [i for i, o in enumerate(group.objects) if o.cls == CLS_BUILDING
+                             and (only is None or o.name in only)]
+            # Google Earth draws a dark overlay pass over the ground tiles: same
+            # triangles, near-black texture. Drawn last they lose every depth tie
+            # to their textured twins; where they are the only geometry their
+            # colour is not used.
+            ph_tex = raster.placeholder_textures(texs)
+            demote = (tris.tex >= 0) & ph_tex[np.clip(tris.tex, 0, len(ph_tex) - 1)]   # lose depth ties
+            if demote.any():
+                order = np.argsort(demote, kind="stable")
+                tris = raster.SceneTris(tris.pos[order], tris.uv[order], tris.tex[order], tris.obj[order],
+                                        tris.mesh[order], tris.dc[order], tris.local[order])
+                demote = demote[order]
+            # Triangles that both use such a texture and sample its pattern: not
+            # used to texture anything.
+            dark_tri = demote & (raster.triangle_texture_stats(tris, texs)[:, 3] >= 0.2)
+            print(f"  {int(demote.sum())} of {len(demote)} triangles ({demote.mean():.0%}) use a placeholder texture "
+                  f"({int(ph_tex.sum())} textures); {int(dark_tri.sum())} show its pattern", flush=True)
+            top = raster.top_down(tris, texs, params.res, depth_bias=np.where(demote, -0.05, 0.0) if demote.any() else None)
+            # Colour not to trust: pixels won by a pattern-showing triangle, or by
+            # any placeholder-texture triangle where the colour itself looks like one.
+            won = np.maximum(top.tri, 0)
+            dark_px = (top.tri >= 0) & (dark_tri[won] | (demote[won] & raster.placeholder_pixels(top.color)))
             cls_of = np.array([o.cls for o in group.objects] + [0], np.int32)
             obj_cls = cls_of[top.obj]                     # -1 -> last entry (0)
             tri_cls = cls_of[tris.obj]
             print(f"scene: {len(tris.obj)} triangles, {len(buildings)} buildings, "
                   f"raster {top.color.shape[1]}x{top.color.shape[0]} ({time.time() - t0:.0f} s)", flush=True)
+            ter = None
+            if args.clean:
+                progress(0, max(1, len(buildings)), "Rebuilding the terrain...")
+                ter = terrain.analyse(top, obj_cls, params.res, color_holes=dark_px, log=lambda s: print(s, flush=True))
+                if args.debug_dir:
+                    cv2.imwrite(os.path.join(args.debug_dir, "terrain_holes.png"), ter.holes.astype(np.uint8) * 255)
 
             replaced, models = {}, {}
             drop = np.zeros(len(tris.obj), bool)          # captured triangles a model replaces
@@ -525,7 +574,7 @@ def main():
                 lo = np.array([*model.footprint.bounds[:2], -np.inf]) - [5, 5, 0]
                 hi = np.array([*model.footprint.bounds[2:], np.inf]) + [5, 5, 0]
                 cen = tris.pos.mean(1)
-                near_sel = np.all((cen >= lo) & (cen <= hi), 1) & ~np.isin(tri_cls, [CLS_CAR, CLS_TREE, CLS_PLANTS])
+                near_sel = np.all((cen >= lo) & (cen <= hi), 1) & ~np.isin(tri_cls, [CLS_CAR, CLS_TREE, CLS_PLANTS]) & ~dark_tri
                 src = raster.SceneTris(tris.pos[near_sel], tris.uv[near_sel], tris.tex[near_sel],
                                        tris.obj[near_sel], tris.mesh[near_sel])
                 def surface(x, y, top=top):
@@ -540,6 +589,11 @@ def main():
                 if fid < params.min_wall_fidelity:
                     print(f"  {name}: walls do not match the captured facades ({fid:.0%}), kept", flush=True)
                     continue
+                if ter is not None:
+                    # Walls down onto the rebuilt terrain: no crack at the base.
+                    omin = ter.outline_min(model.footprint)
+                    if omin is not None:
+                        model.ground_z = min(model.ground_z, omin - 0.15)
                 faces = building.model_faces(model)
                 own_rows = np.flatnonzero(sel)
                 own_inside = inside_model(model, tris.pos[own_rows])
@@ -585,13 +639,57 @@ def main():
                 drop[rows] = True
             if absorbed:
                 print(f"  absorbed {len(absorbed)} facade fragments into refined buildings", flush=True)
-            if replaced:
+            if ter is not None:
+                # Captured triangles with a placeholder texture lying on the rebuilt
+                # terrain (ground clutter, mislabelled pieces): the terrain shows instead.
+                low = dark_tri & ~np.isin(tri_cls, list(terrain.REMOVED))
+                if low.any():
+                    cen = tris.pos[low].mean(1)
+                    above = cen[:, 2] - ter.height_at(cen[:, 0], cen[:, 1])
+                    idx = np.flatnonzero(low)[above < 1.5]
+                    drop[idx] = True
+                    print(f"  {len(idx)} placeholder-textured triangles at ground level dropped", flush=True)
+            if replaced or drop.any():
                 group.meshes = drop_triangles(group, tris, drop) + [m for ms in replaced.values() for m in ms]
                 group.textures += new_textures
+            if ter is not None:
+                progress(len(buildings), max(1, len(buildings)), "Meshing the terrain...")
+                color = terrain.fill_color(top, ter, inpainter, log=lambda s: print(s, flush=True))
+                if args.debug_dir:
+                    cv2.imwrite(os.path.join(args.debug_dir, "terrain_color.png"), color[..., ::-1])
+                step_px = max(1, int(round(args.terrain_step / params.res)))
+                while terrain.PAGE % step_px:
+                    step_px -= 1
+                terrain.clean_group(group, ter, color, step_px, log=lambda s: print(s, flush=True))
+            if args.cull or args.clean:
+                progress(len(buildings), max(1, len(buildings)), "Removing hidden surfaces...")
+                # Refined models and the terrain win coincident pixels over captured
+                # meshes; glass interiors are never culled; trees never occlude.
+                model_ids = {id(m) for ms in replaced.values() for m in ms}
+                n_obj = len(group.objects)
+                cls_of = lambda m: group.objects[m.object_id].cls if 0 <= m.object_id < n_obj else 0
+                pri, occ, prot = [], [], set()
+                # Meshes mostly made of placeholder-textured triangles lose coincident pixels.
+                cur = raster.collect(group)
+                ph_all = raster.placeholder_textures(texs if len(texs) >= len(group.textures) else raster.decode_textures(group))
+                ph = (cur.tex >= 0) & ph_all[np.clip(cur.tex, 0, len(ph_all) - 1)]
+                nm = len(group.meshes)
+                dark_share = np.bincount(cur.mesh[ph], minlength=nm) / np.maximum(np.bincount(cur.mesh, minlength=nm), 1)
+                for mi, m in enumerate(group.meshes):
+                    is_model = id(m) in model_ids or (args.clean and cls_of(m) in terrain.TERRAIN)
+                    dark = dark_share[mi] > 0.5 and not is_model
+                    pri.append(0 if is_model else (2 if dark else 1))
+                    occ.append(cls_of(m) != CLS_TREE)
+                    if m.material == mtscene.MAT_INTERIOR:
+                        prot.add(mi)
+                before, after = cull.cull_group(group, prot, pri, occ, log=lambda s: print(s, flush=True))
+                print(f"  hidden surfaces: {before - after} of {before} triangles removed ({(before - after) / max(before, 1):.1%})",
+                      flush=True)
 
     progress(1, 1, "Saving the refined scene...")
     mtscene.save(args.output, batches)
-    print(f"Refined {done} of {total} buildings in {time.time() - t0:.0f} s; saved {args.output}", flush=True)
+    print(f"Refined {done} of {total} buildings{' and rebuilt the terrain' if args.clean else ''} in "
+          f"{time.time() - t0:.0f} s; saved {args.output}", flush=True)
     return 0
 
 

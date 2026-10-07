@@ -83,12 +83,14 @@ static int RunRefineCommand(int argc, char* argv[])
 {
     if (argc < 4)
     {
-        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--no-glass]\n");
+        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--no-glass] [--clean] [--cull]\n");
         return 2;
     }
     RefineSettings settings;
     for (int i = 4; i < argc; i++)
         if (!strcmp(argv[i], "--no-glass")) settings.glass = false;
+        else if (!strcmp(argv[i], "--clean")) settings.clean = true;
+        else if (!strcmp(argv[i], "--cull")) settings.cull = true;
     settings.workDir = std::filesystem::path(argv[3]).parent_path().string();
     if (settings.workDir.empty()) settings.workDir = ".";
     BuildingRefiner refiner;

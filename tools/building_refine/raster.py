@@ -1,4 +1,4 @@
-"""Scene triangles, DXT1 decoding and a numba triangle rasterizer."""
+"""Scene triangles, DXT1/3/5 decoding and a numba triangle rasterizer."""
 from dataclasses import dataclass
 
 import numba
@@ -8,12 +8,26 @@ import numpy as np
 GL_TRIANGLES = 4
 GL_COMPRESSED_RGB_S3TC_DXT1 = 0x83F0
 GL_COMPRESSED_RGBA_S3TC_DXT1 = 0x83F1
+GL_COMPRESSED_RGBA_S3TC_DXT3 = 0x83F2
+GL_COMPRESSED_RGBA_S3TC_DXT5 = 0x83F3
 
 
 def decode_dxt1(width, height, data):
     """DXT1 blocks -> uint8[h, w, 3]."""
     bw, bh = max(1, (width + 3) // 4), max(1, (height + 3) // 4)
     blocks = np.frombuffer(data, dtype="<u2", count=bw * bh * 4).reshape(bh, bw, 4)
+    return _decode_color_blocks(blocks, width, height, always_four=False)
+
+
+def decode_dxt5(width, height, data):
+    """DXT3 / DXT5 blocks (8 bytes alpha + a DXT1 colour block) -> uint8[h, w, 3]; alpha dropped."""
+    bw, bh = max(1, (width + 3) // 4), max(1, (height + 3) // 4)
+    blocks = np.frombuffer(data, dtype="<u2", count=bw * bh * 8).reshape(bh, bw, 8)[..., 4:8]
+    return _decode_color_blocks(blocks, width, height, always_four=True)
+
+
+def _decode_color_blocks(blocks, width, height, always_four):
+    bh, bw = blocks.shape[:2]
     c0, c1 = blocks[..., 0].astype(np.int32), blocks[..., 1].astype(np.int32)
     bits = blocks[..., 2].astype(np.uint32) | (blocks[..., 3].astype(np.uint32) << 16)
 
@@ -21,7 +35,7 @@ def decode_dxt1(width, height, data):
         return np.stack([((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31], -1)
 
     p0, p1 = rgb565(c0), rgb565(c1)
-    four = (c0 > c1)[..., None]
+    four = np.ones_like(c0, bool)[..., None] if always_four else (c0 > c1)[..., None]
     p2 = np.where(four, (2 * p0 + p1) // 3, (p0 + p1) // 2)
     p3 = np.where(four, (p0 + 2 * p1) // 3, 0)
     palette = np.stack([p0, p1, p2, p3], 2)                          # bh, bw, 4, 3
@@ -100,9 +114,14 @@ def decode_textures(group):
         w, h, data = t.mips[0]
         if t.internal_format in (GL_COMPRESSED_RGB_S3TC_DXT1, GL_COMPRESSED_RGBA_S3TC_DXT1):
             img = decode_dxt1(w, h, data)
+        elif t.internal_format in (GL_COMPRESSED_RGBA_S3TC_DXT3, GL_COMPRESSED_RGBA_S3TC_DXT5):
+            img = decode_dxt5(w, h, data)
         elif len(data) >= w * h * 4:
             img = np.frombuffer(data, np.uint8, w * h * 4).reshape(h, w, 4)[..., :3]
         else:
+            skipped = decode_textures.skipped = getattr(decode_textures, "skipped", 0) + 1
+            if skipped == 1:
+                print(f"texture format 0x{t.internal_format:X} not decoded: those tiles sample black", flush=True)
             continue
         out[i] = img if img.shape[:2] == (256, 256) else cv2.resize(img, (256, 256), interpolation=cv2.INTER_AREA)
     return out
@@ -171,6 +190,79 @@ def rasterize(scr, uv, tex, tid, texs, W, H, depth, color, ids, zband_lo, zband_
                 ids[py, px] = tid[t]
 
 
+@numba.njit(cache=True)
+def _tri_texture_stats(uv, tex, texs, out):
+    """Per triangle, over a 10-point barycentric grid of its texture: mean
+    brightness (max channel), its std, saturation of the mean colour, and the
+    share of samples that are placeholder colours (near-black, or a bright
+    saturated primary such as the yellow of Google Earth's missing-texture pattern)."""
+    for t in range(len(tex)):
+        if tex[t] < 0:
+            out[t, 0] = 128.0
+            continue
+        n = 0
+        s = s2 = sr = sg = sb = 0.0
+        ph = 0
+        for i in range(4):
+            for j in range(4 - i):
+                a = (i + 0.5) / 4.0
+                b = (j + 0.5) / 4.0
+                c = 1.0 - a - b
+                if c < 0.0:
+                    continue
+                u = a * uv[t, 0, 0] + b * uv[t, 1, 0] + c * uv[t, 2, 0]
+                v = a * uv[t, 0, 1] + b * uv[t, 1, 1] + c * uv[t, 2, 1]
+                r, g, bl = _sample(texs, tex[t], u, v)
+                m = max(r, max(g, bl))
+                mn_ = min(r, min(g, bl))
+                if m < 12 or (m > 100 and (m - mn_) > 0.8 * m):
+                    ph += 1
+                s += m
+                s2 += m * m
+                sr += r
+                sg += g
+                sb += bl
+                n += 1
+        mean = s / n
+        var = s2 / n - mean * mean
+        out[t, 0] = mean
+        out[t, 1] = np.sqrt(var) if var > 0.0 else 0.0
+        mx = max(sr, max(sg, sb)) / n
+        mn = min(sr, min(sg, sb)) / n
+        out[t, 2] = (mx - mn) / mx if mx > 0.0 else 0.0
+        out[t, 3] = ph / n
+
+
+def yellowish(c):
+    """The yellow of Google Earth's missing-texture checker, also after
+    resampling has blended it with its black cells (olive)."""
+    c = c.astype(np.int32)
+    return (c[..., 0] > 120) & (c[..., 1] > 110) & (c[..., 2] < 100) & ((c[..., 0] + c[..., 1]) // 2 - c[..., 2] > 60)
+
+
+def placeholder_textures(texs, black=12, share=0.5):
+    """Textures that are mostly placeholder: near-black (Google Earth's dark
+    overlay pass on the ground tiles) or the yellow/black checker of imagery
+    that had not streamed in. Such a texture may still carry real imagery in a
+    corner, so this decides drawing order, not deletion."""
+    flat = texs.reshape(len(texs), -1, 3)
+    return ((flat.max(-1) < black) | yellowish(flat)).mean(1) > share
+
+
+def triangle_texture_stats(tris, texs):
+    """float64[t, 4]: mean brightness, std, saturation, placeholder-colour share."""
+    st = np.zeros((len(tris.tex), 4), np.float64)
+    _tri_texture_stats(tris.uv.astype(np.float64), tris.tex, texs, st)
+    return st
+
+
+def placeholder_pixels(color, black=12):
+    """Pixels coloured like a placeholder: near-black, or the yellow of Google
+    Earth's missing-texture pattern."""
+    c = color.astype(np.int32)
+    return (c.max(-1) < black) | yellowish(color)
+
+
 @dataclass
 class TopRaster:
     min_x: float
@@ -179,6 +271,7 @@ class TopRaster:
     height: np.ndarray     # float32[H, W], -inf empty
     color: np.ndarray      # uint8[H, W, 3]
     obj: np.ndarray        # int32[H, W] object id, -1 none
+    tri: np.ndarray = None  # int32[H, W] triangle row in the SceneTris, -1 none
 
     def to_px(self, x, y):
         return (x - self.min_x) / self.res, (self.max_y - y) / self.res
@@ -187,15 +280,23 @@ class TopRaster:
         return self.min_x + px * self.res, self.max_y - py * self.res
 
 
-def top_down(tris, texs, res=0.25):
+def top_down(tris, texs, res=0.25, depth_bias=None):
+    """depth_bias: optional float[t] added to the triangles' heights for the
+    depth test only (e.g. negative for Google Earth's dark overlay twins)."""
     lo, hi = tris.pos.reshape(-1, 3).min(0), tris.pos.reshape(-1, 3).max(0)
     W, H = int(np.ceil((hi[0] - lo[0]) / res)), int(np.ceil((hi[1] - lo[1]) / res))
     scr = np.empty(tris.pos.shape, np.float64)
     scr[..., 0] = (tris.pos[..., 0] - lo[0]) / res
     scr[..., 1] = (hi[1] - tris.pos[..., 1]) / res
     scr[..., 2] = tris.pos[..., 2]
+    if depth_bias is not None:
+        scr[..., 2] += depth_bias[:, None]
     depth = np.full((H, W), -np.inf)
     color = np.zeros((H, W, 3), np.uint8)
     ids = np.full((H, W), -1, np.int32)
-    rasterize(scr, tris.uv, tris.tex, tris.obj, texs, W, H, depth, color, ids, -1e30, 1e30)
-    return TopRaster(lo[0], hi[1], res, depth.astype(np.float32), color, ids)
+    rasterize(scr, tris.uv, tris.tex, np.arange(len(tris.obj), dtype=np.int32), texs, W, H, depth, color, ids, -1e30, 1e30)
+    obj = np.where(ids >= 0, tris.obj[np.maximum(ids, 0)], -1).astype(np.int32)
+    if depth_bias is not None:
+        hit = ids >= 0
+        depth[hit] -= depth_bias[ids[hit]]
+    return TopRaster(lo[0], hi[1], res, depth.astype(np.float32), color, obj, ids)

@@ -240,10 +240,38 @@ capture, small ones and poor fits keep their captured mesh. Facade slivers the
 segmenter split off are absorbed into the refined building next to them.
 Progress and the log (`refine.log`) go to the segmentation debug folder.
 
+**Clean scene** (checkbox / `--clean`) goes further: cars (including buses and
+vans the segmenter made into a small building or tree) and surface clutter
+(people, poles, bins, parked-car rows left in a ground class: raised blobs under
+60 m²) are removed, and ground,
+roads, plants and water are rebuilt as one textured height field from the
+top-down raster - holes under trees, cars, clutter and buildings are filled from
+their surroundings - heights geometrically, the orthophoto with LaMa image
+inpainting, so lane markings, kerbs and paving continue across the filled area
+(`--no-lama` for a plain geometric fill; the 200 MB `big-lama.pt` downloads once
+into `~/.cache/meshtool`) - with refined walls set down onto it.
+Trees keep their captured meshes. The result is one terrain mesh per class
+(0.5 m grid, `--terrain-step`) on 2048 px orthophoto pages.
+
+**Remove hidden surfaces** (checkbox / `--cull`, always on with clean) deletes
+triangles no view from above the horizon sees: ~60 orthographic views
+rasterize triangle ids; coincident surfaces (the z-fighting) are settled by
+priority - refined models and terrain over captured, textured over Google
+Earth's dark overlay tiles, earlier over later - so one of two coincident
+triangles survives. Trees never occlude (what is under them stays for when
+trees are hidden). Undersides seen only from below are lost.
+
+Google Earth's captures carry placeholder textures: a near-black overlay pass
+drawn over the ground tiles at the same depth, and a yellow/black checker on
+tiles whose imagery had not streamed in. refine.py draws triangles with such
+textures last (they lose every depth tie to their textured twins), never bakes
+or textures from them, fills their colour from the surrounding surface, and
+with Clean scene drops the ones lying on the rebuilt terrain.
+
 ```
-MeshTool --refine in.mtscene out.mtscene [--no-glass]
+MeshTool --refine in.mtscene out.mtscene [--no-glass] [--clean] [--cull]
 python toolsuilding_refine
-efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--debug-dir d]
+efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--clean] [--cull] [--no-lama] [--debug-dir d]
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
 MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..]
 ```

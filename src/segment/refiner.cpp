@@ -117,6 +117,10 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
                       Quote(result->outputPath) + " --progress";
     if (!settings.glass)
         cmd += " --no-glass";
+    if (settings.clean)
+        cmd += " --clean";
+    if (settings.cull)
+        cmd += " --cull";
 
     SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, TRUE };
     HANDLE readPipe = nullptr, writePipe = nullptr;
