@@ -163,6 +163,7 @@ struct MeshData : public core::Primitive
     int32_t         object_id = -1;     // index into the owning group's objects, -1 = none
     int32_t         capture_id = -1;    // index into the owning group's captures, -1 = unknown
     float           lod_size = 0.0f;    // GE tile edge (metres): coarser draws behind finer; 0 = not a GE tile
+    uint8_t         model_variant = 0; // 0 shared, 1 original, 2 refined (scene v5)
     uint8_t         material = 0;       // MeshMaterial
 
     MeshData() : num_vertex(0),
@@ -204,6 +205,10 @@ enum MeshMaterial : uint8_t
 {
     kMatCaptured = 0,
     kMatGlass = 1,
+    kMatPcgFacade = 3,
+    kMatPcgMetal = 4,
+    kMatPcgRoof = 5,
+    kMatPcgStone = 6,
     kMatInterior = 2,   // dark backing just behind glass, so it never shows an empty shell
 };
 
@@ -227,6 +232,9 @@ struct SceneObject
 {
     string          name;               // e.g. "building_012", "road"
     ObjectClass     cls = kObjUnknown;
+    bool            hasOriginalModel = false; // derived from meshes on load
+    bool            hasRefinedModel = false;
+    bool            showOriginalModel = false; // preview only; save always retains both
     core::bounds3d  bbox_ws;
 };
 
@@ -262,6 +270,17 @@ struct GroupMeshData
         }
     }
 };
+
+// The same visibility rule is used by drawing, picking and mesh export.
+inline bool IsMeshModelVisible(const GroupMeshData* group, const MeshData* mesh)
+{
+    if (!mesh) return false;
+    if (mesh->model_variant == 0 || mesh->object_id < 0 ||
+        size_t(mesh->object_id) >= group->objects.size()) return true;
+    const auto& object = group->objects[size_t(mesh->object_id)];
+    if (!object.hasOriginalModel || !object.hasRefinedModel) return true;
+    return mesh->model_variant == (object.showOriginalModel ? 1 : 2);
+}
 
 struct BatchMeshData
 {

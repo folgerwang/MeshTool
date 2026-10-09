@@ -44,6 +44,7 @@ public:
         double      yawDeg = 30.0;   // view direction (0 looks north, +90 east)
         double      pitchDeg = -35.0;
         double      zoom = 1.0;      // < 1 moves the camera closer than the framing distance
+        bool        originalModels = false; // screenshot comparison mode
         bool        hasBox = false;  // frame this world box instead (same camera across scenes)
         double      box[6] = {};     // min x, y, z, max x, y, z
         bool        glass = true;    // draw glass facades as glass (false: as captured)
@@ -120,6 +121,7 @@ private:
     // (group + object index) or, in an unsegmented scene, a single mesh.
     GroupMeshData* m_selGroup = nullptr;
     int32_t        m_selObject = -1;
+    bool           m_objectMenuClick = false; // RMB click, cancelled by drag/navigation
     MeshData*      m_selMesh = nullptr;
     void UpdateSelection();                   // clicks, validity, UI requests, overlay
     void PickAt(float mouseX, float mouseY);  // ray-cast the visible meshes

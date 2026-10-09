@@ -50,6 +50,8 @@ public:
     bool  wantStartRefine = false;
     bool  wantCancelRefine = false;
     bool  refineRunning = false;
+    bool  refinePCG = false;
+    int   refineScope = 0; // 0 selected, 1 all segmented buildings
     bool  refineGlass = true;
     bool  refineClean = false;   // Refine Buildings: also rebuild the terrain, drop cars and clutter
     bool  refineCull = true;     // Refine Buildings: remove hidden surfaces (z-fighting)
@@ -71,6 +73,8 @@ public:
     struct SelectionInfo
     {
         bool        active = false;
+        bool        hasModelComparison = false;
+        int         modelVersion = 1; // 0 original, 1 refined
         std::string name;           // object name, or "mesh" for an unsegmented mesh
         std::string className;
         int         meshes = 0;
@@ -86,6 +90,10 @@ public:
     int   selectionView = kSelSegment;   // T toggles: highlighted segment / actual textured object
     bool  wantFrameSelection = false;
     bool  wantClearSelection = false;
+    int   wantModelVersion = -1;
+    int   wantAllModelVersion = -1;
+    bool  wantSelectionContextMenu = false;
+    ImVec2 selectionContextMenuPos = ImVec2(0, 0);
 
     // Scene file requests, chosen in a file dialog and carried out by the app.
     std::string pendingOpenScenePath;
@@ -142,6 +150,7 @@ private:
     void DrawSegmentDialog();
     void DrawObjectsSection();
     void DrawSelectionSection();
+    void DrawSelectionContextMenu();
     void DrawCapturesSection();
 
     // Icon textures

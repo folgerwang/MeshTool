@@ -9,6 +9,7 @@ the building's main axes, then a prism model (flat/sloped roof parts, vertical
 walls to the ground) textured by projecting the original captured mesh onto
 each new face."""
 import argparse
+import copy
 import math
 import os
 import sys
@@ -414,6 +415,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
     ap.add_argument("output")
+    ap.add_argument("--pcg", action="store_true", help="add procedural architectural details and PBR finishes")
+    ap.add_argument("--target", help="exact selected batch:group:object indices")
     ap.add_argument("--only", help="comma-separated building names")
     ap.add_argument("--no-sam", action="store_true", help="outline from height only")
     ap.add_argument("--no-glass", action="store_true", help="do not detect glass facades")
@@ -432,6 +435,17 @@ def main():
     ap.add_argument("--progress", action="store_true",
                     help="print '@progress <done> <total> <message>' lines (for MeshTool)")
     args = ap.parse_args()
+    target = None
+    if args.target:
+        try:
+            target = tuple(map(int, args.target.split(":")))
+            if len(target) != 3 or min(target) < 0: raise ValueError()
+        except ValueError:
+            ap.error("--target must be nonnegative batch:group:object indices")
+        if args.clean or args.cull:
+            ap.error("scene cleanup cannot be combined with selected-building refinement")
+    elif args.only and (args.clean or args.cull):
+        ap.error("scene cleanup is available only when refining all buildings")
 
     def progress(done, total, msg):
         if args.progress:
@@ -440,6 +454,12 @@ def main():
     t0 = time.time()
     progress(0, 1, "Loading scene...")
     batches = mtscene.load(args.input)
+    if target is not None:
+        try:
+            obj = batches[target[0]].groups[target[1]].objects[target[2]]
+            if obj.cls != CLS_BUILDING: raise IndexError()
+        except IndexError:
+            ap.error("selected target is missing or is not a segmented building")
     progress(0, 1, "Loading SAM2 and CLIP...")
     params = building.Params()
     predictor = torch = None
@@ -465,25 +485,63 @@ def main():
         os.makedirs(args.debug_dir, exist_ok=True)
 
     total = done = 0
-    for batch in batches:
+    for batch_index, batch in enumerate(batches):
+        if target is not None and batch_index != target[0]: continue
         if batch.is_spline:
             continue
-        for group in batch.groups:
+        for group_index, group in enumerate(batch.groups):
+            if target is not None and group_index != target[1]: continue
             buildings = [i for i, o in enumerate(group.objects) if o.cls == CLS_BUILDING
-                         and (only is None or o.name in only)]
+                         and (only is None or o.name in only)
+                         and (target is None or i == target[2])]
             if not buildings and not args.clean:
                 continue
-            progress(0, len(buildings), "Rendering the scene from above...")
-            tris = raster.collect(group)
-            texs = raster.decode_textures(group)
+            # Keep archival originals outside every fitting/culling pass. They
+            # share the scene's textures and are written back after refinement.
+            originals = [m for m in group.meshes if m.model_variant == 1]
+            group.meshes = [m for m in group.meshes if m.model_variant != 1]
+            archived_objects = {m.object_id for m in originals}
+            # Exclude previous procedural attachments from fitting and replace
+            # them only when that building's new fit succeeds. This prevents
+            # stacked details on repeated Apply while preserving rejected fits.
+            previous_details = []
+            if args.pcg:
+                previous_details = [m for m in group.meshes if m.object_id in buildings and m.material in (4,5,6)]
+                group.meshes = [m for m in group.meshes if not (m.object_id in buildings and m.material in (4,5,6))]
+            local_bounds = None
+            selected_area = len(buildings) == 1 and (target is not None or only is not None)
+            if selected_area:
+                own_meshes = [m for m in group.meshes if m.object_id == buildings[0] and len(m.vertices)]
+                if not own_meshes:
+                    raise ValueError("Selected building has no mesh geometry")
+                lo = np.min([m.vertices[:,:2].min(0)+m.translation[:2] for m in own_meshes],axis=0)
+                hi = np.max([m.vertices[:,:2].max(0)+m.translation[:2] for m in own_meshes],axis=0)
+                local_bounds = np.r_[lo-20.0,hi+20.0]  # ground ring, occluders, texture context
+            progress(1,100,"Collecting nearby triangles..." if selected_area else "Collecting scene triangles...")
+            tris = raster.collect(group, bounds=local_bounds)
+            texture_group = group
+            if selected_area:
+                from types import SimpleNamespace
+                used = np.unique(tris.tex[tris.tex >= 0])
+                remap = np.full(len(group.textures),-1,np.int32)
+                remap[used] = np.arange(len(used),dtype=np.int32)
+                valid = tris.tex >= 0
+                tris.tex[valid] = remap[tris.tex[valid]]
+                texture_group = SimpleNamespace(textures=[group.textures[i] for i in used])
+                print(f"Selected area: {local_bounds[2]-local_bounds[0]:.1f} x {local_bounds[3]-local_bounds[1]:.1f} m, "
+                      f"{len(tris.obj):,} nearby triangles, {len(used)} of {len(group.textures)} textures",flush=True)
+            progress(3,100,f"Decoding {len(texture_group.textures)} nearby textures..." if selected_area else "Decoding scene textures...")
+            texs = raster.decode_textures(texture_group,progress=lambda n,total: progress(3+int(7*n/max(1,total)),100,f"Decoding textures {n+1}/{total}..."))
             if args.clean:
                 terrain.relabel_vehicles(tris, group.objects, log=lambda s: print(s, flush=True))
                 buildings = [i for i, o in enumerate(group.objects) if o.cls == CLS_BUILDING
-                             and (only is None or o.name in only)]
+                             and (only is None or o.name in only)
+                         and (target is None or i == target[2])]
             # Google Earth draws a dark overlay pass over the ground tiles: same
             # triangles, near-black texture. Drawn last they lose every depth tie
             # to their textured twins; where they are the only geometry their
             # colour is not used.
+            progress(10,100,f"Checking textures on {len(tris.obj):,} triangles...")
             ph_tex = raster.placeholder_textures(texs)
             demote = (tris.tex >= 0) & ph_tex[np.clip(tris.tex, 0, len(ph_tex) - 1)]   # lose depth ties
             if demote.any():
@@ -496,7 +554,9 @@ def main():
             dark_tri = demote & (raster.triangle_texture_stats(tris, texs)[:, 3] >= 0.2)
             print(f"  {int(demote.sum())} of {len(demote)} triangles ({demote.mean():.0%}) use a placeholder texture "
                   f"({int(ph_tex.sum())} textures); {int(dark_tri.sum())} show its pattern", flush=True)
-            top = raster.top_down(tris, texs, params.res, depth_bias=np.where(demote, -0.05, 0.0) if demote.any() else None)
+            top = raster.top_down(tris, texs, params.res, depth_bias=np.where(demote, -0.05, 0.0) if demote.any() else None,
+                                  bounds=local_bounds, progress=lambda n,total,w,h: progress(15+int(20*n/max(1,total)),100,
+                                  f"Rendering {'selected area' if selected_area else 'scene'} {w}x{h}: {n:,}/{total:,} triangles"))
             # Colour not to trust: pixels won by a pattern-showing triangle, or by
             # any placeholder-texture triangle where the colour itself looks like one.
             won = np.maximum(top.tri, 0)
@@ -523,7 +583,7 @@ def main():
             for bi, oid in enumerate(buildings):
                 name = group.objects[oid].name
                 total += 1
-                progress(bi, len(buildings), f"Refining {name} ({bi + 1} of {len(buildings)})")
+                progress(35+int(60*bi/max(1,len(buildings))),100,f"Refining {name} ({bi + 1} of {len(buildings)})")
                 full = top.obj == oid
                 if not full.any():
                     print(f"  {name}: not visible from above, kept", flush=True)
@@ -611,6 +671,13 @@ def main():
                     continue
                 meshes, textures, cov, pages, glass_m2 = model_meshes(
                     model, faces, src, texs, args.texel, oid, len(group.textures) + len(new_textures), classifier)
+                if args.pcg:
+                    import pcg
+                    for m in meshes:
+                        if m.material == mtscene.MAT_CAPTURED: m.material = pcg.MAT_FACADE
+                    details, n_parts = pcg.detail_meshes(faces, oid, model)
+                    meshes += details
+                    print(f"  PCG: {n_parts} architectural parts in {len(details)} material meshes", flush=True)
                 new_textures += textures
                 replaced[oid] = meshes
                 models[oid] = model
@@ -649,9 +716,20 @@ def main():
                     idx = np.flatnonzero(low)[above < 1.5]
                     drop[idx] = True
                     print(f"  {len(idx)} placeholder-textured triangles at ground level dropped", flush=True)
+            # Snapshot only successfully refined buildings, before their source
+            # draw calls are modified. Repeated refinement keeps the first original.
+            for oid in replaced:
+                if oid not in archived_objects:
+                    for source in group.meshes + previous_details:
+                        if source.object_id != oid: continue
+                        original = copy.copy(source)
+                        original.draw_calls = [(prim, idx.copy()) for prim, idx in source.draw_calls]
+                        original.model_variant = 1
+                        originals.append(original)
             if replaced or drop.any():
                 group.meshes = drop_triangles(group, tris, drop) + [m for ms in replaced.values() for m in ms]
                 group.textures += new_textures
+            group.meshes += [m for m in previous_details if m.object_id not in replaced]
             if ter is not None:
                 progress(len(buildings), max(1, len(buildings)), "Meshing the terrain...")
                 color = terrain.fill_color(top, ter, inpainter, log=lambda s: print(s, flush=True))
@@ -686,8 +764,13 @@ def main():
                 print(f"  hidden surfaces: {before - after} of {before} triangles removed ({(before - after) / max(before, 1):.1%})",
                       flush=True)
 
-    progress(1, 1, "Saving the refined scene...")
+            for mesh in group.meshes:
+                if mesh.object_id in replaced: mesh.model_variant = 2
+            group.meshes += originals
+
+    progress(98, 100, "Saving the refined scene...")
     mtscene.save(args.output, batches)
+    progress(100, 100, "Refinement complete")
     print(f"Refined {done} of {total} buildings{' and rebuilt the terrain' if args.clean else ''} in "
           f"{time.time() - t0:.0f} s; saved {args.output}", flush=True)
     return 0

@@ -115,6 +115,12 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     const std::string logPath = (work / "refine.log").string();
     std::string cmd = Quote(python) + " -u " + Quote(script) + " " + Quote(inputPath) + " " +
                       Quote(result->outputPath) + " --progress";
+    if (settings.noSam)
+        cmd += " --no-sam";
+    if (settings.pcg)
+        cmd += " --pcg";
+    if (!settings.target.empty())
+        cmd += " --target " + Quote(settings.target);
     if (!settings.glass)
         cmd += " --no-glass";
     if (settings.clean)
@@ -173,7 +179,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
         DWORD got = 0;
         if (!ReadFile(readPipe, buf, sizeof(buf), &got, nullptr) || got == 0)
             break;
-        if (log) fwrite(buf, 1, got, log);
+        if (log) { fwrite(buf, 1, got, log); fflush(log); }
         pending.append(buf, got);
         size_t nl;
         while ((nl = pending.find('\n')) != std::string::npos)

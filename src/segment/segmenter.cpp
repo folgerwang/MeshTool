@@ -548,7 +548,7 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
     {
         for (MeshData* m : g->meshes)
         {
-            if (!m || !m->vertex_list || m->num_vertex <= 0 || m->draw_call_list.size() != 1 ||
+            if (!m || m->model_variant == 1 || !m->vertex_list || m->num_vertex <= 0 || m->draw_call_list.size() != 1 ||
                 !m->draw_call_list[0].is_ge_mesh() || m->draw_call_list[0].get_index_count() < 3)
                 continue;
             SegmentResult::MeshAssign a;
@@ -1777,6 +1777,22 @@ std::vector<MeshData*> ApplySegmentation(const SegmentResult& result)
     {
         if (local_ids.count(a.group)) continue;
         local_ids[a.group];
+        // A new successful segmentation replaces the old object identities.
+        // Drop their archival variants only now, so cancelled runs retain them.
+        auto& meshes = a.group->meshes;
+        for (auto it = meshes.begin(); it != meshes.end(); )
+        {
+            if (*it && (*it)->model_variant == 1)
+            {
+                replaced.push_back(*it);
+                it = meshes.erase(it);
+            }
+            else
+            {
+                if (*it) (*it)->model_variant = 0;
+                ++it;
+            }
+        }
         a.group->objects.clear();
         for (MeshData* m : a.group->meshes) if (m) m->object_id = -1;
     }

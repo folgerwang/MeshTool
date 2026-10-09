@@ -168,6 +168,7 @@ void MeshToolUI::DrawUI()
     DrawToolbar();
     DrawScenePanel();
     DrawViewport();
+    DrawSelectionContextMenu();
     DrawStatusBar();
 
     if (showRefPointDialog)     DrawRefPointDialog();
@@ -240,6 +241,8 @@ void MeshToolUI::DrawMenuBar()
             if (ImGui::MenuItem("Open Scene...",      "Ctrl+O"))   ActionOpenScene();
             if (ImGui::MenuItem("Save Scene...",      "Ctrl+S", false, !g_world.mesh_data_batches.empty()))
                 ActionSaveScene();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Save meshes, textures, segmented objects and their labels together in one .mtscene file.");
             ImGui::Separator();
             if (ImGui::MenuItem("Import USGS...",     "Ctrl+U"))   ActionImportUSGS();
             if (ImGui::MenuItem("Import KML...",      "Ctrl+K"))   ActionImportKML();
@@ -284,7 +287,17 @@ void MeshToolUI::DrawMenuBar()
             if (ImGui::MenuItem("Segment Scene (AI)...", nullptr, false, !g_world.mesh_data_batches.empty()))
                 showSegmentDialog = true;
             if (ImGui::MenuItem("Refine Buildings (AI)...", nullptr, false, SceneHasBuildings()))
+            {
+                refinePCG = false;
+                refineScope = selection.active && selection.className == "building" ? 0 : 1;
                 showRefineDialog = true;
+            }
+            if (ImGui::MenuItem("Improve Buildings (PCG)...", nullptr, false, SceneHasBuildings()))
+            {
+                refinePCG = true;
+                refineScope = selection.active && selection.className == "building" ? 0 : 1;
+                showRefineDialog = true;
+            }
             if (ImGui::MenuItem("Save Check Screenshots", nullptr, false, !g_world.mesh_data_batches.empty()))
                 wantCheckScreenshots = true;
             ImGui::EndMenu();
@@ -656,7 +669,7 @@ void MeshToolUI::DrawViewport()
 
     // Navigation hint (bottom-left)
     {
-        const char* nav = "Click select  T segment/actual  G GE follow  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
+        const char* nav = "Click select  Right-click actions  T segment/actual  G GE follow  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
         float lineH = ImGui::GetTextLineHeight();
         dl->AddText(ImVec2(x + 10, y + h - lineH - 8), IM_COL32(110, 118, 145, 170), nav);
     }
@@ -775,6 +788,62 @@ void MeshToolUI::DrawStatusBar()
 // Object clicked in the viewport (scene panel)
 // ---------------------------------------------------------------------------
 
+void MeshToolUI::DrawSelectionContextMenu()
+{
+    const char* popup = "Object actions##selection";
+    if (wantSelectionContextMenu)
+    {
+        wantSelectionContextMenu = false;
+        if (selection.active) ImGui::OpenPopup(popup);
+    }
+    ImGui::SetNextWindowPos(selectionContextMenuPos, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopup(popup)) return;
+    if (!selection.active)
+    {
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+
+    ImGui::TextDisabled("%s", selection.name.c_str());
+    ImGui::Separator();
+    const bool building = selection.className == "building";
+    const bool processing = segRunning || refineRunning;
+    if (ImGui::MenuItem("Improve selected building (PCG)...", nullptr, false, building && !processing))
+    {
+        refinePCG = true;
+        refineScope = 0;
+        showRefineDialog = true;
+    }
+    if (ImGui::MenuItem("Refine selected building (AI)...", nullptr, false, building && !processing))
+    {
+        refinePCG = false;
+        refineScope = 0;
+        showRefineDialog = true;
+    }
+    if (ImGui::MenuItem("Improve all buildings (PCG)...", nullptr, false, SceneHasBuildings() && !processing))
+    {
+        refinePCG = true;
+        refineScope = 1;
+        showRefineDialog = true;
+    }
+    ImGui::Separator();
+    if (building || selection.hasModelComparison)
+    {
+        if (ImGui::MenuItem("Original model", nullptr, !selection.hasModelComparison || selection.modelVersion == 0)) wantModelVersion = 0;
+        if (ImGui::MenuItem("Refined model", nullptr, selection.hasModelComparison && selection.modelVersion == 1, selection.hasModelComparison)) wantModelVersion = 1;
+        if (!selection.hasModelComparison) ImGui::TextDisabled("No refined model available.");
+        ImGui::Separator();
+    }
+    if (ImGui::MenuItem("Frame selected object")) wantFrameSelection = true;
+    ImGui::MenuItem("Isolate selected object", nullptr, &isolateSelection);
+    if (ImGui::MenuItem("Segment highlight", "T", selectionView == kSelSegment)) selectionView = kSelSegment;
+    if (ImGui::MenuItem("Actual materials", "T", selectionView == kSelActual)) selectionView = kSelActual;
+    ImGui::Separator();
+    if (ImGui::MenuItem("Clear selection")) wantClearSelection = true;
+    ImGui::EndPopup();
+}
+
 void MeshToolUI::DrawSelectionSection()
 {
     if (!selection.active)
@@ -797,6 +866,18 @@ void MeshToolUI::DrawSelectionSection()
         if (!selection.captureText.empty())
             ImGui::Text("Capture:   %s", selection.captureText.c_str());
         ImGui::Spacing();
+        if (selection.className == "building" || selection.hasModelComparison)
+        {
+            ImGui::TextUnformatted("Model:");
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Original", !selection.hasModelComparison || selection.modelVersion == 0)) wantModelVersion = 0;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!selection.hasModelComparison);
+            if (ImGui::RadioButton("Refined", selection.hasModelComparison && selection.modelVersion == 1)) wantModelVersion = 1;
+            ImGui::EndDisabled();
+            if (!selection.hasModelComparison)
+                ImGui::TextWrapped("No refined model saved. A successful refinement is required to compare. Skipped buildings keep their original model.");
+        }
         ImGui::TextUnformatted("View:");
         ImGui::SameLine();
         ImGui::RadioButton("Segment", &selectionView, kSelSegment);
@@ -811,6 +892,15 @@ void MeshToolUI::DrawSelectionSection()
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear"))
             wantClearSelection = true;
+        if (selection.className == "building")
+        {
+            if (ImGui::Button("Improve selected building (PCG)..."))
+            {
+                refinePCG = true;
+                refineScope = 0;
+                showRefineDialog = true;
+            }
+        }
         ImGui::Unindent(8);
     }
     ImGui::PopStyleColor(2);
@@ -909,7 +999,7 @@ void MeshToolUI::DrawCapturesSection()
 void MeshToolUI::DrawObjectsSection()
 {
     size_t instances[kObjClassCount] = {};
-    size_t total = 0, glassMeshes = 0;
+    size_t total = 0, glassMeshes = 0, comparable = 0;
     for (const BatchMeshData* batch : g_world.mesh_data_batches)
         for (const GroupMeshData* group : batch->group_meshes)
         {
@@ -917,6 +1007,7 @@ void MeshToolUI::DrawObjectsSection()
             {
                 instances[o.cls < kObjClassCount ? o.cls : kObjUnknown]++;
                 total++;
+                if (o.hasOriginalModel && o.hasRefinedModel) comparable++;
             }
             for (const MeshData* m : group->meshes)
                 if (m && m->material == kMatGlass) glassMeshes++;
@@ -929,6 +1020,13 @@ void MeshToolUI::DrawObjectsSection()
     if (ImGui::CollapsingHeader("Objects", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Indent(8);
+        if (comparable)
+        {
+            ImGui::Text("Compare %zu refined buildings:", comparable);
+            if (ImGui::Button("All originals")) wantAllModelVersion = 0;
+            ImGui::SameLine();
+            if (ImGui::Button("All refined")) wantAllModelVersion = 1;
+        }
         ImGui::Checkbox("Colour by class", &classColors);
         if (classColors)
             ImGui::Checkbox("Distinct colour per building", &buildingColors);
@@ -990,6 +1088,7 @@ void MeshToolUI::DrawRefineDialog()
     if (ImGui::BeginPopupModal("Refine Buildings", &showRefineDialog, ImGuiWindowFlags_AlwaysAutoResize))
     {
         ImGui::TextColored(ImVec4(0.5f, 0.85f, 1.0f, 1.0f),
+            refinePCG ? "Improve segmented buildings with PCG details and PBR finishes." :
             "Replace segmented buildings with clean models: straight walls, flat roofs.");
         ImGui::TextDisabled("Walls follow the captured facades; textures are projected from the capture.");
         ImGui::TextDisabled("Buildings the model cannot match stay as captured.");
@@ -1013,8 +1112,22 @@ void MeshToolUI::DrawRefineDialog()
         }
         else
         {
+            const bool selectedBuilding = selection.active && selection.className == "building";
+            if (!selectedBuilding) ImGui::BeginDisabled();
+            ImGui::RadioButton("Selected building", &refineScope, 0);
+            if (!selectedBuilding) ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::RadioButton("All segmented buildings", &refineScope, 1);
+            if (refineScope == 0 && selectedBuilding)
+                ImGui::Text("Target: %s", selection.name.c_str());
+            else if (refineScope == 0)
+                ImGui::TextDisabled("Select a segmented building, or choose All segmented buildings.");
+            ImGui::Checkbox("PCG architectural details + PBR", &refinePCG);
+            ImGui::TextDisabled("Adds facade trim, floor bands, coping, gutters and rooftop equipment.");
+            ImGui::TextDisabled("Keeps fitted building shape and captured appearance; unmatched buildings stay.");
             ImGui::Checkbox("Detect glass facades", &refineGlass);
             ImGui::TextDisabled("Curtain walls get a translucent, reflective glass material.");
+            if (refineScope == 0) ImGui::BeginDisabled();
             ImGui::Checkbox("Clean scene", &refineClean);
             ImGui::TextDisabled("Removes cars and small surface clutter, rebuilds ground, roads, plants and");
             ImGui::TextDisabled("water as one filled surface (holes under trees, cars and buildings filled");
@@ -1023,13 +1136,18 @@ void MeshToolUI::DrawRefineDialog()
             ImGui::TextDisabled("Deletes triangles no view from above sees: terrain under buildings, walls");
             ImGui::TextDisabled("against neighbours, duplicate tiles (the z-fighting). Always on with Clean scene.");
             ImGui::Spacing();
+            if (refineScope == 0) ImGui::EndDisabled();
+            if (refineScope == 0) ImGui::TextDisabled("Scene cleanup is available for batch operations only.");
             ImGui::TextDisabled("Runs tools\\building_refine\\refine.py (Python with SAM2, CLIP; GPU).");
             ImGui::TextDisabled("The refined scene replaces the current one; save it with File > Save Scene.");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
-            if (ImGui::Button("Refine", ImVec2(140, 0)))
+            const bool canRun = refineScope == 1 || selectedBuilding;
+            if (!canRun || segRunning) ImGui::BeginDisabled();
+            if (ImGui::Button(refinePCG ? "Apply PCG" : "Refine", ImVec2(140, 0)))
                 wantStartRefine = true;
+            if (!canRun || segRunning) ImGui::EndDisabled();
             ImGui::SameLine();
             if (ImGui::Button("Close", ImVec2(140, 0)))
             {
@@ -1391,6 +1509,8 @@ void MeshToolUI::ActionSaveScene()
         if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
             fileName += ".mtscene";
         pendingSaveScenePath = fileName;
+        if (segRunning || refineRunning)
+            SetStatus("Save queued: the scene and segmentation will be saved when processing finishes.", 8.0f);
     }
 }
 void MeshToolUI::ActionImportUSGS()

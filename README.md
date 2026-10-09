@@ -58,7 +58,12 @@ A typical session, from an empty scene to an exported model:
 8. **Segment.** Tools > Segment Scene (AI) splits the scene into buildings,
    trees, cars, road, plants, water (needs Ollama for best results; see
    below).
-9. **Save and export.** File > Save Scene (Ctrl+S) keeps everything in
+9. **Save and export.** File > Save Scene (Ctrl+S) embeds segmentation with the
+   scene: object names/classes, building identities and mesh assignments are
+   restored by Open Scene without running segmentation again. If segmentation
+   or refinement is still running, saving waits for the result. Unrefined
+   segmented scenes reopen in class colours; refined scenes show their materials.
+   File > Save Scene (Ctrl+S) keeps everything in
    `.mtscene`; File > Export Mesh writes `.glb` / `.gltf` / `.ma`.
 
 **If something looks wrong**

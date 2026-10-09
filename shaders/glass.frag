@@ -40,7 +40,7 @@ void main(void)
     if (dot(N, V) < 0.0)
         N = -N;                                    // glass is seen from both sides
 
-    vec3 base = texture(uTextures[uTexture.x], vTextureCoord).xyz;
+    vec3 base = uBoxColor.w > 0.5 ? texture(uTextures[uTexture.x], vTextureCoord).xyz : uBoxColor.xyz;
     float opacity = uScreenPosition.y;
     float reflectivity = uScreenPosition.z;
 

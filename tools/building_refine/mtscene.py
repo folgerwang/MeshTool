@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 MAGIC = b"MTSCENE\0"
-VERSION = 4
+VERSION = 5
 MAT_CAPTURED, MAT_GLASS, MAT_INTERIOR = 0, 1, 2
 
 
@@ -27,6 +27,7 @@ class Mesh:
     colors: np.ndarray | None          # uint32[n]
     draw_calls: list                   # [(primitive_type, uint32[count])]
     material: int = MAT_CAPTURED
+    model_variant: int = 0 # 0 shared, 1 original, 2 refined
 
 
 @dataclass
@@ -103,6 +104,8 @@ def load(path):
                 tex = r.pod("<I")
                 obj = r.pod("<i") if version >= 3 else -1
                 mat = r.pod("<B") if version >= 4 else MAT_CAPTURED
+                variant = r.pod("<B") if version >= 5 else 0
+                if variant > 2: raise ValueError("invalid model variant")
                 tr = np.array([r.pod("<d"), r.pod("<d"), r.pod("<d")])
                 has_uv, has_color = r.pod("<B"), r.pod("<B")
                 verts = r.array("<f4", n * 3).reshape(n, 3) if n else np.zeros((0, 3), np.float32)
@@ -113,7 +116,7 @@ def load(path):
                     prim = r.pod("<I")
                     count = r.pod("<I")
                     dcs.append((prim, r.array("<u4", count)))
-                meshes.append(Mesh(tex, obj, tr, verts, uvs, cols, dcs, mat))
+                meshes.append(Mesh(tex, obj, tr, verts, uvs, cols, dcs, mat, variant))
             objects = []
             if version >= 3:
                 for _ in range(r.pod("<I")):
@@ -146,7 +149,7 @@ def save(path, batches):
             w("<I", len(g.meshes))
             for m in g.meshes:
                 n = len(m.vertices)
-                w("<IIiB", n, m.tex_index & 0xFFFFFFFF, m.object_id, m.material)
+                w("<IIiBB", n, m.tex_index & 0xFFFFFFFF, m.object_id, m.material, m.model_variant)
                 w("<ddd", *map(float, m.translation))
                 has_uv = m.uvs is not None and n > 0
                 has_col = m.colors is not None and n > 0

@@ -83,12 +83,15 @@ static int RunRefineCommand(int argc, char* argv[])
 {
     if (argc < 4)
     {
-        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--no-glass] [--clean] [--cull]\n");
+        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--pcg] [--target batch:group:object] [--no-sam] [--no-glass] [--clean] [--cull]\n");
         return 2;
     }
     RefineSettings settings;
     for (int i = 4; i < argc; i++)
         if (!strcmp(argv[i], "--no-glass")) settings.glass = false;
+        else if (!strcmp(argv[i], "--pcg")) settings.pcg = true;
+        else if (!strcmp(argv[i], "--no-sam")) settings.noSam = true;
+        else if (!strcmp(argv[i], "--target") && i + 1 < argc) settings.target = argv[++i];
         else if (!strcmp(argv[i], "--clean")) settings.clean = true;
         else if (!strcmp(argv[i], "--cull")) settings.cull = true;
     settings.workDir = std::filesystem::path(argv[3]).parent_path().string();
@@ -267,6 +270,7 @@ int main(int argc, char* argv[])
             else if (!strcmp(argv[i], "--pitch") && i + 1 < argc) shots.pitchDeg = atof(argv[++i]);
             else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) shots.zoom = atof(argv[++i]);
             else if (!strcmp(argv[i], "--no-glass")) shots.glass = false;
+            else if (!strcmp(argv[i], "--original-models")) shots.originalModels = true;
             else if (!strcmp(argv[i], "--box") && i + 6 < argc)
             {
                 for (int k = 0; k < 6; k++) shots.box[k] = atof(argv[++i]);

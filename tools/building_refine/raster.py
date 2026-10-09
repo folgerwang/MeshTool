@@ -85,30 +85,44 @@ class SceneTris:
     local: np.ndarray = None  # int32[t] triangle index in that draw call
 
 
-def collect(group):
+def collect(group, bounds=None):
     pos, uv, tex, obj, mesh, dcs, local = [], [], [], [], [], [], []
     for mi, m in enumerate(group.meshes):
+        if bounds is not None:
+            if not len(m.vertices): continue
+            lo = m.vertices[:, :2].min(0) + m.translation[:2]
+            hi = m.vertices[:, :2].max(0) + m.translation[:2]
+            if np.any(hi < bounds[:2]) or np.any(lo > bounds[2:]): continue
         for di, (prim, idx) in enumerate(m.draw_calls):
             if prim != GL_TRIANGLES or len(idx) < 3:
                 continue
             idx = idx[: len(idx) // 3 * 3].reshape(-1, 3)
+            local_rows = np.arange(len(idx), dtype=np.int32)
+            points = m.vertices[idx].astype(np.float64) + m.translation
+            if bounds is not None:
+                keep = np.all(points[:, :, :2].max(1) >= bounds[:2], axis=1) & np.all(points[:, :, :2].min(1) <= bounds[2:], axis=1)
+                idx, points, local_rows = idx[keep], points[keep], local_rows[keep]
+                if not len(idx): continue
             dcs.append(np.full(len(idx), di, np.int32))
-            local.append(np.arange(len(idx), dtype=np.int32))
-            pos.append(m.vertices[idx].astype(np.float64) + m.translation)
+            local.append(local_rows)  # original draw-call triangle IDs, needed by drop_triangles
+            pos.append(points)
             uv.append(m.uvs[idx] if m.uvs is not None else np.zeros((len(idx), 3, 2), np.float32))
             t = m.tex_index if m.tex_index < len(group.textures) else -1
             tex.append(np.full(len(idx), t, np.int32))
             obj.append(np.full(len(idx), m.object_id, np.int32))
             mesh.append(np.full(len(idx), mi, np.int32))
+    if not pos:
+        raise ValueError("No triangles in the selected building area")
     return SceneTris(np.concatenate(pos), np.concatenate(uv), np.concatenate(tex),
                      np.concatenate(obj), np.concatenate(mesh), np.concatenate(dcs), np.concatenate(local))
 
 
-def decode_textures(group):
+def decode_textures(group, progress=None):
     """All group textures as one uint8[n, 256, 256, 3] stack (resized if needed)."""
     import cv2
     out = np.zeros((max(1, len(group.textures)), 256, 256, 3), np.uint8)
     for i, t in enumerate(group.textures):
+        if progress is not None: progress(i, len(group.textures))
         if not t.mips:
             continue
         w, h, data = t.mips[0]
@@ -280,11 +294,13 @@ class TopRaster:
         return self.min_x + px * self.res, self.max_y - py * self.res
 
 
-def top_down(tris, texs, res=0.25, depth_bias=None):
+def top_down(tris, texs, res=0.25, depth_bias=None, bounds=None, progress=None):
     """depth_bias: optional float[t] added to the triangles' heights for the
     depth test only (e.g. negative for Google Earth's dark overlay twins)."""
     lo, hi = tris.pos.reshape(-1, 3).min(0), tris.pos.reshape(-1, 3).max(0)
-    W, H = int(np.ceil((hi[0] - lo[0]) / res)), int(np.ceil((hi[1] - lo[1]) / res))
+    if bounds is not None:
+        lo[:2], hi[:2] = bounds[:2], bounds[2:]
+    W, H = max(1,int(np.ceil((hi[0] - lo[0]) / res))), max(1,int(np.ceil((hi[1] - lo[1]) / res)))
     scr = np.empty(tris.pos.shape, np.float64)
     scr[..., 0] = (tris.pos[..., 0] - lo[0]) / res
     scr[..., 1] = (hi[1] - tris.pos[..., 1]) / res
@@ -294,7 +310,16 @@ def top_down(tris, texs, res=0.25, depth_bias=None):
     depth = np.full((H, W), -np.inf)
     color = np.zeros((H, W, 3), np.uint8)
     ids = np.full((H, W), -1, np.int32)
-    rasterize(scr, tris.uv, tris.tex, np.arange(len(tris.obj), dtype=np.int32), texs, W, H, depth, color, ids, -1e30, 1e30)
+    # Chunk callbacks expose real work while preserving global triangle IDs and
+    # the original tie order. Bounds clip large terrain triangles to the ROI.
+    count = len(tris.obj)
+    step = 2048 if progress is not None else max(1,count)
+    for start in range(0,count,step):
+        end = min(start+step,count)
+        if progress is not None: progress(start,count,W,H)
+        rasterize(scr[start:end], tris.uv[start:end], tris.tex[start:end],
+                  np.arange(start,end,dtype=np.int32),texs,W,H,depth,color,ids,-1e30,1e30)
+    if progress is not None: progress(count,count,W,H)
     obj = np.where(ids >= 0, tris.obj[np.maximum(ids, 0)], -1).astype(np.int32)
     if depth_bias is not None:
         hit = ids >= 0

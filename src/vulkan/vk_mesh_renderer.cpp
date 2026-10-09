@@ -187,7 +187,7 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
         for (const auto* group : batch->group_meshes) {
             if (!group) continue;
             for (auto* mesh : group->meshes) {
-                if (!mesh) continue;
+                if (!IsMeshModelVisible(group, mesh)) continue;
                 ObjectClass cls = kObjUnknown;
                 if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
                     cls = group->objects[size_t(mesh->object_id)].cls;
@@ -285,6 +285,17 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     if (mesh->lod_size > 0.0f)
         pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
     pc.textureIndex[0] = TextureSlot(hasTexture ? mesh->tex_id : 0xFFFFFFFF);
+    pc.textureIndex[1] = flatColor ? 0 : mesh->material;
+    if (!flatColor && !hasTexture)
+    {
+        const float metal[3] = { 0.20f, 0.24f, 0.28f };
+        const float roof[3] = { 0.12f, 0.14f, 0.16f };
+        const float stone[3] = { 0.63f, 0.61f, 0.56f };
+        const float* finish = mesh->material == kMatPcgMetal ? metal :
+                              mesh->material == kMatPcgRoof ? roof :
+                              mesh->material == kMatPcgStone ? stone : nullptr;
+        if (finish) memcpy(pc.boxColor, finish, 3 * sizeof(float));
+    }
     if (asGlass)
     {
         pc.screenPosition[1] = frame.glassOpacity;     // glass.frag

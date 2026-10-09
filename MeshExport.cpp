@@ -464,6 +464,7 @@ bool ExportGltfMeshFile(const string& file_name, const vector<BatchMeshData*>& b
             for (uint32_t iMesh = 0; iMesh < batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes.size(); iMesh++)
             {
                 const MeshData* mesh_data = batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes[iMesh];
+                if (!IsMeshModelVisible(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup], mesh_data)) continue;
                 if (!mesh_data || mesh_data->num_vertex <= 0 || !mesh_data->vertex_list)
                 {
                     continue;
@@ -768,6 +769,7 @@ void ExportMaMeshFile(const string& file_name, const vector<BatchMeshData*>& bat
                 for (uint32_t iMesh = 0; iMesh < batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes.size(); iMesh++)
                 {
                     const MeshData* mesh_data = batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup]->meshes[iMesh];
+                if (!IsMeshModelVisible(batch_mesh_data[iMeshBatch]->group_meshes[iMeshGroup], mesh_data)) continue;
                     if (mesh_data)
                     {
                         for (uint32_t i_draw = 0; i_draw < mesh_data->draw_call_list.size(); i_draw++)

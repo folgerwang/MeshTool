@@ -431,6 +431,10 @@ void MeshToolApp::UpdateAutoShots()
         m_camera->distance *= m_auto.zoom;
         m_ui->classColors = true;
         m_ui->glass = m_auto.glass;
+        for (auto* batch : g_world.mesh_data_batches)
+            if (batch) for (auto* group : batch->group_meshes)
+                if (group) for (auto& object : group->objects)
+                    object.showOriginalModel = m_auto.originalModels;
         m_autoStage = 2;
         m_autoFrames = 0;
     }
@@ -811,9 +815,28 @@ void MeshToolApp::UpdateRefine()
         if (m_refiner->Running() || (m_segmenter && m_segmenter->Running()))
             return;
         RefineSettings settings;
+        settings.pcg = m_ui->refinePCG;
+        if (m_ui->refineScope == 0)
+        {
+            if (!m_selGroup || m_selObject < 0 || size_t(m_selObject) >= m_selGroup->objects.size() ||
+                m_selGroup->objects[size_t(m_selObject)].cls != kObjBuilding)
+            {
+                m_ui->statusMessage = "Select a segmented building before applying PCG.";
+                m_ui->statusTimeout = 10.0f;
+                return;
+            }
+            for (size_t bi = 0; bi < g_world.mesh_data_batches.size(); ++bi)
+            {
+                const auto* batch = g_world.mesh_data_batches[bi];
+                for (size_t gi = 0; gi < batch->group_meshes.size(); ++gi)
+                    if (batch->group_meshes[gi] == m_selGroup)
+                        settings.target = std::to_string(bi) + ":" + std::to_string(gi) + ":" + std::to_string(m_selObject);
+            }
+            if (settings.target.empty()) return;
+        }
         settings.glass = m_ui->refineGlass;
-        settings.clean = m_ui->refineClean;
-        settings.cull = m_ui->refineCull;
+        settings.clean = m_ui->refineScope == 1 && m_ui->refineClean;
+        settings.cull = m_ui->refineScope == 1 && m_ui->refineCull;
         settings.workDir = m_ui->segSettings.debugDir;
         std::error_code ec;
         std::filesystem::create_directories(settings.workDir, ec);
@@ -846,11 +869,74 @@ void MeshToolApp::UpdateRefine()
         return;
     }
     vkDeviceWaitIdle(m_renderer->GetContext().device);
+    // Restore the current selected object by its group-local identity after
+    // loading the paired result, so its comparison controls are immediately available.
+    size_t selectedBatch = size_t(-1), selectedGroup = size_t(-1);
+    const int selectedObject = m_selObject;
+    const auto selectionInfo = m_ui->selection;
+    for (size_t bi = 0; bi < g_world.mesh_data_batches.size(); ++bi)
+        for (size_t gi = 0; gi < g_world.mesh_data_batches[bi]->group_meshes.size(); ++gi)
+            if (g_world.mesh_data_batches[bi]->group_meshes[gi] == m_selGroup)
+            { selectedBatch = bi; selectedGroup = gi; }
     ClearSelection();
     OpenScene(result->outputPath, /*keepCamera=*/true);
+    if (selectedObject >= 0 && selectedBatch < g_world.mesh_data_batches.size())
+    {
+        auto* batch = g_world.mesh_data_batches[selectedBatch];
+        if (selectedGroup < batch->group_meshes.size())
+        {
+            auto* group = batch->group_meshes[selectedGroup];
+            if (size_t(selectedObject) < group->objects.size())
+            {
+                m_selGroup = group;
+                m_selObject = selectedObject;
+                m_ui->selection = selectionInfo;
+                m_ui->selectionView = MeshToolUI::kSelActual;
+            }
+        }
+    }
     m_ui->classColors = false;
+    m_ui->glass = true;
     m_ui->statusMessage = result->summary + " - save it with File > Save Scene.";
     m_ui->statusTimeout = 15.0f;
+}
+
+namespace
+{
+    struct SceneSegmentationInfo
+    {
+        size_t objects = 0;
+        size_t assignedMeshes = 0;
+        bool refined = false;
+    };
+
+    SceneSegmentationInfo SegmentationInfo(const std::vector<BatchMeshData*>& batches)
+    {
+        SceneSegmentationInfo info;
+        for (const auto* batch : batches)
+        {
+            if (!batch) continue;
+            for (const auto* group : batch->group_meshes)
+            {
+                if (!group) continue;
+                info.objects += group->objects.size();
+                for (const auto* mesh : group->meshes)
+                {
+                    if (!mesh) continue;
+                    if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
+                        ++info.assignedMeshes;
+                    info.refined = info.refined || mesh->material != kMatCaptured;
+                }
+            }
+        }
+        return info;
+    }
+
+    std::string SegmentationSummary(const SceneSegmentationInfo& info)
+    {
+        return "segmentation: " + std::to_string(info.objects) + " objects, " +
+               std::to_string(info.assignedMeshes) + " assigned meshes";
+    }
 }
 
 void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
@@ -882,10 +968,20 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
         g_world.mesh_data_batches.push_back(batch);
     }
     RecomputeWorldBounds();
+    const auto segmentation = SegmentationInfo(loaded);
     if (!keepCamera)
+    {
         FrameBounds(g_world.bbox_ws);
+        // The labels are embedded in the scene; show a restored unrefined
+        // segmentation immediately instead of looking like an unlabelled capture.
+        m_ui->classColors = segmentation.assignedMeshes > 0 && !segmentation.refined;
+        m_ui->buildingColors = true;
+        for (bool& visible : m_ui->classVisible) visible = true;
+        m_ui->glass = true;
+    }
 
-    m_ui->statusMessage = "Opened " + path + " (" + std::to_string(meshes) + " meshes).";
+    m_ui->statusMessage = "Opened " + path + " (" + std::to_string(meshes) + " meshes; " +
+                          SegmentationSummary(segmentation) + " restored).";
     m_ui->statusTimeout = 6.0f;
 }
 
@@ -893,7 +989,8 @@ void MeshToolApp::SaveSceneTo(const std::string& path)
 {
     std::string error;
     if (SaveScene(path, g_world.mesh_data_batches, error))
-        m_ui->statusMessage = "Saved " + path;
+        m_ui->statusMessage = "Saved " + path + " (" +
+                              SegmentationSummary(SegmentationInfo(g_world.mesh_data_batches)) + " included).";
     else
         m_ui->statusMessage = "Save failed: " + error;
     m_ui->statusTimeout = 6.0f;
@@ -1047,7 +1144,11 @@ void MeshToolApp::ClearSelection()
     m_selObject = -1;
     m_selMesh = nullptr;
     if (m_ui)
-        m_ui->selection = MeshToolUI::SelectionInfo();
+        {
+            m_ui->selection = MeshToolUI::SelectionInfo();
+            m_ui->wantSelectionContextMenu = false;
+            m_ui->wantModelVersion = -1;
+        }
 }
 
 bool MeshToolApp::SelectionBounds(core::bounds3d& box, int* meshes, size_t* triangles) const
@@ -1059,7 +1160,7 @@ bool MeshToolApp::SelectionBounds(core::bounds3d& box, int* meshes, size_t* tria
     size_t tris = 0;
     for (const MeshData* mesh : m_selGroup->meshes)
     {
-        if (!mesh || (m_selMesh ? mesh != m_selMesh : mesh->object_id != m_selObject))
+        if (!IsMeshModelVisible(m_selGroup, mesh) || (m_selMesh ? mesh != m_selMesh : mesh->object_id != m_selObject))
             continue;
         if (mesh->bbox_ws.b_valid) box += mesh->bbox_ws;
         count++;
@@ -1094,7 +1195,7 @@ void MeshToolApp::PickAt(float mouseX, float mouseY)
             for (MeshData* mesh : group->meshes)
             {
                 // Only what is drawn can be clicked.
-                if (!mesh || !mesh->vertex_list || mesh->num_vertex <= 0) continue;
+                if (!IsMeshModelVisible(group, mesh) || !mesh->vertex_list || mesh->num_vertex <= 0) continue;
                 if (!m_ui->classVisible[MeshClass(group, mesh)]) continue;
                 if (m_ui->isolateSelection && m_selGroup &&
                     !(group == m_selGroup && (m_selMesh ? mesh == m_selMesh : mesh->object_id == m_selObject)))
@@ -1200,6 +1301,42 @@ void MeshToolApp::UpdateSelection()
             PickAt(p.x, p.y);
     }
 
+    // A plain RMB click selects the object under the cursor and opens its
+    // actions. RMB dragging / Alt dolly / flying retain their camera controls.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        const ImVec2 p = io.MouseClickedPos[ImGuiMouseButton_Right];
+        m_objectMenuClick = !io.WantCaptureMouse && !io.KeyAlt && !io.KeyShift &&
+            !ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Middle) &&
+            p.x >= m_ui->viewportX && p.y >= m_ui->viewportY &&
+            p.x < m_ui->viewportX + m_ui->viewportW && p.y < m_ui->viewportY + m_ui->viewportH;
+    }
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        if (io.KeyAlt || io.KeyShift || ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+            ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] >= 16.0f ||
+            ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_A) ||
+            ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_D) ||
+            ImGui::IsKeyDown(ImGuiKey_Q) || ImGui::IsKeyDown(ImGuiKey_E))
+            m_objectMenuClick = false;
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+    {
+        if (m_objectMenuClick && !io.WantCaptureMouse && !io.KeyAlt &&
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < 16.0f)
+        {
+            const ImVec2 p = io.MouseClickedPos[ImGuiMouseButton_Right];
+            PickAt(p.x, p.y);
+            if (m_ui->selection.active)
+            {
+                m_ui->selectionContextMenuPos = p;
+                m_ui->wantSelectionContextMenu = true;
+            }
+        }
+        m_objectMenuClick = false;
+    }
+
     // Still in the scene? Captures and scene loads replace groups and meshes.
     if (m_selGroup)
     {
@@ -1214,12 +1351,45 @@ void MeshToolApp::UpdateSelection()
         if (!found)
             ClearSelection();
     }
+    if (m_ui->wantAllModelVersion >= 0)
+    {
+        for (auto* batch : g_world.mesh_data_batches)
+            if (batch) for (auto* group : batch->group_meshes)
+                if (group) for (auto& object : group->objects)
+                    if (object.hasOriginalModel && object.hasRefinedModel)
+                        object.showOriginalModel = m_ui->wantAllModelVersion == 0;
+        m_ui->wantAllModelVersion = -1;
+        m_ui->classColors = false;
+        m_ui->selectionView = MeshToolUI::kSelActual;
+    }
     if (!m_selGroup)
     {
+        m_ui->wantModelVersion = -1;
         m_ui->wantFrameSelection = false;
         return;
     }
 
+    if (m_selObject >= 0 && !m_selMesh)
+    {
+        auto& object = m_selGroup->objects[size_t(m_selObject)];
+        auto& info = m_ui->selection;
+        info.hasModelComparison = object.hasOriginalModel && object.hasRefinedModel;
+        if (m_ui->wantModelVersion >= 0 && info.hasModelComparison)
+        {
+            object.showOriginalModel = m_ui->wantModelVersion == 0;
+            m_ui->selectionView = MeshToolUI::kSelActual;
+        }
+        info.modelVersion = object.showOriginalModel ? 0 : 1;
+        core::bounds3d box;
+        SelectionBounds(box, &info.meshes, &info.triangles);
+        if (box.b_valid)
+        {
+            info.size[0] = box.bb_max.x - box.bb_min.x;
+            info.size[1] = box.bb_max.y - box.bb_min.y;
+            info.size[2] = box.bb_max.z - box.bb_min.z;
+        }
+    }
+    m_ui->wantModelVersion = -1;
     if (m_ui->wantFrameSelection)
     {
         m_ui->wantFrameSelection = false;
@@ -1406,12 +1576,6 @@ void MeshToolApp::ProcessPendingActions()
         m_ui->pendingOpenScenePath.clear();
         OpenScene(path);
     }
-    if (!m_ui->pendingSaveScenePath.empty())
-    {
-        std::string path = std::move(m_ui->pendingSaveScenePath);
-        m_ui->pendingSaveScenePath.clear();
-        SaveSceneTo(path);
-    }
 
     if (m_ui->wantFrameAll)
     {
@@ -1453,6 +1617,15 @@ void MeshToolApp::ProcessPendingActions()
     UpdateSegmentation();
 
     UpdateRefine();
+    // Apply completed segmentation/refinement before saving, even if the worker
+    // finished during this frame. A save requested during a run waits for its
+    // resulting object assignments rather than silently saving the old capture.
+    if (!m_ui->pendingSaveScenePath.empty() && !m_ui->segRunning && !m_ui->refineRunning)
+    {
+        std::string path = std::move(m_ui->pendingSaveScenePath);
+        m_ui->pendingSaveScenePath.clear();
+        SaveSceneTo(path);
+    }
     const bool segmenting = m_segmenter && m_segmenter->Running();
 
     // A finished capture, requested here or with F12 inside Google Earth.
