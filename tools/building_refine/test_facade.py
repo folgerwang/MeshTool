@@ -78,6 +78,34 @@ class FacadeTest(unittest.TestCase):
         self.assertEqual(cs['windows'],ms['windows'])
         self.assertNotEqual(ct[0].mips,mt[0].mips)
 
+    def test_shared_diagonal_is_stitched_but_real_corner_is_not(self):
+        def group(tri):
+            tri=np.array(tri,float)
+            n=np.cross(tri[1]-tri[0],tri[2]-tri[0]);n/=np.linalg.norm(n)
+            return {'n':n,'anchor':tri[0],'tri':[tri]}
+        a=group([[0,0,0],[6,0,0],[6,.1,10]])
+        b=group([[0,0,0],[6,.1,10],[0,0,10]])
+        merged,count=facade.stitch_internal_seams([a,b])
+        self.assertEqual(count,1)
+        self.assertEqual(len(merged),1)
+        # Same vertical edge at a real building corner must stay separate.
+        c=group([[0,0,0],[0,0,10],[0,6,10]])
+        self.assertEqual(facade.stitch_internal_seams([b,c])[1],0)
+        # Open, unconnected boundary must not be filled.
+        d=group([[10,0,0],[16,0,0],[16,0,10]])
+        self.assertEqual(facade.stitch_internal_seams([a,d])[1],0)
+
+    def test_warped_capture_produces_planar_glass_panes(self):
+        vertices=np.array([[0,0,0],[10,0,0],[10,.3,16],
+                           [0,0,0],[10,.3,16],[0,0,16]],np.float32)
+        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),vertices,None,None,[(4,np.arange(6,dtype=np.uint32))])
+        meshes,_,stats=facade.build([source],0,0)
+        self.assertGreater(stats['windows'],0)
+        panes=np.concatenate([m.vertices+m.translation for m in meshes if m.material==1]).reshape(-1,6,3)
+        for pane in panes:
+            singular=np.linalg.svd(pane-pane.mean(0),compute_uv=False)
+            self.assertLess(singular[-1],1e-5)
+
     def test_wall_gap_is_not_filled_with_windows(self):
         def panel(x0,x1):return np.array([[[x0,0,0],[x1,0,0],[x1,0,8]],[[x0,0,0],[x1,0,8],[x0,0,8]]],float)
         verts=np.concatenate([panel(0,5),panel(8,13)]).reshape(-1,3)

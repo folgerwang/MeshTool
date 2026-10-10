@@ -85,6 +85,50 @@ def fit_window(tile, opening):
     return best if best is not None else Polygon()
 
 
+def stitch_internal_seams(groups):
+    """Join near-parallel wall patches across shared diagonal mesh edges.
+
+    Only actual shared edges qualify. Vertical corners, open boundaries and
+    strongly folded surfaces are retained. A bounded plane-fit error prevents
+    chains of triangles from flattening an entire curved building.
+    """
+    edges=defaultdict(set)
+    for i,g in enumerate(groups):
+        for tri in g['tri']:
+            for a,b in ((0,1),(1,2),(2,0)):
+                delta=tri[a]-tri[b]
+                if abs(delta[2])<=.5 or np.linalg.norm(delta[:2])<=.5:continue
+                key=tuple(sorted(tuple(np.round(p/.05).astype(np.int64)) for p in (tri[a],tri[b])))
+                edges[key].add(i)
+    parent=list(range(len(groups)));members={i:[i] for i in parent}
+    def root(i):
+        while parent[i]!=i:
+            parent[i]=parent[parent[i]];i=parent[i]
+        return i
+    joined=0
+    for ids in edges.values():
+        if len(ids)!=2:continue
+        a,b=map(root,sorted(ids))
+        if a==b:continue
+        items=members[a]+members[b]
+        vertices=np.concatenate([np.asarray(groups[i]['tri']).reshape(-1,3) for i in items])
+        anchor=vertices.mean(0)
+        _,_,basis=np.linalg.svd(vertices-anchor,full_matrices=False);n=basis[-1]
+        if any(abs(np.dot(n,groups[i]['n']))<.95 for i in items):continue
+        tolerance=min(1.5,max(.10,np.linalg.norm(np.ptp(vertices,axis=0))*.015))
+        if np.max(np.abs((vertices-anchor)@n))>tolerance:continue
+        parent[b]=a;members[a]=items;del members[b];joined+=1
+    result=[]
+    for items in members.values():
+        triangles=[t for i in items for t in groups[i]['tri']]
+        if len(items)==1:result.append(groups[items[0]]);continue
+        vertices=np.asarray(triangles).reshape(-1,3);anchor=vertices.mean(0)
+        _,_,basis=np.linalg.svd(vertices-anchor,full_matrices=False);n=basis[-1]
+        if np.dot(n,groups[items[0]]['n'])<0:n=-n
+        result.append({'n':n,'anchor':anchor,'tri':triangles})
+    return result,joined
+
+
 def build(source, oid, texture_base, source_textures=None, wall_finish="painted-concrete"):
     """Return replacement meshes, textures, and metrics; no input mesh mutation."""
     if not source or not any(len(m.vertices) for m in source):
@@ -119,8 +163,10 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         if match is None:
             match={'n':n,'anchor':t[0],'tri':[]};groups.append(match)
         match['tri'].append(t)
+    capture_groups=groups
+    groups,stitched_seams=stitch_internal_seams(groups)
     import facade_pattern
-    pattern=facade_pattern.detect(source,source_textures,groups) if source_textures else {}
+    pattern=facade_pattern.detect(source,source_textures,capture_groups) if source_textures else {}
     color=tuple(pattern.get('appearance',{}).get('rgb',(139,148,151)))
     panel_material=4 if wall_finish=='metal' else 3
     bay=pattern.get('bay',{}).get('spacing',BAY)
@@ -128,16 +174,45 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     floor_anchor=pattern.get('floor',{}).get('anchor_z',center[2])
     group_floors=pattern.get('group',{}).get('floors',0)
     batches=defaultdict(list); windows=0; tile_count=0; area_source=0.; area_new=0.
+    def world(xy,depth):
+        # Keep the original surface's position while sharing one window grid
+        # across its triangulation. This avoids cracks at neighboring patches.
+        xy=np.asarray(xy)
+        p=xy[:,None,:]-surface_xy[None,:,0,:]
+        v1=(p[:,:,0]*surface_b[None,:,1]-p[:,:,1]*surface_b[None,:,0])*surface_inv
+        v2=(surface_a[None,:,0]*p[:,:,1]-surface_a[None,:,1]*p[:,:,0])*surface_inv
+        inside=(v1>=-1e-5)&(v2>=-1e-5)&(v1+v2<=1.00001)&(surface_inv!=0)
+        choice=inside.argmax(axis=1);rows=np.arange(len(xy))
+        heights=surface_depth[choice,0]+v1[rows,choice]*(surface_depth[choice,1]-surface_depth[choice,0])+v2[rows,choice]*(surface_depth[choice,2]-surface_depth[choice,0])
+        heights[~inside.any(axis=1)]=np.nan
+        # Only numerical boundary points should fall outside the projected union.
+        missing=np.isnan(heights)
+        if missing.any():
+            flat=surface_xy.reshape(-1,2);z=surface_depth.ravel()
+            nearest=np.argmin(((xy[missing,None,:]-flat[None,:,:])**2).sum(2),axis=1)
+            heights[missing]=z[nearest]
+        return origin+xy[:,0,None]*u+xy[:,1,None]*v+(heights+depth)[:,None]*n
+
     def emit(poly,depth,mat,tex,uv_mode,origin,u,v,n,cx,cy,swatch):
         for region in _polygons(poly):
             if region.area<1e-7:continue
+            pane_center=pane_normal=None
+            if mat==mtscene.MAT_GLASS:
+                # One physical pane must have one plane; warped captured quads
+                # otherwise produce a diagonal reflection split between its triangles.
+                corners=world(np.asarray(region.exterior.coords)[:-1],depth)
+                pane_center=corners.mean(0)
+                _,_,basis=np.linalg.svd(corners-pane_center,full_matrices=False)
+                pane_normal=basis[-1]
             for tri in _polygons(shapely.constrained_delaunay_triangles(region)):
                 xy=np.asarray(tri.exterior.coords)[:3]
                 a,b=xy[1]-xy[0],xy[2]-xy[0]
                 signed=a[0]*b[1]-a[1]*b[0]
                 if abs(signed)<1e-9:continue
                 if signed<0:xy=xy[::-1]
-                pos=origin+xy[:,0,None]*u+xy[:,1,None]*v+n*depth
+                pos=world(xy,depth)
+                if pane_normal is not None:
+                    pos-=((pos-pane_center)@pane_normal)[:,None]*pane_normal
                 uv=np.clip((xy-[cx,cy])/[bay,floor],0,1)
                 if uv_mode=='pane':uv=(uv*.90+.05+[swatch%8,swatch//8])/8
                 batches[(mat,tex)].append((pos,uv))
@@ -146,10 +221,9 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
             for ring in [region.exterior,*region.interiors]:
                 xy=np.asarray(ring.coords)
                 for a,b in zip(xy[:-1],xy[1:]):
-                    points=np.array([origin+a[0]*u+a[1]*v+n*front,
-                                     origin+b[0]*u+b[1]*v+n*front,
-                                     origin+b[0]*u+b[1]*v+n*back,
-                                     origin+a[0]*u+a[1]*v+n*back])
+                    face=world(np.array([a,b]),front)
+                    rear=world(np.array([a,b]),back)
+                    points=np.array([face[0],face[1],rear[1],rear[0]])
                     batches[(mat,tex)].append((points[[0,1,2,0,2,3]],np.zeros((6,2))))
     for g in groups:
         # Fit one plane to a coherent patch, smoothing sub-metre capture noise.
@@ -165,6 +239,11 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         xy=np.stack([(t-anchor)@u,(t-anchor)@v],axis=-1)
         lo=xy.min(axis=(0,1));origin=anchor+u*lo[0]+v*lo[1]
         xy-=lo
+        surface_xy=xy
+        surface_depth=(t-origin)@n
+        surface_a=xy[:,1]-xy[:,0];surface_b=xy[:,2]-xy[:,0]
+        det=surface_a[:,0]*surface_b[:,1]-surface_a[:,1]*surface_b[:,0]
+        surface_inv=np.divide(1.,det,out=np.zeros_like(det),where=np.abs(det)>1e-9)
         region=shapely.make_valid(unary_union([Polygon(q) for q in xy]))
         area_source+=region.area
         x0,y0,x1,y1=region.bounds
@@ -203,7 +282,7 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         meshes.append(mtscene.Mesh(tex,oid,center,(pos-center).astype(np.float32),uv,None,
             [(4,np.arange(len(pos),dtype=np.uint32))],mat,2))
     return meshes,_textures(color,wall_finish),{'windows':windows,'tiles':tile_count,'patches':len(groups),
-        'replaced_triangles':len(wall_tri),'source_area':area_source,'covered_area':area_new,'pattern':pattern,'bay':bay,'floor':floor,'wall_color':color,'wall_finish':wall_finish}
+        'replaced_triangles':len(wall_tri),'source_area':area_source,'covered_area':area_new,'pattern':pattern,'bay':bay,'floor':floor,'wall_color':color,'wall_finish':wall_finish,'stitched_seams':stitched_seams}
 
 
 def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete"):
@@ -242,6 +321,7 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                         if base<=mesh.tex_index<base+3:mesh.tex_index=existing+mesh.tex_index-base
                 group.meshes=[m for m in group.meshes if m.object_id!=oid]+original+new
                 done+=1
+                print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins",flush=True)
                 rgb=stats['wall_color'];estimated='capture color estimate' if 'appearance' in stats['pattern'] else 'default color'
                 print(f"  {name}: {wall_finish}, RGB {rgb}, {estimated}",flush=True)
                 for axis,default in (('bay',BAY),('floor',FLOOR)):

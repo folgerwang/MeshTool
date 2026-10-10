@@ -92,3 +92,9 @@ uses metallic shading with a directional grain texture. Select **Wall finish**
 in the PCG dialog, or pass `--wall-finish painted-concrete` / `--wall-finish metal`.
 Glass and metal window frames keep their own materials. Reapply regenerates
 from the original and reuses matching texture atlases rather than stacking them.
+
+Internal diagonal mesh joins are stitched before window layout when neighboring
+patches have compatible normals and bounded fit error. Vertical corners and
+open boundaries remain separate. Geometry is mapped back onto the captured
+surface to avoid introducing cracks. Each generated glass pane is planar, so
+a warped source quad cannot split its reflection diagonally.
