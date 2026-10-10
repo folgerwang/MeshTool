@@ -89,6 +89,58 @@ class PCGTest(unittest.TestCase):
             if x.material==mtscene.MAT_CAPTURED: x.material=pcg.MAT_FACADE
         self.assertIn(mtscene.MAT_GLASS,[x.material for x in meshes])
 
+    def test_captured_fallback_places_equipment_above_flat_roof(self):
+        faces=building.model_faces(model())
+        points=np.concatenate([f.tris for f in faces if f.kind=="roof"]+[np.zeros((1,3,3))])
+        meshes,count=pcg.captured_details(points,7)
+        self.assertGreater(count,0)
+        self.assertLessEqual(len(meshes),3)
+        for mesh in meshes:
+            self.assertEqual(mesh.object_id,7)
+            self.assertTrue(np.isfinite(mesh.vertices).all())
+            self.assertGreater((mesh.vertices+mesh.translation)[:,2].min(),12)
+
+    def test_captured_fallback_skips_slopes_and_degenerate_surfaces(self):
+        points=np.array([[[0,0,0],[0,0,0],[0,0,0]],
+                         [[0,0,12],[10,0,14],[0,10,12]]],dtype=float)
+        meshes,count=pcg.captured_details(points,7)
+        self.assertEqual(count,0)
+        self.assertFalse(meshes)
+
+    def test_captured_bands_follow_walls_without_bridging_openings(self):
+        # Two separated wall panels; the three-metre opening must stay empty.
+        def panel(x0,x1):
+            return np.array([[[x0,0,0],[x1,0,0],[x1,0,12]],
+                             [[x0,0,0],[x1,0,12],[x0,0,12]]],float)
+        points=np.concatenate([panel(0,6),panel(9,15)])
+        meshes,count=pcg.captured_bands(points,4)
+        self.assertGreater(count,0)
+        verts=meshes[0].vertices+meshes[0].translation
+        self.assertTrue(np.isfinite(verts).all())
+        self.assertFalse(((verts[:,0]>6.01)&(verts[:,0]<8.99)).any())
+        self.assertGreater(np.abs(verts[:,1]).min(),.08)
+        again,n=pcg.captured_bands(points,4)
+        self.assertEqual(n,count)
+        np.testing.assert_array_equal(meshes[0].vertices,again[0].vertices)
+
+    def test_reflective_facade_splits_walls_without_changing_roof_or_original(self):
+        import copy
+        source=mesh_from_model(model(),0);source.model_variant=1
+        refined=copy.copy(source);refined.model_variant=2;refined.material=3
+        before=fingerprint(source)
+        result=pcg.reflective_facades([source,refined],{0})
+        self.assertEqual(fingerprint(result[0]),before)
+        self.assertEqual(sum(len(idx) for m in result[1:] for _,idx in m.draw_calls),len(refined.draw_calls[0][1]))
+        self.assertEqual({m.material for m in result[1:]},{1,3})
+        for m in result[1:]:
+            for _,idx in m.draw_calls:
+                p=m.vertices[idx.reshape(-1,3)]
+                n=np.cross(p[:,1]-p[:,0],p[:,2]-p[:,0])
+                wall=np.abs(n[:,2])<.3*np.linalg.norm(n,axis=1)
+                self.assertTrue(wall.all() if m.material==1 else (~wall).all())
+        self.assertEqual([fingerprint(m) for m in result],
+                         [fingerprint(m) for m in pcg.reflective_facades(result,{0})])
+
     def test_details_are_finite_grouped_and_belong_to_target(self):
         m=model()
         details,count=pcg.detail_meshes(building.model_faces(m),7,m)

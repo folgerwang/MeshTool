@@ -69,8 +69,16 @@ class ModelComparisonTest(unittest.TestCase):
         def meshes(b): return sorted(test_pcg.fingerprint(m) for m in b[0].groups[0].meshes)
         self.assertEqual(meshes(first),meshes(second))
 
-    def test_initial_rejection_has_no_false_comparison(self):
+    def test_initial_rejection_preserves_shell_with_pbr_fallback(self):
         with patch('building.build_model',return_value=None): result=run(test_pcg.fixture())
-        self.assertTrue(all(m.model_variant==0 for b in result for g in b.groups for m in g.meshes))
+        group=result[0].groups[0]
+        original=[m for m in group.meshes if m.object_id==0 and m.model_variant==1]
+        shell=[m for m in group.meshes if m.object_id==0 and m.model_variant==2 and m.material==3]
+        self.assertEqual(len(original),1)
+        self.assertEqual(len(shell),1)
+        import numpy as np
+        np.testing.assert_array_equal(original[0].vertices,shell[0].vertices)
+        np.testing.assert_array_equal(original[0].draw_calls[0][1],shell[0].draw_calls[0][1])
+        self.assertTrue(all(m.model_variant==0 for m in group.meshes if m.object_id!=0))
 
 if __name__=='__main__': unittest.main()

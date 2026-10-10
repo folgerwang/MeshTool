@@ -485,3 +485,28 @@ void VulkanMeshRenderer::UploadQuadGeometry()
                           m_quadIdxBuffer, m_quadIdxMemory);
     UploadBufferData(m_ctx, m_quadIdxBuffer, m_quadIdxMemory, indices, idxSize);
 }
+
+void VulkanMeshRenderer::DrawSelectionBox(VkCommandBuffer cmd, const float* viewProj, const float* lo, const float* hi)
+{
+    PushConstants pc = {};
+    memcpy(pc.viewProjMatrix, viewProj, sizeof(pc.viewProjMatrix));
+    for (int i = 0; i < 3; ++i)
+    {
+        pc.modelMatrix[i * 5] = hi[i] - lo[i];
+        pc.modelMatrix[12 + i] = lo[i];
+    }
+    pc.modelMatrix[15] = 1.0f;
+    const PipelineType passes[] = { PIPELINE_BOX_HIDDEN, PIPELINE_BOX_VISIBLE };
+    for (auto pass : passes)
+    {
+        const bool hidden = pass == PIPELINE_BOX_HIDDEN;
+        pc.boxColor[0] = hidden ? 0.25f : 1.0f;
+        pc.boxColor[1] = hidden ? 0.55f : 0.86f;
+        pc.boxColor[2] = hidden ? 1.0f : 0.12f;
+        pc.boxColor[3] = 1.0f;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeMgr->GetPipeline(pass));
+        vkCmdPushConstants(cmd, m_pipeMgr->GetLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(pc), &pc);
+        vkCmdDraw(cmd, 24, 1, 0, 0);
+    }
+}

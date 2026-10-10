@@ -90,6 +90,9 @@ static int RunRefineCommand(int argc, char* argv[])
     for (int i = 4; i < argc; i++)
         if (!strcmp(argv[i], "--no-glass")) settings.glass = false;
         else if (!strcmp(argv[i], "--pcg")) settings.pcg = true;
+        else if (!strcmp(argv[i], "--tiled-facade")) settings.tiledFacade = true;
+        else if (!strcmp(argv[i], "--wall-finish") && i + 1 < argc) settings.wallFinish = argv[++i];
+        else if (!strcmp(argv[i], "--reflective-glass")) settings.reflectiveGlass = true;
         else if (!strcmp(argv[i], "--no-sam")) settings.noSam = true;
         else if (!strcmp(argv[i], "--target") && i + 1 < argc) settings.target = argv[++i];
         else if (!strcmp(argv[i], "--clean")) settings.clean = true;

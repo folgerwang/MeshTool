@@ -51,16 +51,19 @@ public:
     bool  wantCancelRefine = false;
     bool  refineRunning = false;
     bool  refinePCG = false;
+    bool  refineTiledFacade = true;
+    int   refineWallFinish = 0; // painted concrete or brushed metal
     int   refineScope = 0; // 0 selected, 1 all segmented buildings
     bool  refineGlass = true;
+    bool  refineReflectiveGlass = false;
     bool  refineClean = false;   // Refine Buildings: also rebuild the terrain, drop cars and clutter
     bool  refineCull = true;     // Refine Buildings: remove hidden surfaces (z-fighting)
     float refineProgress = 0.0f;
     std::string refineStatus;
     // Glass facades of refined buildings.
     bool  glass = true;
-    float glassOpacity = 0.6f;
-    float glassReflect = 0.6f;
+    float glassOpacity = 0.85f;
+    float glassReflect = 0.95f;
     // Debug: colour tiles by the live capture that produced them and draw
     // each capture's camera, look direction and footprint, joined in order.
     bool  debugCaptures = false;

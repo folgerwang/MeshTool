@@ -415,6 +415,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
     ap.add_argument("output")
+    ap.add_argument("--wall-finish", choices=("painted-concrete","metal"), default="painted-concrete", help="opaque panel PBR finish; color is estimated from the original capture")
+    ap.add_argument("--tiled-facade", action="store_true", help="replace walls with textured facade tiles and modeled recessed windows")
+    ap.add_argument("--reflective-glass", action="store_true", help="explicitly assign reflective glass to refined wall triangles")
     ap.add_argument("--pcg", action="store_true", help="add procedural architectural details and PBR finishes")
     ap.add_argument("--target", help="exact selected batch:group:object indices")
     ap.add_argument("--only", help="comma-separated building names")
@@ -435,6 +438,8 @@ def main():
     ap.add_argument("--progress", action="store_true",
                     help="print '@progress <done> <total> <message>' lines (for MeshTool)")
     args = ap.parse_args()
+    if args.tiled_facade and (args.clean or args.cull):
+        ap.error("tiled facade replacement cannot be combined with scene cleanup")
     target = None
     if args.target:
         try:
@@ -460,6 +465,14 @@ def main():
             if obj.cls != CLS_BUILDING: raise IndexError()
         except IndexError:
             ap.error("selected target is missing or is not a segmented building")
+    if args.tiled_facade:
+        import facade
+        done,total=facade.apply(batches,target,set(args.only.split(",")) if args.only else None,progress,args.wall_finish)
+        progress(98,100,"Saving tiled facades...")
+        mtscene.save(args.output,batches)
+        progress(100,100,"Tiled facade replacement complete")
+        print(f"Refined {done} of {total} buildings with tiled window facades in {time.time()-t0:.0f} s; saved {args.output}",flush=True)
+        return 0
     progress(0, 1, "Loading SAM2 and CLIP...")
     params = building.Params()
     predictor = torch = None
@@ -701,6 +714,35 @@ def main():
                                 cv2.resize(dbg, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST))
                     cv2.imwrite(os.path.join(args.debug_dir, f"{name}_atlas0.png"), pages[0][..., ::-1])
 
+            # PCG can improve a captured shell even when rebuilding it is unsafe.
+            # Existing comparison pairs stay untouched on rejected reapplications.
+            fallback_objects = set()
+            if args.pcg:
+                import pcg
+                for oid in buildings:
+                    if oid in replaced: continue
+                    if oid in archived_objects:
+                        # Regenerate fallback attachments from an unchanged captured
+                        # shell, but retain an already reconstructed model on failure.
+                        old=[m for m in originals if m.object_id==oid]
+                        current=[m for m in group.meshes if m.object_id==oid]
+                        same=len(old)==len(current) and all(
+                            np.array_equal(a.vertices,b.vertices) and np.array_equal(a.translation,b.translation)
+                            and len(a.draw_calls)==len(b.draw_calls)
+                            and all(pa==pb and np.array_equal(ia,ib) for (pa,ia),(pb,ib) in zip(a.draw_calls,b.draw_calls))
+                            for a,b in zip(old,current))
+                        if not same: continue
+                    own = tris.pos[tris.obj == oid]
+                    if not len(own) or not np.isfinite(own).all(): continue
+                    details, n_parts = pcg.captured_details(own, oid)
+                    sources = [m for m in group.meshes if m.object_id == oid]
+                    if not details and not any(m.material == mtscene.MAT_CAPTURED for m in sources): continue
+                    replaced[oid] = details  # keep all captured triangles and textures
+                    fallback_objects.add(oid)
+                    done += 1
+                    print(f"  PCG fallback {group.objects[oid].name}: preserved captured geometry; "
+                          f"PBR finishes, {n_parts} surface-following parts in {len(details)} meshes", flush=True)
+
             absorbed = absorb_fragments(tris, buildings, models)
             for rows in absorbed.values():
                 drop[rows] = True
@@ -766,6 +808,11 @@ def main():
 
             for mesh in group.meshes:
                 if mesh.object_id in replaced: mesh.model_variant = 2
+                if mesh.object_id in fallback_objects and mesh.material == mtscene.MAT_CAPTURED:
+                    mesh.material = pcg.MAT_FACADE
+            if args.reflective_glass:
+                import pcg
+                group.meshes = pcg.reflective_facades(group.meshes, set(buildings))
             group.meshes += originals
 
     progress(98, 100, "Saving the refined scene...")

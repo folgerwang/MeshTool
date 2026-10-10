@@ -63,6 +63,11 @@ void VulkanPipelineManager::Init(VulkanContext* ctx, VkDescriptorSetLayout texLa
                    /*enableBlend=*/false,
                    /*enableDepth=*/true);
 
+    CreatePipeline(PIPELINE_BOX_VISIBLE, "shaders/selectionbox.vert.spv", "shaders/selectionbox.frag.spv",
+                   VK_PRIMITIVE_TOPOLOGY_LINE_LIST, false, true, false);
+    CreatePipeline(PIPELINE_BOX_HIDDEN, "shaders/selectionbox.vert.spv", "shaders/selectionbox.frag.spv",
+                   VK_PRIMITIVE_TOPOLOGY_LINE_LIST, false, true, false);
+
     // Drawn after everything opaque, back to front: tests depth so buildings
     // in front hide it, but does not write it, so what is behind still shows.
     CreatePipeline(PIPELINE_GLASS,
@@ -274,7 +279,8 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = enableDepth ? VK_TRUE : VK_FALSE;
     depthStencil.depthWriteEnable = enableDepth && depthWrite ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp = type == PIPELINE_BOX_HIDDEN ? VK_COMPARE_OP_GREATER :
+        type == PIPELINE_BOX_VISIBLE ? VK_COMPARE_OP_LESS_OR_EQUAL : VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
 
@@ -314,6 +320,12 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
     dynamicState.pDynamicStates = dynamicStates;
 
     // --- Graphics pipeline ---
+    if (type == PIPELINE_BOX_VISIBLE || type == PIPELINE_BOX_HIDDEN)
+    {
+        vertexInputInfo.vertexBindingDescriptionCount = 0;
+        vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    }
+
     VkGraphicsPipelineCreateInfo pipelineInfo = {};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;

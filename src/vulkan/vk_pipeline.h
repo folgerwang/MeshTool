@@ -11,6 +11,8 @@ enum PipelineType {
     PIPELINE_SCREEN_QUAD,
     PIPELINE_BASIC_LIGHT_STRIP,   // Same as BASIC_LIGHT but with triangle strip topology
     PIPELINE_GLASS,               // Translucent, reflective facades: blended, no depth writes
+    PIPELINE_BOX_VISIBLE,
+    PIPELINE_BOX_HIDDEN,
     PIPELINE_COUNT
 };
 

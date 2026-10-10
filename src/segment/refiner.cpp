@@ -121,6 +121,8 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
         cmd += " --pcg";
     if (!settings.target.empty())
         cmd += " --target " + Quote(settings.target);
+    if (settings.tiledFacade) cmd += " --tiled-facade --wall-finish " + Quote(settings.wallFinish);
+    if (settings.reflectiveGlass) cmd += " --reflective-glass";
     if (!settings.glass)
         cmd += " --no-glass";
     if (settings.clean)

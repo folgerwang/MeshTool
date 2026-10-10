@@ -14,7 +14,10 @@ struct RefineSettings
 {
     bool        noSam = false; // optional CLI outline-only mode
     bool        pcg = false;
+    bool        tiledFacade = false;
+    std::string wallFinish = "painted-concrete";
     std::string target; // exact batch:group:object index; empty means batch operation
+    bool        reflectiveGlass = false; // explicit facade material override
     bool        glass = true;       // detect curtain-wall facades and give them the glass material
     bool        clean = false;      // clean scene: remove cars/clutter, rebuild ground and roads under everything
     bool        cull = false;       // remove hidden surfaces (always on with clean)

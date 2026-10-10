@@ -309,6 +309,23 @@ void MeshToolApp::MainLoop()
         drawFrame.glassReflect = m_ui->glassReflect;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
+        if (!m_shotPending)
+        {
+            core::bounds3d box;
+            if (SelectionBounds(box))
+            {
+                float lo[3], hi[3];
+                const double mins[] = { box.bb_min.x, box.bb_min.y, box.bb_min.z };
+                const double maxs[] = { box.bb_max.x, box.bb_max.y, box.bb_max.z };
+                for (int i = 0; i < 3; ++i)
+                {
+                    lo[i] = float(mins[i] - drawFrame.refPos[i]);
+                    hi[i] = float(maxs[i] - drawFrame.refPos[i]);
+                }
+                m_meshRenderer->DrawSelectionBox(cmd, viewProj, lo, hi);
+            }
+        }
+
         // Render ImGui draw data - not on check-screenshot frames: dialogs,
         // their dimming and overlays would cover the scene being checked.
         if (!m_shotPending)
@@ -834,9 +851,13 @@ void MeshToolApp::UpdateRefine()
             }
             if (settings.target.empty()) return;
         }
+        settings.tiledFacade = m_ui->refinePCG && m_ui->refineTiledFacade;
+        settings.wallFinish = m_ui->refineWallFinish == 1 ? "metal" : "painted-concrete";
         settings.glass = m_ui->refineGlass;
+        settings.reflectiveGlass = m_ui->refineReflectiveGlass;
         settings.clean = m_ui->refineScope == 1 && m_ui->refineClean;
         settings.cull = m_ui->refineScope == 1 && m_ui->refineCull;
+        if (settings.tiledFacade) settings.clean = settings.cull = false;
         settings.workDir = m_ui->segSettings.debugDir;
         std::error_code ec;
         std::filesystem::create_directories(settings.workDir, ec);
@@ -1475,15 +1496,7 @@ void MeshToolApp::DrawSelectionOverlay()
         return;
 
     const OverlayView view(*m_ui, *m_camera);
-    const ImU32 lineCol = IM_COL32(255, 220, 30, 230);
-
     const core::vec3d lo = box.bb_min, hi = box.bb_max;
-    core::vec3d c[8];
-    for (int i = 0; i < 8; i++)
-        c[i] = core::vec3d((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, (i & 4) ? hi.z : lo.z);
-    const int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
-    for (const auto& e : edges)
-        view.Line(c[e[0]], c[e[1]], lineCol, 2.0f);
 
     // Label above the box.
     ImVec2 top;

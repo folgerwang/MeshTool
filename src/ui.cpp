@@ -1123,9 +1123,19 @@ void MeshToolUI::DrawRefineDialog()
             else if (refineScope == 0)
                 ImGui::TextDisabled("Select a segmented building, or choose All segmented buildings.");
             ImGui::Checkbox("PCG architectural details + PBR", &refinePCG);
-            ImGui::TextDisabled("Adds facade trim, floor bands, coping, gutters and rooftop equipment.");
-            ImGui::TextDisabled("Keeps fitted building shape and captured appearance; unmatched buildings stay.");
+            if (refinePCG) ImGui::Checkbox("Replace walls with tiled windows", &refineTiledFacade);
+            if (refinePCG && refineTiledFacade)
+                ImGui::TextWrapped("Replaces wall geometry with textured panels, metal window frames, recessed glass and interior backing. Preserves the original for comparison; scene cleanup is skipped.");
+            else ImGui::TextDisabled("Adds facade trim, floor bands, coping, gutters and rooftop equipment.");
+            if (refinePCG && refineTiledFacade)
+            {
+                ImGui::Combo("Wall finish", &refineWallFinish, "Painted concrete\0Brushed metal\0");
+                ImGui::TextWrapped("Panel color is estimated from the original capture. Choose the finish: capture texture alone cannot reliably identify the underlying material.");
+            }
+            if (!(refinePCG && refineTiledFacade)) ImGui::TextDisabled("Preserves captured shape; unsupported reconstruction uses surface details.");
             ImGui::Checkbox("Detect glass facades", &refineGlass);
+            ImGui::Checkbox("Reflective glass facade", &refineReflectiveGlass);
+            if (refineReflectiveGlass) ImGui::TextWrapped("Apply reflective glass to walls; roofs and architectural trim stay opaque.");
             ImGui::TextDisabled("Curtain walls get a translucent, reflective glass material.");
             if (refineScope == 0) ImGui::BeginDisabled();
             ImGui::Checkbox("Clean scene", &refineClean);
