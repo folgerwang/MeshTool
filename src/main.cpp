@@ -15,6 +15,7 @@
 #include "scenefile.h"
 #include "segmenter.h"
 #include "refiner.h"
+#include "route.h"
 
 // Headless segmentation, for testing and batch pipelines:
 //   MeshTool.exe --segment in.mtscene out.mtscene [--no-model] [--res M_PER_PX]
@@ -247,6 +248,32 @@ int main(int argc, char* argv[])
         return RunRefineCommand(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "--objects"))
         return RunObjectsCommand(argc, argv);
+    // MeshTool.exe --route "from" "to" [--spacing m] [--look-back]: print the
+    // camera waypoints a route capture would fly (no Google Earth needed).
+    if (argc >= 4 && !strcmp(argv[1], "--route"))
+    {
+        double spacing = 150.0;
+        bool lookBack = false;
+        for (int i = 4; i < argc; i++)
+        {
+            if (!strcmp(argv[i], "--spacing") && i + 1 < argc) spacing = atof(argv[++i]);
+            else if (!strcmp(argv[i], "--look-back")) lookBack = true;
+        }
+        RoutePlan plan = PlanRoute(argv[2], argv[3], spacing, lookBack);
+        if (!plan.ok)
+        {
+            fprintf(stderr, "route: %s\n", plan.error.c_str());
+            return 1;
+        }
+        printf("# %s\n# -> %s\n# %.0f m, %zu route points, %zu cameras every %.0f m\n",
+               plan.fromName.c_str(), plan.toName.c_str(), plan.lengthM, plan.polyline.size(),
+               plan.waypoints.size(), spacing);
+        for (const RouteWaypoint& w : plan.waypoints)
+            printf("%.6f,%.6f heading %.0f at %.0f m\n", w.lat, w.lon, w.heading, w.distance);
+        fflush(stdout);
+        fprintf(stderr, "route: %zu cameras over %.0f m\n", plan.waypoints.size(), plan.lengthM);
+        return 0;
+    }
 
     try
     {

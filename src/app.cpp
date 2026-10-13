@@ -5,6 +5,7 @@
 #include "app.h"
 
 #include <iostream>
+#include <chrono>
 #include <fstream>
 #include <cstring>
 #include <algorithm>
@@ -516,6 +517,12 @@ void MeshToolApp::UpdateGeoReadout()
 
 void MeshToolApp::UpdateGeFollow()
 {
+    // Route capture drives the follow link itself.
+    if (m_route.state != RouteCapture::kIdle)
+    {
+        m_followWasOn = false;
+        return;
+    }
     const bool on = m_ui->geFollowViewport && m_geoServer;
     if (on && !m_followWasOn)
         m_followSent = false;   // just switched on: send the current view
@@ -579,7 +586,8 @@ void MeshToolApp::UpdateGeFollow()
 bool MeshToolApp::CaptureSettled()
 {
     m_ui->captureGate.clear();
-    if (!m_ui->geFollowViewport || !m_geoServer || !GeoreferencedBatch())
+    const bool routing = m_route.state == RouteCapture::kSettling || m_route.state == RouteCapture::kCapturing;
+    if (!m_geoServer || (!routing && (!m_ui->geFollowViewport || !GeoreferencedBatch())))
         return true;   // not following (no GPS scene yet: the first capture must be possible)
 
     // GE needs time to stream the tiles of the new view after it stops.
@@ -631,7 +639,8 @@ bool MeshToolApp::CaptureSettled()
     // rested kNoReport; with no reports at all, kNoReport after delivery.
     double atCamera = -1.0;   // glfwGetTime() GE was known to be at the camera
     if (view.valid &&
-        metresApart(m_followSentLat, m_followSentLon, m_followSentAlt, view.camLat, view.camLon, view.camAlt) < 2.0)
+        metresApart(m_followSentLat, m_followSentLon, routing ? view.camAlt : m_followSentAlt,
+                    view.camLat, view.camLon, view.camAlt) < (routing ? 3.0 : 2.0))
         atCamera = (std::max)(m_geStillSince, delivered);
     else if (view.valid && view.time > delivered && m_geStillSince > delivered && now - m_geStillSince >= kNoReport)
         atCamera = m_geStillSince + kNoReport - kSettle;
@@ -1602,10 +1611,12 @@ void MeshToolApp::ProcessPendingActions()
         FrameBounds(all);
     }
 
+    UpdateRouteCapture();
     const bool captureSettled = CaptureSettled();
+    const bool routing = m_route.state == RouteCapture::kSettling || m_route.state == RouteCapture::kCapturing;
     // Tell the hook, for its F12 hint and to ignore F12 while GE settles.
     if (GLCaptureHeader* hdr = m_processManager ? m_processManager->GetHeader() : nullptr)
-        hdr->capture_gate = !m_ui->geFollowViewport || !GeoreferencedBatch() ? GLCAPTURE_GATE_NONE
+        hdr->capture_gate = !routing && (!m_ui->geFollowViewport || !GeoreferencedBatch()) ? GLCAPTURE_GATE_NONE
                             : captureSettled                                 ? GLCAPTURE_GATE_READY
                                                                              : GLCAPTURE_GATE_WAIT;
     if (m_ui->wantCaptureFrame)
@@ -1751,6 +1762,216 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->statusMessage = "Google Earth Pro stopped.";
             m_ui->statusTimeout = 5.0f;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Route capture
+// ---------------------------------------------------------------------------
+
+void MeshToolApp::UpdateRouteCapture()
+{
+    RouteCapture& r = m_route;
+    const double now = glfwGetTime();
+    auto log = [](const std::string& line) {
+        if (FILE* f = fopen("C:\\Users\\Public\\meshtool_capture.log", "a"))
+        {
+            fprintf(f, "[route] %s\n", line.c_str());
+            fclose(f);
+        }
+    };
+    auto status = [&](const std::string& text) {
+        m_ui->routeStatus = text;
+        if (text != r.lastStatus)
+        {
+            r.lastStatus = text;
+            m_ui->statusMessage = "Route capture: " + text;
+            m_ui->statusTimeout = 4.0f;
+            log(text);
+        }
+    };
+    auto finish = [&](const std::string& text, bool ok) {
+        r.state = RouteCapture::kIdle;
+        m_ui->routeRunning = false;
+        if (ok) m_ui->routeProgress = 1.0f;
+        status(text);
+        m_ui->statusTimeout = 12.0f;
+        m_followSent = false;   // viewport follow, if on, resends its own camera
+    };
+    auto summary = [&]() {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%d of %zu captures", r.captured, r.plan.waypoints.size());
+        return std::string(buf);
+    };
+
+    if (m_ui->wantStopRouteCapture)
+    {
+        m_ui->wantStopRouteCapture = false;
+        if (r.state != RouteCapture::kIdle)
+            finish("stopped after " + summary(), true);
+    }
+    if (m_ui->wantStartRouteCapture)
+    {
+        m_ui->wantStartRouteCapture = false;
+        if (r.state != RouteCapture::kIdle)
+            status("already running");
+        else if (!m_geoServer || !m_geoServer->Port())
+            finish("the GPS view server is not running", false);
+        else
+        {
+            const std::string from = m_ui->routeFrom, to = m_ui->routeTo;
+            const double spacing = m_ui->routeSpacing;
+            const bool lookBack = m_ui->routeLookBack;
+            r.planning = std::async(std::launch::async, [=] { return PlanRoute(from, to, spacing, lookBack); });
+            r.state = RouteCapture::kPlanning;
+            r.stateTime = now;
+            r.next = 0;
+            r.captured = 0;
+            r.connectSent = false;
+            m_ui->routeRunning = true;
+            m_ui->routeProgress = 0.0f;
+            status("looking up \"" + from + "\" -> \"" + to + "\" and the route...");
+        }
+    }
+
+    switch (r.state)
+    {
+    case RouteCapture::kIdle:
+        return;
+
+    case RouteCapture::kPlanning:
+    {
+        if (r.planning.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+        r.plan = r.planning.get();
+        if (!r.plan.ok)
+        {
+            finish(r.plan.error, false);
+            return;
+        }
+        char buf[512];
+        snprintf(buf, sizeof(buf), "%s -> %s: %.1f km, %zu cameras",
+                 r.plan.fromName.c_str(), r.plan.toName.c_str(), r.plan.lengthM / 1000.0, r.plan.waypoints.size());
+        status(buf);
+        // Google Earth with the hook, started from MeshTool so it carries the follow link.
+        if (!m_processManager || !m_processManager->IsRunning())
+        {
+            m_ui->ActionLiveCapture();
+            if (!m_processManager || !m_processManager->IsRunning())
+            {
+                finish("Google Earth Pro could not be started", false);
+                return;
+            }
+        }
+        r.state = RouteCapture::kLaunching;
+        r.stateTime = now;
+        return;
+    }
+
+    case RouteCapture::kLaunching:
+    {
+        const bool hooked = m_processManager->IsHookConnected();
+        const bool polling = m_geoServer->LastFollowPoll() > 0.0 && now - m_geoServer->LastFollowPoll() < 3.0;
+        if (hooked && polling)
+        {
+            r.state = RouteCapture::kFlying;
+            r.stateTime = now;
+            return;
+        }
+        // A Google Earth started by hand lacks the links: load them once.
+        if (hooked && !polling && !r.connectSent && now - r.stateTime > 8.0)
+        {
+            r.connectSent = true;
+            m_ui->ActionConnectGoogleEarth();
+        }
+        if (now - r.stateTime > 120.0)
+        {
+            finish(!hooked ? "the capture hook did not connect (deploy it with deploy_hook.bat)"
+                           : "Google Earth is not polling the follow link (Connect Google Earth)", false);
+            return;
+        }
+        status(hooked ? "waiting for Google Earth's follow link..." : "waiting for the capture hook to connect...");
+        return;
+    }
+
+    case RouteCapture::kFlying:
+    {
+        if (r.next >= r.plan.waypoints.size())
+        {
+            finish("complete: " + summary(), true);
+            return;
+        }
+        const RouteWaypoint& w = r.plan.waypoints[r.next];
+        m_geoServer->SetFollowCamera(w.lon, w.lat, m_ui->routeHeight, w.heading, m_ui->routeTilt, true);
+        // The settle gate compares Google Earth's reported camera with this one
+        // (horizontally while routing: the altitude is above ground here).
+        m_followSentLat = w.lat;
+        m_followSentLon = w.lon;
+        m_followSentAlt = 0.0;
+        m_followSent = true;
+        m_followMoveTime = now;
+        m_followSentEye = m_camera->Eye();
+        m_followSentFwd = m_camera->Forward();
+        r.state = RouteCapture::kSettling;
+        r.stateTime = now;
+        r.settledTime = -1.0;
+        m_ui->routeProgress = float(r.next) / float(r.plan.waypoints.size());
+        char buf[200];
+        snprintf(buf, sizeof(buf), "camera %zu of %zu (%.0f m along, heading %.0f): flying",
+                 r.next + 1, r.plan.waypoints.size(), w.distance, w.heading);
+        status(buf);
+        return;
+    }
+
+    case RouteCapture::kSettling:
+    {
+        char buf[200];
+        if (CaptureSettled())
+        {
+            if (r.settledTime < 0.0) r.settledTime = now;
+            if (now - r.settledTime >= m_ui->routeDwell)
+            {
+                m_ui->wantCaptureFrame = true;
+                r.state = RouteCapture::kCapturing;
+                r.stateTime = now;
+                snprintf(buf, sizeof(buf), "camera %zu of %zu: capturing", r.next + 1, r.plan.waypoints.size());
+            }
+            else
+                snprintf(buf, sizeof(buf), "camera %zu of %zu: loading tiles (%.0f s)", r.next + 1,
+                         r.plan.waypoints.size(), m_ui->routeDwell - (now - r.settledTime));
+        }
+        else if (now - r.stateTime > 60.0)
+        {
+            snprintf(buf, sizeof(buf), "camera %zu of %zu skipped: %s", r.next + 1, r.plan.waypoints.size(),
+                     m_ui->captureGate.c_str());
+            r.next++;
+            r.state = RouteCapture::kFlying;
+        }
+        else
+            snprintf(buf, sizeof(buf), "camera %zu of %zu: %s", r.next + 1, r.plan.waypoints.size(),
+                     m_ui->captureGate.c_str());
+        status(buf);
+        return;
+    }
+
+    case RouteCapture::kCapturing:
+    {
+        const bool requested = m_captureRequestTime >= r.stateTime;
+        if (requested && !m_capturePending)
+        {
+            r.captured++;
+            r.next++;
+            r.state = RouteCapture::kFlying;
+        }
+        else if (!requested && now - r.stateTime > 1.0)
+        {
+            // The gate closed again in between: settle once more.
+            r.state = RouteCapture::kSettling;
+            r.stateTime = now;
+            r.settledTime = -1.0;
+        }
+        return;
+    }
     }
 }
 

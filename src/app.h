@@ -5,6 +5,8 @@
 #include <map>
 #include <memory>
 #include <cstdint>
+#include <future>
+#include "route.h"
 #include "coremath.h"
 
 class VulkanRenderer;
@@ -110,6 +112,23 @@ private:
     // While following: may a capture be taken now? (GE has flown to the
     // viewport camera and come to rest.) Reason in m_ui->captureGate when not.
     bool        CaptureSettled();
+    // Capture > Route Capture: Google Earth is flown along a route between
+    // two addresses through the follow link and a capture is taken at every
+    // waypoint once the view has settled.
+    struct RouteCapture
+    {
+        enum State { kIdle, kPlanning, kLaunching, kFlying, kSettling, kCapturing };
+        State  state = kIdle;
+        std::future<RoutePlan> planning;
+        RoutePlan plan;
+        size_t next = 0;             // waypoint to fly to
+        int    captured = 0;
+        double stateTime = 0.0;      // glfwGetTime() the state was entered
+        double settledTime = -1.0;   // when the gate first opened for this waypoint
+        bool   connectSent = false;  // links re-sent to a Google Earth that was not polling
+        std::string lastStatus;
+    } m_route;
+    void UpdateRouteCapture();
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet

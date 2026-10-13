@@ -52,6 +52,17 @@ A typical session, from an empty scene to an exported model:
    wherever you leave the MeshTool viewport camera. Its overlay shows
    *F12: WAIT - SETTLING* while it flies and loads, then *F12: CAPTURE READY*.
    Press F12 then.
+6b. **Route capture (optional).** Capture > Route Capture... takes two
+   addresses (or "lat, lon"), looks them up with OpenStreetMap Nominatim,
+   asks the OSRM demo server for the driving route, and places a camera every
+   150 m along it (height 250 m above ground, tilt 55 deg, looking along the
+   route; adjustable). Google Earth is started if needed, flown to each
+   camera through the follow link, and a frame is captured once the view has
+   settled and the tiles have loaded. "Also capture looking back" adds a
+   turned-around capture at every stop. Progress shows in the Live Capture
+   panel, where Stop ends the run; captures stitch into one scene as usual.
+   `MeshTool --route "from" "to" [--spacing m] [--look-back]` prints the
+   cameras without Google Earth. Needs an internet connection.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
    highlighted / as captured).
@@ -278,6 +289,7 @@ MeshTool --refine in.mtscene out.mtscene [--no-glass] [--clean] [--cull]
 python toolsuilding_refine
 efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--clean] [--cull] [--no-lama] [--debug-dir d]
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
+MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 150] [--look-back]
 MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..]
 ```
 

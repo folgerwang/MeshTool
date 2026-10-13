@@ -174,6 +174,7 @@ void MeshToolUI::DrawUI()
     if (showRefPointDialog)     DrawRefPointDialog();
     if (showRegionSelectDialog) DrawRegionSelectDialog();
     if (showNavCaptureDialog)   DrawNavCaptureDialog();
+    if (showRouteCaptureDialog) DrawRouteCaptureDialog();
     if (showSegmentDialog)      DrawSegmentDialog();
     if (showRefineDialog)       DrawRefineDialog();
     if (showMessageBox)         DrawMessageBox();
@@ -254,6 +255,9 @@ void MeshToolUI::DrawMenuBar()
         if (ImGui::BeginMenu("Capture"))
         {
             if (ImGui::MenuItem("Navigate & Capture...", "Ctrl+N"))  showNavCaptureDialog = true;
+            if (ImGui::MenuItem("Route Capture..."))                 showRouteCaptureDialog = true;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Two addresses: Google Earth flies the route between them and captures along it.");
             ImGui::Separator();
             if (ImGui::MenuItem("Launch Google Earth"))   ActionLiveCapture();
             if (ImGui::MenuItem("Capture Frame",  "F5"))  wantCaptureFrame = true;
@@ -621,6 +625,19 @@ void MeshToolUI::DrawScenePanel()
             ImGui::SetTooltip("Whenever the viewport camera comes to rest, Google Earth flies to the same\n"
                               "position and direction. Needs a GPS-referenced scene, and Google Earth\n"
                               "started from MeshTool (its KML carries the follow link).");
+        if (routeRunning || !routeStatus.empty())
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(routeRunning ? ImVec4(0.3f, 0.9f, 0.3f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+                               "Route capture:");
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s", routeStatus.c_str());
+            if (routeRunning)
+            {
+                ImGui::ProgressBar(routeProgress, ImVec2(-1, 0));
+                if (ImGui::SmallButton("Stop route capture")) wantStopRouteCapture = true;
+            }
+        }
         ImGui::Unindent(8);
     }
 
@@ -1731,6 +1748,79 @@ void MeshToolUI::ActionNavCapture()
     else
     {
         SetStatus("Google Earth launched. Click 'Capture Frame' when ready.");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Route Capture dialog
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawRouteCaptureDialog()
+{
+    ImGui::OpenPopup("Route Capture");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(540, 0), ImGuiCond_Appearing);
+
+    if (ImGui::BeginPopupModal("Route Capture", &showRouteCaptureDialog, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextColored(ImVec4(0.5f, 0.85f, 1.0f, 1.0f),
+            "Capture everything along a route between two places.");
+        ImGui::TextDisabled("Google Earth flies the driving route camera by camera and captures at each stop.\n"
+                            "Captures stitch into one scene as usual.");
+        ImGui::Spacing();
+        ImGui::InputText("From", routeFrom, sizeof(routeFrom));
+        ImGui::InputText("To", routeTo, sizeof(routeTo));
+        ImGui::TextDisabled("An address, a place name, or \"lat, lon\" (e.g. 37.7955, -122.3937).");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Cameras along the route:");
+        ImGui::SliderFloat("Spacing (m)", &routeSpacing, 50.0f, 500.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Distance between camera stops along the route.");
+        ImGui::SliderFloat("Height above ground (m)", &routeHeight, 60.0f, 600.0f, "%.0f");
+        ImGui::SliderFloat("Tilt (deg)", &routeTilt, 20.0f, 75.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 looks straight down, 90 at the horizon. The camera looks along the route.");
+        ImGui::SliderFloat("Load wait (s)", &routeDwell, 1.0f, 20.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Extra seconds after Google Earth settles, for the tiles to stream in.");
+        ImGui::Checkbox("Also capture looking back", &routeLookBack);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("A second capture at each stop, turned around: both street sides get a facing view. Doubles the captures.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Needs an internet connection: OpenStreetMap Nominatim resolves the addresses,\n"
+                            "the OSRM demo server computes the route. Google Earth is started if needed.");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        if (routeRunning)
+        {
+            ImGui::TextWrapped("Running: %s", routeStatus.c_str());
+            ImGui::ProgressBar(routeProgress, ImVec2(-1, 0));
+            if (ImGui::Button("Stop", ImVec2(120, 0))) wantStopRouteCapture = true;
+        }
+        else
+        {
+            if (!routeStatus.empty()) ImGui::TextWrapped("Last run: %s", routeStatus.c_str());
+            if (ImGui::Button("Start", ImVec2(120, 0)))
+            {
+                if (!routeFrom[0] || !routeTo[0])
+                    ShowMessage("Route Capture", "Enter both the start and the destination.");
+                else
+                {
+                    wantStartRouteCapture = true;
+                    showRouteCaptureDialog = false;
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(120, 0)))
+        {
+            showRouteCaptureDialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 }
 

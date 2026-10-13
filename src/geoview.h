@@ -49,7 +49,8 @@ public:
     // level; tilt 0 = looking straight down, 90 = at the horizon). GE polls
     // /follow twice a second and gets each new camera once, so it never
     // fights the user's own navigation in GE.
-    void SetFollowCamera(double lon, double lat, double alt, double heading, double tilt);
+    // `aboveGround`: altitude is metres above the terrain under the camera.
+    void SetFollowCamera(double lon, double lat, double alt, double heading, double tilt, bool aboveGround = false);
     // glfwGetTime() of GE's last /follow poll (0 = never: GE was started with
     // a KML from before this link existed).
     double LastFollowPoll() const;

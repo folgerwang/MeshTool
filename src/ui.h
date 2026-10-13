@@ -34,6 +34,22 @@ public:
     bool wantFrameAll = false;      // point the camera at everything loaded
     bool wantCheckScreenshots = false;   // Tools > Save Check Screenshots
 
+    // Route capture (Capture > Route Capture): settings and requests for the
+    // app, which flies Google Earth along the route and captures; its progress.
+    char  routeFrom[256] = "";
+    char  routeTo[256] = "";
+    float routeSpacing = 150.0f;   // metres between cameras along the route
+    float routeHeight = 250.0f;    // camera height above the ground (m)
+    float routeTilt = 55.0f;       // degrees, 0 = straight down
+    float routeDwell = 4.0f;       // seconds for tiles to stream in after Google Earth settles
+    bool  routeLookBack = false;   // a second, turned-around capture at each position
+    bool  wantStartRouteCapture = false;
+    bool  wantStopRouteCapture = false;
+    bool  routeRunning = false;
+    float routeProgress = 0.0f;
+    std::string routeStatus;
+    void ActionLiveCapture();      // launch Google Earth Pro with the hook and the GPS links
+
     // Segmentation (Tools > Segment Scene): settings and requests for the app,
     // progress reported back by it.
     SegmentSettings segSettings;
@@ -121,6 +137,10 @@ private:
 
     bool regionSelectMode = false;
 
+    // Route Capture dialog
+    bool showRouteCaptureDialog = false;
+    void DrawRouteCaptureDialog();
+
     // Navigate & Capture dialog
     bool showNavCaptureDialog = false;
     int  navMode = 0;           // 0 = GPS coordinates, 1 = address/place
@@ -181,7 +201,6 @@ private:
     void ActionImportUSGS();
     void ActionImportKML();
     void ActionExport();
-    void ActionLiveCapture();
     void ActionNavCapture();  // Navigate to location & auto-capture
 
     // Pending auto-capture state

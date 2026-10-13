@@ -124,14 +124,14 @@ GeoView GeoViewServer::Latest() const
     return m_latest;
 }
 
-void GeoViewServer::SetFollowCamera(double lon, double lat, double alt, double heading, double tilt)
+void GeoViewServer::SetFollowCamera(double lon, double lat, double alt, double heading, double tilt, bool aboveGround)
 {
     char kml[512];
     snprintf(kml, sizeof(kml),
              "<Camera><longitude>%.9f</longitude><latitude>%.9f</latitude><altitude>%.2f</altitude>"
              "<heading>%.3f</heading><tilt>%.3f</tilt><roll>0</roll>"
-             "<altitudeMode>absolute</altitudeMode></Camera>",
-             lon, lat, alt, heading, tilt);
+             "<altitudeMode>%s</altitudeMode></Camera>",
+             lon, lat, alt, heading, tilt, aboveGround ? "relativeToGround" : "absolute");
     std::lock_guard<std::mutex> lock(m_mutex);
     m_followKml = kml;
     m_followSeq++;

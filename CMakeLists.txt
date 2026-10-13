@@ -54,6 +54,7 @@ set(NEW_SOURCES
     src/segment/qwen_client.cpp
     src/segment/refiner.cpp
     src/file_downloader.cpp
+    src/route.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp
     src/vulkan/vk_texture_manager.cpp
@@ -116,6 +117,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     mt_stb
     Advapi32.lib
     RPCRT4.lib
+    winhttp.lib
 )
 
 if(WIN32)
