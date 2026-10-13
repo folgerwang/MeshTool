@@ -170,24 +170,29 @@ class FacadeTest(unittest.TestCase):
         self.assertGreater(panes[:,0].min(),.40);self.assertLess(panes[:,0].max(),12.3-.40)
         self.assertLess(widths[0],min(widths[1:-1])-.1)
 
-    def test_recessed_slot_faces_keep_capture_winding(self):
+    def test_patches_face_outward_by_ray_parity_whatever_the_winding(self):
         def quad(p0,p1,p2,p3):return np.array([p0,p1,p2,p0,p2,p3],float)
-        # Main walls wound outward (CCW seen from outside); a notch face at x=5
-        # faces -x by winding although the building centre lies at +x.
-        a=quad([0,0,0],[0,0,10],[0,10,10],[0,10,0])          # x=0, normal -x
-        b=quad([20,0,0],[20,10,0],[20,10,10],[20,0,10])      # x=20, normal +x
-        c=quad([5,4,0],[5,4,10],[5,6,10],[5,6,0])            # notch, normal -x
-        verts=np.concatenate([a,b,c]).astype(np.float32)
-        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(len(verts),dtype=np.uint32))])
-        meshes,_,stats=facade.build([source],0,0)
-        self.assertEqual(stats['orientation'],'winding')
-        backing=np.concatenate([m.vertices+m.translation for m in meshes if m.material==2])
-        notch=backing[(backing[:,1]>3.99)&(backing[:,1]<6.01)&(np.abs(backing[:,0]-5)<1)]
-        self.assertTrue(len(notch));self.assertTrue(np.allclose(notch[:,0],5.55,atol=1e-4))
-        # Inconsistent winding falls back to the centre rule.
-        c2=quad([5,4,0],[5,6,0],[5,6,10],[5,4,10]);a2=quad([0,0,0],[0,10,0],[0,10,10],[0,0,10])
-        verts=np.concatenate([a2,b,c2]).astype(np.float32)
-        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(len(verts),dtype=np.uint32))])
-        self.assertEqual(facade.build([source],0,0)[2]['orientation'],'centre')
+        # A 20 m deep building whose x=0 wall has a 2 m notch cut 5 m into it.
+        a1=quad([0,0,0],[0,0,10],[0,4,10],[0,4,0]);a2=quad([0,6,0],[0,6,10],[0,10,10],[0,10,0])
+        b=quad([20,0,0],[20,10,0],[20,10,10],[20,0,10])
+        e1=quad([0,0,0],[20,0,0],[20,0,10],[0,0,10]);e2=quad([0,10,0],[0,10,10],[20,10,10],[20,10,0])
+        s1=quad([0,4,0],[5,4,0],[5,4,10],[0,4,10]);s2=quad([0,6,0],[0,6,10],[5,6,10],[5,6,0])
+        back_ok=quad([5,4,0],[5,4,10],[5,6,10],[5,6,0])          # faces -x into the notch
+        back_bad=quad([5,4,0],[5,6,0],[5,6,10],[5,4,10])         # wound the wrong way
+        # Each duplicated once, as captures often are; a wrongly wound main wall too.
+        for back,a_first in ((back_ok,a1),(back_bad,a1[[0,2,1,3,5,4]])):
+            verts=np.concatenate([a_first,a2,b,e1,e2,s1,s2,back,back,b]).astype(np.float32)
+            source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(len(verts),dtype=np.uint32))])
+            meshes,_,stats=facade.build([source],0,0)
+            backing=np.concatenate([m.vertices+m.translation for m in meshes if m.material==2])
+            # Backing cells sit 55 cm behind each wall, on the building side.
+            on=lambda a,v:np.abs(a-v)<.01
+            notch=backing[(on(backing[:,1],4)|on(backing[:,1],6))&(np.abs(backing[:,0]-5)<1)]
+            self.assertTrue(len(notch));self.assertTrue(np.allclose(notch[:,0],5.55,atol=1e-4))
+            front=backing[(np.abs(backing[:,0])<1)&(backing[:,1]>1)&(backing[:,1]<3.4)]
+            self.assertTrue(len(front));self.assertTrue(np.allclose(front[:,0],.55,atol=1e-4))
+            far=backing[(np.abs(backing[:,0]-20)<1)&(backing[:,1]>1)&(backing[:,1]<9)]
+            self.assertTrue(len(far));self.assertTrue(np.allclose(far[:,0],19.45,atol=1e-4))
+        self.assertGreaterEqual(stats['flipped_patches'],1)
 
 if __name__=='__main__':unittest.main()

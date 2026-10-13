@@ -137,6 +137,49 @@ def stitch_internal_seams(groups):
         result.append({'n':n,'anchor':anchor,'tri':triangles})
     return result,joined
 
+def _unique_triangles(tris):
+    """Drop duplicate capture triangles (LOD copies), whatever their vertex order."""
+    if not len(tris):return tris
+    key=np.sort(np.round(tris,3).reshape(len(tris),3,3).view([('x',float),('y',float),('z',float)]).reshape(len(tris),3),axis=1)
+    flat=key.view(np.dtype((np.void,key.dtype.itemsize*3)))
+    _,first=np.unique(flat,return_index=True)
+    return tris[np.sort(first)]
+
+
+def orient_outward(groups,all_tri,center):
+    """Point each patch away from the building by ray parity.
+
+    Horizontal rays leave the patch's largest triangles along its normal; an odd
+    number of crossings of the building's other surfaces means that side is
+    inside. Duplicate capture triangles are removed first, so they do not count
+    twice. Patches whose rays give no majority keep the centre-outward rule.
+    Returns the number of patches flipped against their winding.
+    """
+    unique=_unique_triangles(np.asarray(all_tri,dtype=np.float64))
+    v0=unique[:,0];e1=unique[:,1]-v0;e2=unique[:,2]-v0
+    def crossings(o,d):
+        if not len(unique):return 0
+        h=np.cross(d,e2);a=np.einsum('ij,ij->i',e1,h);valid=np.abs(a)>1e-9
+        f=np.divide(1.,a,out=np.zeros_like(a),where=valid);s=o-v0
+        u=f*np.einsum('ij,ij->i',s,h);q=np.cross(s,e1)
+        v=f*np.einsum('ij,j->i',q,d);t=f*np.einsum('ij,ij->i',q,e2)
+        return int((valid&(u>=-1e-6)&(v>=-1e-6)&(u+v<=1+1e-6)&(t>1e-3)).sum())
+    angles=[np.radians(a) for a in (-30,-15,0,15,30)]
+    flipped=0
+    for g in groups:
+        n=g['n'];inside=0;total=0
+        samples=sorted(g['tri'],key=lambda t:-np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])))[:4]
+        for t in samples:
+            c=t.mean(0)
+            for r in angles:
+                R=np.array([[np.cos(r),-np.sin(r),0],[np.sin(r),np.cos(r),0],[0,0,1]])
+                d=R@n;total+=1;inside+=crossings(c+d*.02,d)%2
+        if total and inside*2!=total:outward=inside*2<total
+        else:outward=np.dot(np.mean([t.mean(0) for t in samples],axis=0)-center,n)>0
+        if not outward:
+            g['n']=-n;flipped+=1
+    return flipped
+
 
 def build(source, oid, texture_base, source_textures=None, wall_finish="painted-concrete"):
     """Return replacement meshes, textures, and metrics; no input mesh mutation."""
@@ -173,15 +216,10 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     # the building to an inferred rectangular footprint.
     groups=[]
     wall_tri.sort(key=lambda t:-np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])))
-    # Outward direction: the capture's own winding when it is consistent (so a
-    # recessed slot faces into the slot, not into the building); otherwise
-    # away from the building centre.
-    walls=np.asarray(wall_tri);cross=np.cross(walls[:,1]-walls[:,0],walls[:,2]-walls[:,0])
-    area=np.linalg.norm(cross,axis=1);outward=np.einsum('ij,ij->i',walls.mean(1)-center,cross)>0
-    winding=area[outward].sum()>=.85*area.sum()
+    # Provisional outward direction from the capture winding; each patch is
+    # then checked by ray parity against the building's own surfaces below.
     for t in wall_tri:
         n=np.cross(t[1]-t[0],t[2]-t[0]);n/=np.linalg.norm(n)
-        if not winding and np.dot(t.mean(0)-center,n)<0:n=-n
         match=None
         for g in groups:
             if np.dot(n,g['n'])>.98 and np.max(np.abs((t-g['anchor'])@g['n']))<.60:
@@ -189,6 +227,8 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         if match is None:
             match={'n':n,'anchor':t[0],'tri':[]};groups.append(match)
         match['tri'].append(t)
+    all_tri=np.concatenate([p[v] for _,_,_,p,_,v in parts if p is not None]) if parts else np.zeros((0,3,3))
+    flipped=orient_outward(groups,all_tri,center)
     capture_groups=groups
     groups,stitched_seams=stitch_internal_seams(groups)
     import facade_pattern
@@ -418,7 +458,7 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     return meshes,_textures(color,wall_finish),{'windows':windows,'tiles':tile_count,'patches':len(groups),
         'replaced_triangles':len(wall_tri),'roof_triangles':len(roof_pts),'source_area':area_source,'covered_area':area_new,
         'pattern':pattern,'bay':bay_nominal,'floor':floor,'wall_color':color,'wall_finish':wall_finish,'stitched_seams':stitched_seams,
-        'modules':dict(counts),'sampled_patches':sampled,'entrance':entrance is not None,'orientation':'winding' if winding else 'centre'}
+        'modules':dict(counts),'sampled_patches':sampled,'entrance':entrance is not None,'flipped_patches':flipped}
 
 
 def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete"):
@@ -457,7 +497,7 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                         if base<=mesh.tex_index<base+TEXTURE_COUNT:mesh.tex_index=existing+mesh.tex_index-base
                 group.meshes=[m for m in group.meshes if m.object_id!=oid]+original+new
                 done+=1
-                print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins; patches face outward by capture {stats['orientation']}",flush=True)
+                print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins; {stats['flipped_patches']} patch(es) turned outward by ray parity",flush=True)
                 rgb=stats['wall_color'];estimated='capture color estimate' if 'appearance' in stats['pattern'] else 'default color'
                 print(f"  {name}: {wall_finish}, RGB {rgb}, {estimated}",flush=True)
                 for axis,default in (('bay',BAY),('floor',FLOOR)):

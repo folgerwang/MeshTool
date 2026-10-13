@@ -127,9 +127,12 @@ Each wall patch takes an integer number of bays (its width divided by the
 nearest whole count of nominal bays), so a patch never ends in a sliver
 window and every interior window in a patch has the same width. The first and
 last bay of a patch keep a 25 cm solid corner post, so glazing never runs
-into a corner or an open edge. Patches face outward by the capture's own
-triangle winding when at least 85% of the wall area agrees with the
-centre-outward rule; this keeps recessed slots and notches facing into the
-slot instead of placing the dark backing in front of them. Inconsistently
-wound captures fall back to the centre rule. The log names the rule used.
+into a corner or an open edge. Each patch is turned outward by ray parity:
+horizontal rays leave its largest triangles along the patch normal, and an
+odd number of crossings of the building's other surfaces means that side is
+inside. Duplicate capture triangles are removed before counting. This keeps
+recessed slots facing into the slot and corrects wrongly wound capture faces,
+either of which otherwise places the dark backing in front of the wall. A
+patch whose rays give no majority keeps the centre-outward rule. The log
+reports how many patches were turned.
 
