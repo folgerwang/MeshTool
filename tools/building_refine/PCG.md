@@ -121,3 +121,15 @@ re-surfaced with a generated roof membrane texture (1 m seams, 4 m repeat)
 using the roof PBR finish; fragments near the ground stay captured. The
 generated atlas is now four textures (panel, panes, backing, roof).
 
+### Bay fitting, corner posts and patch orientation
+
+Each wall patch takes an integer number of bays (its width divided by the
+nearest whole count of nominal bays), so a patch never ends in a sliver
+window and every interior window in a patch has the same width. The first and
+last bay of a patch keep a 25 cm solid corner post, so glazing never runs
+into a corner or an open edge. Patches face outward by the capture's own
+triangle winding when at least 85% of the wall area agrees with the
+centre-outward rule; this keeps recessed slots and notches facing into the
+slot instead of placing the dark backing in front of them. Inconsistently
+wound captures fall back to the centre rule. The log names the rule used.
+

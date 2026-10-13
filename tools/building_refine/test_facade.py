@@ -154,4 +154,40 @@ class FacadeTest(unittest.TestCase):
         facade.apply(batches,(0,0,0));facade.apply(batches,(0,0,1))
         self.assertEqual(len(g.textures),facade.TEXTURE_COUNT)
 
+    def test_integer_bays_and_corner_posts_remove_sliver_windows(self):
+        # A 12.3 m wall: eight bays of 1.54 m rather than seven full bays and a sliver.
+        verts=np.array([[0,0,0],[12.3,0,0],[12.3,0,10],[0,0,0],[12.3,0,10],[0,0,10]],np.float32)
+        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(6,dtype=np.uint32))])
+        meshes,_,stats=facade.build([source],0,0)
+        panes=np.concatenate([m.vertices+m.translation for m in meshes if m.material==1])
+        widths=[]
+        for lo in np.arange(0,12.3,12.3/8):
+            inside=panes[(panes[:,0]>lo+.01)&(panes[:,0]<lo+12.3/8-.01)&(panes[:,2]>4)&(panes[:,2]<6)]
+            widths.append(np.ptp(inside[:,0]) if len(inside) else 0)
+        self.assertTrue(all(w>.5 for w in widths),widths)
+        self.assertAlmostEqual(min(widths[1:-1]),max(widths[1:-1]),places=3)
+        # Corner posts: the end bays' panes stop further from the edge.
+        self.assertGreater(panes[:,0].min(),.40);self.assertLess(panes[:,0].max(),12.3-.40)
+        self.assertLess(widths[0],min(widths[1:-1])-.1)
+
+    def test_recessed_slot_faces_keep_capture_winding(self):
+        def quad(p0,p1,p2,p3):return np.array([p0,p1,p2,p0,p2,p3],float)
+        # Main walls wound outward (CCW seen from outside); a notch face at x=5
+        # faces -x by winding although the building centre lies at +x.
+        a=quad([0,0,0],[0,0,10],[0,10,10],[0,10,0])          # x=0, normal -x
+        b=quad([20,0,0],[20,10,0],[20,10,10],[20,0,10])      # x=20, normal +x
+        c=quad([5,4,0],[5,4,10],[5,6,10],[5,6,0])            # notch, normal -x
+        verts=np.concatenate([a,b,c]).astype(np.float32)
+        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(len(verts),dtype=np.uint32))])
+        meshes,_,stats=facade.build([source],0,0)
+        self.assertEqual(stats['orientation'],'winding')
+        backing=np.concatenate([m.vertices+m.translation for m in meshes if m.material==2])
+        notch=backing[(backing[:,1]>3.99)&(backing[:,1]<6.01)&(np.abs(backing[:,0]-5)<1)]
+        self.assertTrue(len(notch));self.assertTrue(np.allclose(notch[:,0],5.55,atol=1e-4))
+        # Inconsistent winding falls back to the centre rule.
+        c2=quad([5,4,0],[5,6,0],[5,6,10],[5,4,10]);a2=quad([0,0,0],[0,10,0],[0,10,10],[0,0,10])
+        verts=np.concatenate([a2,b,c2]).astype(np.float32)
+        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(len(verts),dtype=np.uint32))])
+        self.assertEqual(facade.build([source],0,0)[2]['orientation'],'centre')
+
 if __name__=='__main__':unittest.main()

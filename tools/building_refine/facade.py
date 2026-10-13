@@ -173,9 +173,15 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     # the building to an inferred rectangular footprint.
     groups=[]
     wall_tri.sort(key=lambda t:-np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])))
+    # Outward direction: the capture's own winding when it is consistent (so a
+    # recessed slot faces into the slot, not into the building); otherwise
+    # away from the building centre.
+    walls=np.asarray(wall_tri);cross=np.cross(walls[:,1]-walls[:,0],walls[:,2]-walls[:,0])
+    area=np.linalg.norm(cross,axis=1);outward=np.einsum('ij,ij->i',walls.mean(1)-center,cross)>0
+    winding=area[outward].sum()>=.85*area.sum()
     for t in wall_tri:
         n=np.cross(t[1]-t[0],t[2]-t[0]);n/=np.linalg.norm(n)
-        if np.dot(t.mean(0)-center,n)<0:n=-n
+        if not winding and np.dot(t.mean(0)-center,n)<0:n=-n
         match=None
         for g in groups:
             if np.dot(n,g['n'])>.98 and np.max(np.abs((t-g['anchor'])@g['n']))<.60:
@@ -191,7 +197,7 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     reference=facade_pattern.reference_luminance(pattern)
     color=tuple(pattern.get('appearance',{}).get('rgb',(139,148,151)))
     panel_material=4 if wall_finish=='metal' else 3
-    bay=pattern.get('bay',{}).get('spacing',BAY)
+    bay_nominal=bay=pattern.get('bay',{}).get('spacing',BAY)
     floor=pattern.get('floor',{}).get('spacing',FLOOR)
     floor_anchor=pattern.get('floor',{}).get('anchor_z',center[2])
     group_floors=pattern.get('group',{}).get('floors',0)
@@ -215,8 +221,11 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         xy-=lo
         region=shapely.make_valid(unary_union([Polygon(q) for q in xy]))
         x0,y0,x1,y1=region.bounds
-        columns=int(np.ceil(x1/bay))
-        if cap is not None and x1>=bay and y1>=1.:
+        # An integer number of bays spans each patch, so no patch ends with a
+        # sliver window; the bay stretches or shrinks by less than half a module.
+        columns=max(1,int(round(x1/bay_nominal)))
+        bay=x1/columns
+        if cap is not None and x1>=bay_nominal and y1>=1.:
             res=max(.15,float(max(x1,y1))/1024)
             image,mask=facade_pattern.project_patch(cap,origin,u,v,n,(x1,y1),res)
             classes=facade_pattern.column_classes(image,mask,res,bay,reference,columns)
@@ -227,7 +236,7 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         for col in range(columns):
             strip=region.intersection(box(col*bay,y0-1,(col+1)*bay,y1+1))
             spans.append(strip.bounds if not strip.is_empty else None)
-        frames.append({'origin':origin,'u':u,'v':v,'n':n,'xy':xy,'t':t,'region':region,
+        frames.append({'origin':origin,'u':u,'v':v,'n':n,'xy':xy,'t':t,'region':region,'bay':bay,
                        'classes':classes['columns'],'spans':spans,'columns':columns,'stats':classes})
     # Ground-level columns: the lowest module row on the building base that is
     # tall enough for a storefront, above a short plinth stub where one exists.
@@ -311,10 +320,12 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         surface_inv=np.divide(1.,det,out=np.zeros_like(det),where=np.abs(det)>1e-9)
         area_source+=region.area
         x0,y0,x1,y1=region.bounds
+        bay=f['bay'];columns=f['columns']
         # Global floor datum aligns levels across the different facade patches.
         floor_phase=(origin[2]-floor_anchor)%floor
         for row,cy in enumerate(np.arange(-floor_phase,y1,floor)):
-            for col,cx in enumerate(np.arange(0,x1,bay)):
+            for col in range(columns):
+                cx=col*bay
                 cell=region.intersection(box(cx,cy,cx+bay,cy+floor))
                 if cell.area<1e-5:continue
                 tile_count+=1
@@ -329,12 +340,15 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                 base=span is not None and cb<=span[1]+.02 and origin[2]+cb<=zmin+1.4
                 # Stronger spandrels repeat at the observed multi-floor cadence.
                 strong=group_floors and level%group_floors==0
+                # Solid corner posts where a patch ends: glass never runs into a
+                # corner or an open edge without a mullion-sized pier.
+                left=.25 if col==0 else 0.;right=.25 if col==columns-1 else 0.
                 door=None;canopy=False
                 if kind=='pier':
                     opening=Polygon();counts['piers']+=1
                 elif col in f['ground'] and abs(f['ground'][col]-cy)<1e-6:
                     # Ground floor: storefront glazing from a low sill to a transom.
-                    opening=box(cx+.06,cb+.12,cx+bay-.06,cy+floor-.30);counts['storefront']+=1
+                    opening=box(cx+.06+left,cb+.12,cx+bay-.06-right,cy+floor-.30);counts['storefront']+=1
                     if entrance==(fi,col):door=True
                 elif base and ct-cb<1.2:
                     opening=Polygon();counts['plinths']+=1        # solid plinth, no sliver window
@@ -342,11 +356,11 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                     opening=Polygon();counts['parapets']+=1       # solid parapet, no sliver window
                 elif kind=='glazed':
                     sill=.50 if strong else .32
-                    opening=box(cx+.05,cy+sill,cx+bay-.05,cy+floor-.10);counts['glazed']+=1
+                    opening=box(cx+.05+left,cy+sill,cx+bay-.05-right,cy+floor-.10);counts['glazed']+=1
                 else:
                     # Cladding reads as solid: punched windows between wide piers.
                     sill=1.15 if strong else .95
-                    opening=box(cx+.30,cy+sill,cx+bay-.30,cy+floor-.25);counts['clad']+=1
+                    opening=box(cx+.30+left*.6,cy+sill,cx+bay-.30-right*.6,cy+floor-.25);counts['clad']+=1
                 frame=.045 if kind=='glazed' else .065
                 # Boundary modules get supported smaller rectangles instead of missing panes.
                 outer=fit_window(tile,opening) if not opening.is_empty else Polygon()
@@ -403,8 +417,8 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     sampled=sum(1 for f in frames if f['stats']['sampled'])
     return meshes,_textures(color,wall_finish),{'windows':windows,'tiles':tile_count,'patches':len(groups),
         'replaced_triangles':len(wall_tri),'roof_triangles':len(roof_pts),'source_area':area_source,'covered_area':area_new,
-        'pattern':pattern,'bay':bay,'floor':floor,'wall_color':color,'wall_finish':wall_finish,'stitched_seams':stitched_seams,
-        'modules':dict(counts),'sampled_patches':sampled,'entrance':entrance is not None}
+        'pattern':pattern,'bay':bay_nominal,'floor':floor,'wall_color':color,'wall_finish':wall_finish,'stitched_seams':stitched_seams,
+        'modules':dict(counts),'sampled_patches':sampled,'entrance':entrance is not None,'orientation':'winding' if winding else 'centre'}
 
 
 def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete"):
@@ -443,7 +457,7 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                         if base<=mesh.tex_index<base+TEXTURE_COUNT:mesh.tex_index=existing+mesh.tex_index-base
                 group.meshes=[m for m in group.meshes if m.object_id!=oid]+original+new
                 done+=1
-                print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins",flush=True)
+                print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins; patches face outward by capture {stats['orientation']}",flush=True)
                 rgb=stats['wall_color'];estimated='capture color estimate' if 'appearance' in stats['pattern'] else 'default color'
                 print(f"  {name}: {wall_finish}, RGB {rgb}, {estimated}",flush=True)
                 for axis,default in (('bay',BAY),('floor',FLOOR)):
