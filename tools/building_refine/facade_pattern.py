@@ -68,17 +68,90 @@ def panel_color(image,mask):
     return {'rgb':tuple(int(round(x)) for x in color),'samples':len(samples)}
 
 
-def detect(source,textures,groups):
-    from refine import project_face
+def capture(source,textures):
+    """Decoded capture of one building: only the textures its meshes reference."""
     used=sorted({m.tex_index for m in source if m.uvs is not None and m.tex_index<len(textures)})
-    if not used:return {}
+    if not used:return None
     remap={old:i for i,old in enumerate(used)}
     meshes=[]
     for m in source:
         if m.tex_index not in remap or m.uvs is None:continue
         part=copy.copy(m);part.tex_index=remap[m.tex_index];meshes.append(part)
     group=SimpleNamespace(meshes=meshes,textures=[textures[i] for i in used])
-    src=raster.collect(group);tex=raster.decode_textures(group)
+    return SimpleNamespace(src=raster.collect(group),tex=raster.decode_textures(group))
+
+
+def project_patch(cap,origin,u,v,n,size,res):
+    """Captured colour and coverage of one wall patch in its tiling frame."""
+    from refine import project_face
+    face=SimpleNamespace(origin=origin,u=u,v=v,normal=n,size=size)
+    image,_,mask=project_face(face,cap.src,cap.tex,res,(-.8,.8))
+    return image,mask
+
+
+def reference_luminance(pattern):
+    """Raw captured luminance of the cladding (before albedo compensation)."""
+    rgb=pattern.get('appearance',{}).get('rgb')
+    if not rgb:return 120.
+    return float(np.dot(rgb,[.2126,.7152,.0722])/1.12)
+
+
+def column_classes(image,mask,res,bay,reference,count):
+    """Classify each bay column of a patch from the capture: glazed, clad or pier.
+
+    Column means are split in two when the patch has real contrast; otherwise
+    the whole patch is one class judged against the building's cladding
+    luminance (blue, dark surfaces are glazing). Uncovered columns follow their
+    nearest sampled neighbour. A lone clad bay between glazing is a pier.
+    """
+    classes=['clad']*count
+    if count<=0:return {'columns':classes,'sampled':0,'glazing':0.,'contrast':0.}
+    gray=cv2.cvtColor(image,cv2.COLOR_RGB2GRAY).astype(float)
+    blue=image[:,:,2].astype(float)-image[:,:,0].astype(float)
+    means=np.full(count,np.nan);blues=np.full(count,np.nan)
+    for j in range(count):
+        a=int(round(j*bay/res));b=max(a+1,int(round((j+1)*bay/res)))
+        m=mask[:,a:b]
+        if m.sum()<40:continue
+        means[j]=gray[:,a:b][m].mean();blues[j]=np.median(blue[:,a:b][m])
+    known=np.isfinite(means)
+    if not known.any():return {'columns':classes,'sampled':0,'glazing':0.,'contrast':0.}
+    values=means[known]
+    lo,hi=np.percentile(values,[10,90]);contrast=float(hi-lo)
+    glazed=np.zeros(count,bool)
+    if contrast>25 and known.sum()>=4:
+        c0,c1=values.min(),values.max()
+        for _ in range(20):
+            near=np.abs(values-c0)<=np.abs(values-c1)
+            if near.all() or (~near).all():break
+            c0,c1=values[near].mean(),values[~near].mean()
+        dark=np.abs(means-c0)<=np.abs(means-c1)
+        if c1<.62*reference:glazed=known.copy()
+        elif c0<.78*reference:glazed=known&dark
+    else:
+        med=float(np.median(values));bl=float(np.nanmedian(blues))
+        if med<.65*reference or (med<.85*reference and bl>20):glazed=known.copy()
+    idx=np.flatnonzero(known)
+    for j in range(count):
+        if not known[j]:glazed[j]=glazed[idx[np.argmin(np.abs(idx-j))]]
+    classes=['glazed' if g else 'clad' for g in glazed]
+    def neighbours(j):
+        return (classes[j-1] if j>0 else None,classes[j+1] if j+1<count else None)
+    for j in range(count):
+        left,right=neighbours(j)
+        if classes[j]=='glazed' and left=='clad' and right=='clad':classes[j]='clad'
+    for j in range(count):
+        left,right=neighbours(j)
+        if classes[j]=='clad' and left=='glazed' and right=='glazed':classes[j]='pier'
+    return {'columns':classes,'sampled':int(known.sum()),
+            'glazing':float(np.mean([c=='glazed' for c in classes])),'contrast':contrast}
+
+
+def detect(source,textures,groups,cap=None):
+    from refine import project_face
+    cap=cap or capture(source,textures)
+    if cap is None:return {}
+    src,tex=cap.src,cap.tex
     candidates={'floor':[],'bay':[],'group':[]}
     colors=[]
     largest=sorted(groups,key=lambda g:-sum(np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])) for t in g['tri']))[:8]

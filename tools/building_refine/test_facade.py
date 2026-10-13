@@ -13,7 +13,7 @@ class FacadeTest(unittest.TestCase):
         meshes,textures,stats=facade.build([source],0,0)
         self.assertGreater(stats['windows'],20)
         self.assertAlmostEqual(stats['source_area'],stats['covered_area'],places=5)
-        self.assertEqual(len(textures),3)
+        self.assertEqual(len(textures),facade.TEXTURE_COUNT)
         self.assertEqual(before,test_pcg.fingerprint(source))
         self.assertTrue({1,2,3,4}.issubset({m.material for m in meshes}))
         for m in meshes:
@@ -28,7 +28,8 @@ class FacadeTest(unittest.TestCase):
             if m.material==1:
                 p=m.vertices+m.translation
                 distance=np.stack([np.abs(p[:,0]),np.abs(p[:,0]-12),np.abs(p[:,1]),np.abs(p[:,1]-10)])
-                self.assertTrue(np.isclose(distance,.14,atol=1e-5).any(axis=0).all())
+                # Window panes sit 14 cm behind the wall; entrance door leaves 40 cm.
+                self.assertTrue((np.isclose(distance,.14,atol=1e-5)|np.isclose(distance,.40,atol=1e-5)).any(axis=0).all())
 
     def test_exact_target_original_and_neighbors_survive_reapply(self):
         batches=test_pcg.fixture();g=batches[0].groups[0]
@@ -115,5 +116,42 @@ class FacadeTest(unittest.TestCase):
         for m in meshes:
             p=m.vertices+m.translation
             self.assertFalse(((p[:,0]>5.001)&(p[:,0]<7.999)).any())
+
+    def test_ground_floor_parapet_and_roof_surfacing(self):
+        source=test_pcg.mesh_from_model(test_pcg.model(),0)
+        meshes,textures,stats=facade.build([source],0,10)
+        modules=stats['modules']
+        self.assertGreaterEqual(modules['storefront'],20)
+        self.assertEqual(modules['entrance'],1)
+        self.assertTrue(stats['entrance'])
+        self.assertGreater(modules['parapets'],0)
+        self.assertEqual(stats['roof_triangles'],2)
+        roof=[m for m in meshes if m.material==5]
+        self.assertEqual(len(roof),1)
+        self.assertEqual(roof[0].tex_index,13)
+        self.assertTrue(np.allclose((roof[0].vertices+roof[0].translation)[:,2],12))
+        # No captured-material mesh is left: the roof was re-surfaced.
+        self.assertFalse([m for m in meshes if m.material==0])
+        # The canopy projects beyond the wall plane; the door is recessed deeper than panes.
+        metal=np.concatenate([m.vertices+m.translation for m in meshes if m.material==4])
+        self.assertTrue((metal[:,1]<-1.2).any() or (metal[:,1]>11.2).any() or (metal[:,0]<-1.2).any() or (metal[:,0]>13.2).any())
+        panes=np.concatenate([m.vertices+m.translation for m in meshes if m.material==1])
+        inset=np.stack([np.abs(panes[:,0]),np.abs(panes[:,0]-12),np.abs(panes[:,1]),np.abs(panes[:,1]-10)]).min(0)
+        self.assertTrue(np.isclose(inset,.40,atol=1e-5).any())
+
+    def test_low_fragments_stay_captured_and_textures_reused(self):
+        verts=np.array([[0,0,0],[10,0,0],[10,0,16],[0,0,0],[10,0,16],[0,0,16],
+                        [0,0,.5],[3,0,.5],[3,2,.5],      # ground-level non-wall fragment
+                        [0,0,16],[10,0,16],[10,4,16]],np.float32)   # roof cap
+        source=mtscene.Mesh(0xffffffff,0,np.zeros(3),verts,None,None,[(4,np.arange(12,dtype=np.uint32))])
+        meshes,textures,stats=facade.build([source],0,0)
+        self.assertEqual(stats['roof_triangles'],1)
+        captured=[m for m in meshes if m.material==0]
+        self.assertEqual(len(captured),1)
+        self.assertEqual([len(idx) for _,idx in captured[0].draw_calls],[3])
+        self.assertEqual(len(textures),facade.TEXTURE_COUNT)
+        batches=test_pcg.fixture();g=batches[0].groups[0]
+        facade.apply(batches,(0,0,0));facade.apply(batches,(0,0,1))
+        self.assertEqual(len(g.textures),facade.TEXTURE_COUNT)
 
 if __name__=='__main__':unittest.main()

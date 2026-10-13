@@ -35,4 +35,29 @@ class PatternTest(unittest.TestCase):
         self.assertAlmostEqual(result['bay']['spacing'],1.8,places=5)
         self.assertAlmostEqual(result['floor']['spacing'],3.6,places=5)
 
+    def test_column_classes_follow_capture_composition(self):
+        # Dark blue glazing, a bright cladding zone, one lone bright pier, and
+        # an uncovered column that follows its neighbour.
+        res,bay=.1,1.6
+        image=np.zeros((300,16*16,3),np.uint8);image[:]=[30,45,70]
+        for col in (5,6,7,8,12):image[:,col*16:(col+1)*16]=[150,148,140]
+        mask=np.ones(image.shape[:2],bool);mask[:,3*16:4*16]=False
+        found=pattern.column_classes(image,mask,res,bay,140.,16)
+        c=found['columns']
+        self.assertEqual(c[5:9],['clad']*4)
+        self.assertEqual(c[12],'pier')
+        self.assertEqual(c[3],'glazed')
+        self.assertEqual({c[i] for i in (0,1,2,4,9,10,11,13,14,15)},{'glazed'})
+        self.assertEqual(found['sampled'],15)
+        # A uniformly bright patch is cladding; a uniformly dark blue one is glazing.
+        bright=np.full((300,160,3),[150,148,140],np.uint8)
+        self.assertEqual(set(pattern.column_classes(bright,np.ones((300,160),bool),res,bay,140.,10)['columns']),{'clad'})
+        self.assertEqual(set(pattern.column_classes(image[:,:160].copy()*0+np.array([30,45,70],np.uint8),np.ones((300,160),bool),res,bay,140.,10)['columns']),{'glazed'})
+        # Without coverage every column defaults to cladding.
+        self.assertEqual(pattern.column_classes(image,np.zeros(mask.shape,bool),res,bay,140.,16)['sampled'],0)
+
+    def test_reference_luminance_undoes_albedo_compensation(self):
+        self.assertAlmostEqual(pattern.reference_luminance({'appearance':{'rgb':(112,112,112)}}),100.,places=5)
+        self.assertEqual(pattern.reference_luminance({}),120.)
+
 if __name__=='__main__':unittest.main()

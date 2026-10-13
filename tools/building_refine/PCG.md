@@ -98,3 +98,26 @@ patches have compatible normals and bounded fit error. Vertical corners and
 open boundaries remain separate. Geometry is mapped back onto the captured
 surface to avoid introducing cracks. Each generated glass pane is planar, so
 a warped source quad cannot split its reflection diagonally.
+
+### Capture-typed modules, base, crown and roof
+
+Each wall patch is projected from the original textures and every bay column
+is classified from its captured luminance against the building's cladding
+estimate: dark, blue columns become **glazed** curtain-wall modules (near
+full-bay panes over a slim spandrel); bright columns become **clad** modules
+(punched windows between wide piers); a lone clad bay between glazing becomes
+a solid, slightly proud **pier**. A patch with little column contrast is one
+class. Uncovered columns follow their nearest sampled neighbour; without any
+capture every column is clad, as before. The log reports the module counts.
+
+The lowest full-height module row on the building base becomes a storefront
+(low sill, transom); a short partial row beneath it is a solid plinth. The
+widest ground-level patch with at least three storefront bays gets an
+entrance: recessed door leaves under a projecting metal canopy. Partial top
+rows shorter than 70% of a floor are solid parapets, and every patch top edge
+carries a proud coping strip. Non-wall captured triangles more than 2 m above
+the wall base (roof caps, setbacks, roof clutter) keep their geometry but are
+re-surfaced with a generated roof membrane texture (1 m seams, 4 m repeat)
+using the roof PBR finish; fragments near the ground stay captured. The
+generated atlas is now four textures (panel, panes, backing, roof).
+
