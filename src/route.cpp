@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 #include <GeographicLib/Geodesic.hpp>
 
 #pragma comment(lib, "winhttp.lib")
@@ -83,8 +84,9 @@ bool JsonNumber(const std::string& json, const char* key, size_t from, double& o
 
 } // namespace
 
-std::string HttpGet(const std::string& url, std::string* error)
+std::string HttpGet(const std::string& url, std::string* error, int* statusOut)
 {
+    if (statusOut) *statusOut = 0;
     auto fail = [&](const char* what) {
         char buf[160];
         snprintf(buf, sizeof(buf), "%s (error %lu)", what, GetLastError());
@@ -134,11 +136,9 @@ std::string HttpGet(const std::string& url, std::string* error)
     if (connect) WinHttpCloseHandle(connect);
     WinHttpCloseHandle(session);
     if (what) return fail(what);
-    if (status != 200)
-    {
-        if (error) *error = "HTTP " + std::to_string(status) + " from " + std::string(url, 0, url.find('/', 8));
-        return std::string();
-    }
+    if (statusOut) *statusOut = (int)status;
+    if (status != 200 && error)
+        *error = "HTTP " + std::to_string(status) + " from " + std::string(url, 0, url.find('/', 8));
     return body;
 }
 
@@ -165,22 +165,45 @@ bool Geocode(const std::string& query, double& lon, double& lat, std::string& na
         name = buf;
         return true;
     }
-    std::string body = HttpGet("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + UrlEncode(query), &error);
-    if (body.empty())
+    // Comma-separated parts are matched strictly by the geocoder, so a query
+    // with one unknown qualifier finds nothing. Retry with fewer parts: all,
+    // then first + last (place + region), then the first part alone.
+    std::vector<std::string> parts;
+    for (size_t p = 0; p <= query.size();)
     {
-        if (error.empty()) error = "empty answer from the geocoder";
-        return false;
+        size_t c = query.find(',', p);
+        if (c == std::string::npos) c = query.size();
+        std::string part = query.substr(p, c - p);
+        size_t a = part.find_first_not_of(" \t"), b = part.find_last_not_of(" \t");
+        if (a != std::string::npos) parts.push_back(part.substr(a, b - a + 1));
+        p = c + 1;
     }
-    std::string latText, lonText;
-    if (!JsonString(body, "lat", 0, latText) || !JsonString(body, "lon", 0, lonText))
+    std::vector<std::string> attempts;
+    attempts.push_back(query);
+    if (parts.size() > 2) attempts.push_back(parts.front() + ", " + parts.back());
+    if (parts.size() > 1) attempts.push_back(parts.front());
+    for (size_t i = 0; i < attempts.size(); i++)
     {
-        error = "no match for \"" + query + "\"";
-        return false;
+        if (i) Sleep(1100);   // the public geocoder allows one request per second
+        int status = 0;
+        std::string body = HttpGet("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + UrlEncode(attempts[i]),
+                                   &error, &status);
+        if (status != 200)
+        {
+            if (error.empty()) error = "no answer from the geocoder";
+            return false;
+        }
+        std::string latText, lonText;
+        if (!JsonString(body, "lat", 0, latText) || !JsonString(body, "lon", 0, lonText))
+            continue;
+        lat = strtod(latText.c_str(), nullptr);
+        lon = strtod(lonText.c_str(), nullptr);
+        if (!JsonString(body, "display_name", 0, name)) name = attempts[i];
+        error.clear();
+        return true;
     }
-    lat = strtod(latText.c_str(), nullptr);
-    lon = strtod(lonText.c_str(), nullptr);
-    if (!JsonString(body, "display_name", 0, name)) name = query;
-    return true;
+    error = "no match for \"" + query + "\" (try a place name plus its state or country)";
+    return false;
 }
 
 bool RouteBetween(double lon0, double lat0, double lon1, double lat1,
@@ -190,18 +213,20 @@ bool RouteBetween(double lon0, double lat0, double lon1, double lat1,
     snprintf(url, sizeof(url),
              "https://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson",
              lon0, lat0, lon1, lat1);
-    std::string body = HttpGet(url, &error);
-    if (body.empty())
-    {
-        if (error.empty()) error = "empty answer from the router";
-        return false;
-    }
+    int status = 0;
+    std::string body = HttpGet(url, &error, &status);
     std::string code;
     if (JsonString(body, "code", 0, code) && code != "Ok")
     {
         std::string message;
         JsonString(body, "message", 0, message);
         error = "router: " + code + (message.empty() ? "" : " - " + message);
+        if (code == "NoRoute") error += " (no road route between the two points)";
+        return false;
+    }
+    if (body.empty() || status != 200)
+    {
+        if (error.empty()) error = "empty answer from the router";
         return false;
     }
     size_t coords = body.find("\"coordinates\":");

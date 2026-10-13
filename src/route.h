@@ -26,8 +26,9 @@ struct RoutePlan
     std::vector<RouteWaypoint> waypoints;
 };
 
-// HTTPS GET. Returns the body; on failure returns "" and sets `error`.
-std::string HttpGet(const std::string& url, std::string* error);
+// HTTPS GET. Returns the body (also for an HTTP error status, which goes to
+// `status`); on a transport failure returns "" and sets `error`.
+std::string HttpGet(const std::string& url, std::string* error, int* status = nullptr);
 
 // "lat, lon" / "lat lon" typed directly, else an address for the geocoder.
 bool ParseLatLon(const std::string& text, double& lat, double& lon);

@@ -36,8 +36,8 @@ public:
 
     // Route capture (Capture > Route Capture): settings and requests for the
     // app, which flies Google Earth along the route and captures; its progress.
-    char  routeFrom[256] = "";
-    char  routeTo[256] = "";
+    char  routeFrom[256] = "Bowman Bay, Washington";
+    char  routeTo[256] = "Cranberry Lake Campground, Washington";
     float routeSpacing = 150.0f;   // metres between cameras along the route
     float routeHeight = 250.0f;    // camera height above the ground (m)
     float routeTilt = 55.0f;       // degrees, 0 = straight down
