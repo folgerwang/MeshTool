@@ -526,12 +526,22 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     vkAllocateMemory(m_ctx->device, &allocInfo, nullptr, &tex.memory);
     vkBindImageMemory(m_ctx->device, tex.image, tex.memory, 0);
 
-    // Transition & copy
-    VkCommandBuffer cmd = m_ctx->commandBuffers[0];
+    // Transition & copy with a one-off command buffer. This runs in the
+    // middle of a frame (the drive simulation uploads its sky while the
+    // frame's command buffer is recording), so it must not touch the frame
+    // command buffers: resetting one of those mid-frame submitted it while
+    // it was still being written, which corrupted the driver and crashed
+    // later inside an allocation.
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = m_ctx->commandPool;
+    cmdAllocInfo.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_ctx->device, &cmdAllocInfo, &cmd);
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkResetCommandBuffer(cmd, 0);
     vkBeginCommandBuffer(cmd, &beginInfo);
 
     VkImageMemoryBarrier barrier{};
@@ -564,6 +574,7 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     submitInfo.pCommandBuffers = &cmd;
     vkQueueSubmit(m_ctx->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(m_ctx->graphicsQueue);
+    vkFreeCommandBuffers(m_ctx->device, m_ctx->commandPool, 1, &cmd);
 
     vkutil::DestroyBuffer(*m_ctx, staging);
 

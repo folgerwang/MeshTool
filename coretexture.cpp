@@ -38,7 +38,20 @@ void Dxt1Convertor::DecodeDxt1Texture(uint32_t* dst_iamge_buffer, uint32_t w, ui
     {
         for (uint32_t b_x = 0; b_x < block_w; b_x++)
         {
-            DecodeDxt1Block(dst_iamge_buffer, b_x * 4, b_y * 4, w, dxt_src + (b_y * block_w + b_x) * 8);
+            const uint8_t* block = dxt_src + (b_y * block_w + b_x) * 8;
+            if (b_x * 4 + 4 <= w && b_y * 4 + 4 <= h)
+            {
+                DecodeDxt1Block(dst_iamge_buffer, b_x * 4, b_y * 4, w, block);
+                continue;
+            }
+            // Edge block of a texture whose size is not a multiple of 4: decode
+            // it aside and copy the pixels that exist (the block writer has no
+            // bounds and would run past the buffer).
+            uint32_t tmp[16];
+            DecodeDxt1Block(tmp, 0, 0, 4, block);
+            for (uint32_t py = 0; py < 4 && b_y * 4 + py < h; py++)
+                for (uint32_t px = 0; px < 4 && b_x * 4 + px < w; px++)
+                    dst_iamge_buffer[(b_y * 4 + py) * w + b_x * 4 + px] = tmp[py * 4 + px];
         }
     }
 }

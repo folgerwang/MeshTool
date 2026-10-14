@@ -36,8 +36,9 @@ struct VulkanContext
 
     // Synchronization
     static const int MAX_FRAMES_IN_FLIGHT = 2;
-    std::vector<VkSemaphore> imageAvailableSemaphores;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkSemaphore> imageAvailableSemaphores;   // per frame in flight
+    std::vector<VkSemaphore> renderFinishedSemaphores;   // per swapchain image: presentation may still wait on
+                                                         // it after the frame's fence has signalled
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
     uint32_t imageIndex = 0;
@@ -94,6 +95,8 @@ private:
     void CreateCommandBuffers();
     void CreateDescriptorPool();
     void CreateSyncObjects();
+    void CreateRenderFinishedSemaphores();
+    void DestroyRenderFinishedSemaphores();
 
     void CleanupSwapchain();
 };
