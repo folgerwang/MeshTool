@@ -867,6 +867,8 @@ void MeshToolApp::UpdateRefine()
             if (settings.target.empty()) return;
         }
         settings.tiledFacade = m_ui->refinePCG && m_ui->refineTiledFacade;
+        settings.autoFit = settings.tiledFacade && m_ui->refineAutoFit;
+        settings.fitIterations = m_ui->refineFitIterations;
         settings.wallFinish = m_ui->refineWallFinish == 1 ? "metal" : "painted-concrete";
         settings.glass = m_ui->refineGlass;
         settings.reflectiveGlass = m_ui->refineReflectiveGlass;

@@ -1151,6 +1151,12 @@ void MeshToolUI::DrawRefineDialog()
             if (refinePCG && refineTiledFacade)
             {
                 ImGui::Combo("Wall finish", &refineWallFinish, "Painted concrete\0Brushed metal\0");
+                ImGui::Checkbox("Fit to original with multiple cameras", &refineAutoFit);
+                if (refineAutoFit)
+                {
+                    ImGui::SliderInt("Fit iterations", &refineFitIterations, 1, 6);
+                    ImGui::TextWrapped("Repeats render and compare using eight views of the saved capture. Keeps the baseline if separate validation views get worse. Multiple iterations take longer.");
+                }
                 ImGui::TextWrapped("Panel color is estimated from the original capture. Choose the finish: capture texture alone cannot reliably identify the underlying material.");
             }
             if (!(refinePCG && refineTiledFacade)) ImGui::TextDisabled("Preserves captured shape; unsupported reconstruction uses surface details.");

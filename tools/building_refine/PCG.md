@@ -56,16 +56,22 @@ For an explicitly glass-clad building, enable **Reflective glass facade** in the
 
 ## Tiled window facade replacement
 
-PCG now defaults to **Replace walls with tiled windows** in the editor. This
-replaces vertical captured triangles with facade modules: fine-grain panel
+PCG defaults to **Replace walls with tiled windows** in the editor. It first
+recovers continuous facade planes from area-weighted wall directions and depth
+clusters. Repeated windows cross internal scan-fragment boundaries instead of
+being cropped separately inside every triangle patch. Strongly orthogonal
+buildings use a shared set of wall directions; setbacks retain separate planes.
+Supported walls are rebuilt with facade modules: fine-grain panel
 textures, metal frames, glass recessed 14 cm, and dark interior backing.
-The original wall triangles are absent from the refined version. Roofs and
-non-wall triangles retain their captured geometry. The full original is saved
+Replaced wall triangles are absent from the refined version. Roofs and
+unsupported surfaces retain their captured geometry. The full original is saved
 for comparison. Disable this option to use the earlier trim-only workflow.
 
 The facade is a procedural design, not a recovery of the building's real window
-layout. Local plane clipping preserves capture openings and overall shape;
-existing missing geometry and distorted roofs are not reconstructed by this step.
+layout. Small capture cracks are closed and noisy boundaries simplified; larger
+openings and disconnected wings remain separate. Wall positions are regularized
+within bounded depth clusters instead of following every captured wrinkle.
+Distorted roofs and larger missing surfaces are not reconstructed by this step.
 Meshes are batched by material and shared textures are reused when reapplied.
 This path does not need SAM/CLIP and skips scene cleanup. CLI: `--tiled-facade`.
 
@@ -81,6 +87,10 @@ defaults (1.6 m bay, 3.4 m floor), and the log states which values were detected
 inferred, or defaulted. Original textures, rather than generated tiles, drive
 reapplication.
 
+Fitted sill height adjusts ordinary rows while retaining the stronger band at
+the detected multi-floor cadence. That band's datum comes from its own captured
+phase, so window-height optimization cannot erase the grouped-floor design.
+
 ### Wall color and finish
 
 Tiled panel color is estimated from bright structural regions of the original
@@ -92,6 +102,9 @@ uses metallic shading with a directional grain texture. Select **Wall finish**
 in the PCG dialog, or pass `--wall-finish painted-concrete` / `--wall-finish metal`.
 Glass and metal window frames keep their own materials. Reapply regenerates
 from the original and reuses matching texture atlases rather than stacking them.
+
+Each generated glass pane lies on its recovered facade plane. When no supported
+planes can be recovered, the older captured-surface method remains the fallback.
 
 Internal diagonal mesh joins are stitched before window layout when neighboring
 patches have compatible normals and bounded fit error. Vertical corners and
@@ -136,3 +149,71 @@ either of which otherwise places the dark backing in front of the wall. A
 patch whose rays give no majority keeps the centre-outward rule. The log
 reports how many patches were turned.
 
+### Iterative multi-camera fitting
+
+The PCG dialog's **Fit to original with multiple cameras** option runs 1–6
+iterations (default 3). It renders eight fixed 512-pixel orthographic views of the saved
+original and the actual generated geometry. Four alternating views drive a
+bounded coordinate search over window sill/jamb proportions, bay spacing, and
+horizontal/vertical grid offsets, with progressively smaller steps. Detected
+per-face bright-band phases can anchor the window grid to the capture. Panel and glass colors
+are seeded from original texture samples in those four views, including separate
+palettes for differently lit facade directions. A shared horizontal grid is
+also tried across neighboring wall patches. Recovered facade planes and detected
+floor spacing stay fixed during the search.
+
+The other four views are used only for the final acceptance check. The objective
+combines multiscale unlit RGB error, local contrast/structure agreement (weight
+0.75), silhouette IoU, and depth error. The structural term penalizes shifted
+window rows even when average color is unchanged. A candidate
+must improve the training views, not worsen the mean validation score, and pass
+per-view shape/depth/regression limits. On regularized facades the relative
+limits allow up to 0.01 silhouette IoU loss and 0.65 m mean depth increase;
+surface-following fallback keeps the tighter 0.002 / 0.05 m limits. Otherwise the normal tiled baseline is
+kept. Insufficient textured wall coverage skips the fit. This is bounded local
+optimization, not proof of the real architectural layout or a global optimum;
+unlit texture comparison does not evaluate dynamic PBR lighting/reflections.
+The viewport glass shader uses Fresnel-weighted reflections, so fitted pane
+colors remain visible head-on instead of being overwhelmed by an artificial
+minimum sky reflection.
+
+Each run writes `camera_fit/<batch>_<group>_<object>/fit.json` and `cameras.png`
+in the app's refinement work directory. The sheet shows capture, baseline, and
+best candidate; `accepted` in the report says whether that candidate was used.
+Original meshes and textures remain embedded, and reapplying starts from them.
+CLI input and output paths must differ, including links to the same file.
+
+```powershell
+python tools/building_refine/refine.py original.mtscene fitted.mtscene --tiled-facade --auto-fit --fit-iterations 3 --target 0:0:175 --debug-dir fit_reports
+# The native --refine command also accepts --auto-fit and --fit-iterations.
+```
+
+When the surrounding scene is available, base recovery reads nearby road,
+ground and building triangles without changing their objects. Coplanar lower
+wall fragments support the reconstruction; a well-supported local ground level
+and a facade span present at three higher elevations allow bounded downward
+continuation. Separate wings remain separate, and absent ground evidence leaves
+the base unchanged. Recovered lower walls include inferred geometry, not a new
+capture of entrances or storefront details. The recovery parameters record
+donor object IDs, observed area, inferred completion area and ground support.
+
+For context-completed convex towers, the upper captured wall outline can form
+a continuous facade with joined corners. This requires at least 85% of the
+upper wall area to lie within two metres of the simplified outline. Captured
+rooftops remain; the closed shell replaces lower scan fragments, including tiny
+degenerate triangles that otherwise remain as floating specks. Unsupported or
+concave outlines retain the patch-based path. Near-parallel overlapping patches
+are assigned to the stronger wall; narrow tails are removed before windowing.
+
+Window rows can use a repeated `row_offsets` sequence in
+fractions of a bay: `[0, 0.5]` alternates half-window offsets, while `[0, 0, 0.5]`
+uses a three-floor cycle. Row indices use the floor datum rather than restarting
+at each mesh patch. Boundary windows remain clipped to the facade. Per-face
+capture detection requires three observed cycles and consistent phase; missing
+or low-contrast pixels do not justify staggering. Multi-camera fitting compares
+aligned, alternating and three-row layouts, with held-out validation before a
+candidate replaces the current layout.
+
+This uses virtual camera captures of existing data. It does not acquire new
+Google Earth imagery. Multiple iterations
+rebuild and compare real window meshes; large, fragmented buildings take longer.

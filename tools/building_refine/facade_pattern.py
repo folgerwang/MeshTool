@@ -44,7 +44,63 @@ def image_pattern(image,mask,res):
         if name=='floor':values=values[::-1];valid=valid[::-1]
         value=period(values,valid,res,limits)
         if value:result[name]=value
+    # Averaging staggered rows can turn a bay into its half/quarter harmonic.
+    # Recover horizontal spacing from individual floor bands before phase fit.
+    if 'floor' in result:
+        floor=result['floor']['spacing'];phase=result['floor']['phase']
+        bottom=gray[::-1];covered=mask[::-1];bays=[]
+        for z in np.arange(phase,len(gray)*res-floor,floor):
+            a=int((z+.25*floor)/res);b=int((z+.8*floor)/res)
+            if b-a<3:continue
+            m=covered[a:b];values=(bottom[a:b]*m).sum(0)/np.maximum(m.sum(0),1)
+            candidate=period(values,m.mean(0)>.8,res,(1.,4.))
+            if candidate:bays.append(candidate)
+        if len(bays)>=3:
+            best=max(bays,key=lambda q:sum(abs(v['spacing']-q['spacing'])<.15 for v in bays))
+            agree=[v for v in bays if abs(v['spacing']-best['spacing'])<.15]
+            if len(agree)>=max(3,len(bays)*.7):
+                result['bay']={**best,'row_samples':len(agree)}
     return result
+
+
+def row_pattern(image,mask,res,bay,floor,floor_phase=0.):
+    """Estimate a repeated 2-4 floor sequence of horizontal window phases.
+
+    Missing pixels never vote. Require three observed cycles and consistent
+    phase within each row class before preferring staggering to aligned rows.
+    """
+    gray=cv2.cvtColor(image,cv2.COLOR_RGB2GRAY).astype(float)[::-1]
+    mask=np.asarray(mask,bool)[::-1]
+    rows=[];phases=[]
+    x=(np.arange(gray.shape[1])+.5)*res
+    if len(x)*res<bay*4:return None
+    for row in range(int(np.floor(-floor_phase/floor)),int(np.ceil((len(gray)*res-floor_phase)/floor))):
+        low=int(np.ceil((floor_phase+(row+.25)*floor)/res))
+        high=int(np.floor((floor_phase+(row+.8)*floor)/res))
+        if low<0 or high>len(gray) or high-low<3:continue
+        m=mask[low:high];valid=m.mean(0)>.8
+        if valid.mean()<.65:continue
+        signal=(gray[low:high]*m).sum(0)/np.maximum(m.sum(0),1)
+        signal-=cv2.GaussianBlur(signal.reshape(1,-1),(0,1),sigmaX=max(2.,bay/res)).ravel()
+        values=signal[valid];values=values-values.mean()
+        if np.std(values)<3:continue
+        coefficient=np.mean(values*np.exp(-2j*np.pi*x[valid]/bay))
+        if abs(coefficient)*np.sqrt(2)/np.std(values)<.4:continue
+        rows.append(row);phases.append(-np.angle(coefficient)/(2*np.pi))
+    if len(rows)<6:return None
+    rows=np.array(rows);phasors=np.exp(2j*np.pi*np.array(phases))
+    aligned=abs(phasors.mean())
+    for cycle in (2,3,4):
+        classes=[phasors[rows%cycle==i] for i in range(cycle)]
+        if any(len(c)<3 for c in classes):continue
+        consistency=float(np.mean([abs(c.mean()) for c in classes]))
+        if consistency<.9 or consistency<aligned+.18:continue
+        phase=np.angle([c.mean() for c in classes])/(2*np.pi)
+        offsets=(phase-phase[0])%1
+        offsets=np.where(np.abs(offsets-np.round(offsets*4)/4)<.06,np.round(offsets*4)/4,offsets)%1
+        return dict(offsets=np.round(offsets,3).tolist(),phase=float((phase[0]%1)*bay),
+                    anchor_z=float(floor_phase),confidence=consistency,observed_rows=len(rows))
+    return None
 
 
 def panel_color(image,mask):
@@ -153,7 +209,7 @@ def detect(source,textures,groups,cap=None):
     if cap is None:return {}
     src,tex=cap.src,cap.tex
     candidates={'floor':[],'bay':[],'group':[]}
-    colors=[]
+    colors=[];faces=[]
     largest=sorted(groups,key=lambda g:-sum(np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])) for t in g['tri']))[:8]
     for g in largest:
         n=g['n'];u=np.cross([0.,0.,1.],n);u/=np.linalg.norm(u);v=np.cross(n,u)
@@ -168,6 +224,15 @@ def detect(source,textures,groups,cap=None):
         color=panel_color(image,mask)
         if color:colors.append(color)
         found=image_pattern(image,mask,res)
+        if found:
+            # Per-face phases let the window grid follow the capture on that face.
+            record=dict(normal=n.tolist(),origin=origin.tolist(),**{k:dict(v) for k,v in found.items()})
+            if 'floor' in found and 'bay' in found:
+                rows=row_pattern(image,mask,res,found['bay']['spacing'],found['floor']['spacing'],found['floor']['phase'])
+                if rows:
+                    rows['anchor_z']=float(origin[2]+rows['anchor_z']*v[2])
+                    record['rows']=rows
+            faces.append(record)
         # Wide bright/dark groups survive low-resolution captures even when
         # individual floors do not. Sample half-width strips to avoid averaging
         # together facades with different illumination or occlusion.
@@ -184,7 +249,7 @@ def detect(source,textures,groups,cap=None):
             value['anchor_z']=float(origin[2]+value['phase']*v[2])
             value['weight']=value['confidence']*min(value['cycles'],15)*float(mask.mean())
             candidates[name].append(value)
-    result={}
+    result={'faces':faces} if faces else {}
     if colors:
         samples=np.asarray([c['rgb'] for c in colors],float)
         light=samples@np.array([.2126,.7152,.0722])

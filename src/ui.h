@@ -69,6 +69,8 @@ public:
     bool  refineRunning = false;
     bool  refinePCG = false;
     bool  refineTiledFacade = true;
+    bool  refineAutoFit = true;
+    int   refineFitIterations = 3;
     int   refineWallFinish = 0; // painted concrete or brushed metal
     int   refineScope = 0; // 0 selected, 1 all segmented buildings
     bool  refineGlass = true;

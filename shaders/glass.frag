@@ -59,11 +59,12 @@ void main(void)
     // Schlick Fresnel for glass (F0 = 0.04): weak head-on, strong at grazing angles.
     float cosT = clamp(dot(N, V), 0.0, 1.0);
     float fresnel = 0.04 + 0.96 * pow(1.0 - cosT, 5.0);
-    float k = clamp(reflectivity * (0.80 + 0.20 * fresnel), 0.0, 1.0) * pane;
+    // Let fitted pane tint survive head-on. An 80% reflection floor hid nearly
+    // all capture-derived color and made every facade look like the same sky.
+    float k = clamp(reflectivity * fresnel, 0.0, 1.0) * pane;
 
     vec3 R = reflect(-V, N);
-    vec3 tint = mix(vec3(0.10, 0.19, 0.24), base * 0.45, 0.20);
-    vec3 color = mix(tint, Sky(R), k);
+    vec3 color = mix(base, Sky(R), k);
     float sun = pow(max(dot(R, kSunDir), 0.0), 600.0) * 4.0 * reflectivity * pane;
     color += vec3(1.0, 0.97, 0.9) * sun;
 

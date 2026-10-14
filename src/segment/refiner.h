@@ -15,6 +15,8 @@ struct RefineSettings
     bool        noSam = false; // optional CLI outline-only mode
     bool        pcg = false;
     bool        tiledFacade = false;
+    bool        autoFit = false;
+    int         fitIterations = 3;
     std::string wallFinish = "painted-concrete";
     std::string target; // exact batch:group:object index; empty means batch operation
     bool        reflectiveGlass = false; // explicit facade material override

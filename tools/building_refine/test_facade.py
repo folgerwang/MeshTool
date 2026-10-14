@@ -7,6 +7,31 @@ import mtscene
 import test_pcg
 
 class FacadeTest(unittest.TestCase):
+    def test_surface_projection_keeps_overlap_order_and_boundary_fallback(self):
+        xy=np.array([[[0.,0.],[1.,0.],[0.,1.]],[[0.,0.],[1.,0.],[0.,1.]]])
+        z=np.array([[0.,1.,2.],[10.,11.,12.]])
+        a=xy[:,1]-xy[:,0];b=xy[:,2]-xy[:,0]
+        points=np.array([[.2,.3],[1.,0.],[2.,0.]])
+        np.testing.assert_allclose(facade._surface_heights(points,xy,z,a,b,np.ones(2)),[.8,1.,1.])
+
+    def test_multiple_facade_palettes_reuse_atlases_on_reapply(self):
+        batches=test_pcg.fixture();g=batches[0].groups[0]
+        build=facade.build
+        palettes=[dict(normal=n,wall_color=c,glass_color=[35,45,55]) for n,c in
+                  [([1,0,0],[150,160,170]),([-1,0,0],[120,130,140]),([0,1,0],[180,170,160])]]
+        def colored(*args,**kwargs):
+            if len(args)>5:return build(*args,**kwargs)
+            parameters={**kwargs.pop('parameters',{}),'face_colors':palettes,'align_grid':True}
+            return build(*args,**kwargs,parameters=parameters)
+        with patch('facade.build',side_effect=colored):
+            facade.apply(batches,(0,0,0));count=len(g.textures)
+            self.assertGreater(count,3)
+            first=[test_pcg.fingerprint(m) for m in g.meshes]
+            facade.apply(batches,(0,0,0))
+            self.assertEqual(count,len(g.textures))
+            self.assertEqual(first,[test_pcg.fingerprint(m) for m in g.meshes])
+            self.assertTrue(all(m.tex_index==0xffffffff or m.tex_index<count for m in g.meshes))
+
     def test_replaces_wall_surfaces_with_recessed_window_geometry(self):
         source=test_pcg.mesh_from_model(test_pcg.model(),0)
         before=test_pcg.fingerprint(source)

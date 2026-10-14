@@ -8,6 +8,7 @@ import copy
 from functools import lru_cache
 import numpy as np
 import cv2
+import numba
 import shapely
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
@@ -16,6 +17,68 @@ import raster
 
 BAY, FLOOR = 1.6, 3.4
 
+
+def wall_directions(normals,weights):
+    """Stable horizontal facade directions; neighboring corners stay separate."""
+    axes=[];sums=[]
+    for i in np.argsort(-np.asarray(weights)):
+        n=np.array([normals[i][0],normals[i][1],0.],float)
+        length=np.linalg.norm(n)
+        if length<1e-8:continue
+        n/=length
+        match=next((j for j,a in enumerate(axes) if np.dot(n,a)>np.cos(np.deg2rad(8))),None)
+        if match is None:axes.append(n);sums.append(n*weights[i])
+        else:
+            sums[match]+=n*weights[i]
+            axes[match]=sums[match]/np.linalg.norm(sums[match])
+    return axes
+
+
+@numba.njit(cache=True)
+def _surface_heights(points,xy,z,a,b,inv):
+    """First supporting triangle, matching captured draw order at overlaps."""
+    heights=np.empty(len(points),np.float64)
+    for i in range(len(points)):
+        found=False
+        for j in range(len(xy)):
+            if inv[j]==0:continue
+            dx,dy=points[i,0]-xy[j,0,0],points[i,1]-xy[j,0,1]
+            u=(dx*b[j,1]-dy*b[j,0])*inv[j]
+            v=(a[j,0]*dy-a[j,1]*dx)*inv[j]
+            if u>=-1e-5 and v>=-1e-5 and u+v<=1.00001:
+                heights[i]=z[j,0]+u*(z[j,1]-z[j,0])+v*(z[j,2]-z[j,0])
+                found=True;break
+        if not found:
+            best=np.inf
+            for j in range(len(xy)):
+                for k in range(3):
+                    distance=(points[i,0]-xy[j,k,0])**2+(points[i,1]-xy[j,k,1])**2
+                    if distance<best:best=distance;heights[i]=z[j,k]
+    return heights
+
+
+@numba.njit(cache=True)
+def _window_rectangle(supported,xs,ys):
+    best=np.zeros(4,np.float64);score=0.
+    for first in range(len(ys)-1):
+        columns=np.ones(len(xs)-1,np.bool_)
+        for last in range(first,len(ys)-1):
+            columns &= supported[last]
+            height=ys[last+1]-ys[first]
+            if height<.75:continue
+            start=-1
+            for col in range(len(xs)):
+                if col<len(columns) and columns[col]:
+                    if start<0:start=col
+                elif start>=0:
+                    width=xs[col]-xs[start]
+                    area=(width-.13)*(height-.13)
+                    if width>=.48 and area>score:
+                        best[:]=xs[start],ys[first],xs[col],ys[last+1]
+                        score=area
+                    start=-1
+    return best,score
+
 def _polygons(g):
     if g.is_empty: return []
     if g.geom_type == 'Polygon': return [g]
@@ -23,7 +86,7 @@ def _polygons(g):
 
 
 @lru_cache(maxsize=32)
-def _textures(color=(139,148,151),finish="painted-concrete"):
+def _textures(color=(139,148,151),finish="painted-concrete",glass_color=(52,86,108)):
     # Seeded high-resolution micrograin and brushed finish, not enlarged capture.
     rng=np.random.default_rng(1741)
     n=512
@@ -37,7 +100,7 @@ def _textures(color=(139,148,151),finish="painted-concrete"):
     panes=np.zeros((n,n,3),np.uint8)
     for row in range(8):
         for col in range(8):
-            tint=np.array([52,86,108])+rng.uniform(-10,10)
+            tint=np.array(glass_color)+rng.uniform(-10,10)
             grad=np.linspace(6,-6,64)[:,None,None]
             panes[row*64:(row+1)*64,col*64:(col+1)*64]=np.clip(tint+grad,0,255)
     images.append(panes)
@@ -75,23 +138,9 @@ def fit_window(tile, opening):
     ys=np.unique(np.r_[np.linspace(y0,y1,19),[y for b in bounds for y in (b[1],b[3])]])
     cells=shapely.box(xs[:-1][None,:],ys[:-1,None],xs[1:][None,:],ys[1:,None])
     supported=shapely.covers(available.buffer(1e-7),cells)
-    best=None;score=0.
-    for first in range(len(ys)-1):
-        columns=np.ones(len(xs)-1,dtype=bool)
-        for last in range(first,len(ys)-1):
-            columns &= supported[last]
-            height=ys[last+1]-ys[first]
-            if height<.75:continue
-            edges=np.diff(np.r_[False,columns,False].astype(np.int8))
-            for a,b in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
-                width=xs[b]-xs[a]
-                if width<.48:continue
-                # Prefer more glass area, with deterministic traversal for ties.
-                area=(width-.13)*(height-.13)
-                if area>score:
-                    candidate=box(xs[a],ys[first],xs[b],ys[last+1])
-                    if tile.buffer(1e-6).covers(candidate):best=candidate;score=area
-    return best if best is not None else Polygon()
+    bounds,score=_window_rectangle(supported,xs,ys)
+    candidate=box(*bounds) if score>0 else Polygon()
+    return candidate if tile.buffer(1e-6).covers(candidate) else Polygon()
 
 
 def stitch_internal_seams(groups):
@@ -181,14 +230,29 @@ def orient_outward(groups,all_tri,center):
     return flipped
 
 
-def build(source, oid, texture_base, source_textures=None, wall_finish="painted-concrete"):
+def build(source, oid, texture_base, source_textures=None, wall_finish="painted-concrete",
+          parameters=None, detected_pattern=None):
     """Return replacement meshes, textures, and metrics; no input mesh mutation."""
     empty={'windows':0,'replaced_triangles':0,'patches':0}
     if not source or not any(len(m.vertices) for m in source):
         return [],[],empty
+    parameters=parameters or {}
+    if parameters.get('regular_facades',True):
+        import regular_facade
+        import facade_pattern
+        proxy,planes,regular_stats=regular_facade.rebuild(source,parameters.get('plane_tolerance',.8),parameters.get('base_recovery'))
+        if planes:
+            pattern=detected_pattern if detected_pattern is not None else (facade_pattern.detect(source,source_textures,planes) if source_textures else {})
+            result=build(proxy,oid,texture_base,source_textures,wall_finish,
+                         {**parameters,'regular_facades':False,'align_grid':True},pattern)
+            result[2]['regularization']=regular_stats
+            return result
     center=np.mean([m.translation+np.mean(m.vertices,axis=0) for m in source if len(m.vertices)],axis=0)
     wall_tri=[]; retained=[]; roof_tri=[]; parts=[]
     for m in source:
+        # Surfaces the plane recovery left as captured (roofs, unsupported
+        # walls) are never windowed; their roof caps are still re-surfaced.
+        keep=getattr(m,'pcg_keep',False)
         for prim,idx in m.draw_calls:
             if prim!=4 or len(idx)%3:
                 parts.append((m,prim,idx,None,None,None));continue
@@ -197,6 +261,8 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
             n=np.cross(p[:,1]-p[:,0],p[:,2]-p[:,0]);length=np.linalg.norm(n,axis=1)
             finite=np.isfinite(p).all(axis=(1,2))
             wall=(length>.02)&(np.abs(n[:,2])<.20*length)&finite
+            if keep:
+                parts.append((m,prim,triangles,p,np.zeros(len(p),bool),wall|((length>.02)&finite)));continue
             wall_tri.extend(p[wall]);parts.append((m,prim,triangles,p,wall,(length>.02)&finite))
     if not wall_tri:return [],[],empty
     wall_pts=np.asarray(wall_tri).reshape(-1,3);zmin=wall_pts[:,2].min()
@@ -205,7 +271,9 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     by_mesh=defaultdict(list)
     for m,prim,triangles,p,wall,valid in parts:
         if p is None:by_mesh[id(m)].append((prim,triangles.copy()));continue
-        roof=valid&~wall&(p[:,:,2].mean(1)>=zmin+2.0)
+        n=np.cross(p[:,1]-p[:,0],p[:,2]-p[:,0]);length=np.linalg.norm(n,axis=1)
+        horizontal=np.abs(n[:,2])>=.20*np.maximum(length,1e-12)
+        roof=valid&~wall&horizontal&(p[:,:,2].mean(1)>=zmin+2.0)
         roof_tri.append(p[roof])
         rest=~wall&~roof
         if rest.any():by_mesh[id(m)].append((prim,triangles[rest].ravel().copy()))
@@ -233,14 +301,26 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     groups,stitched_seams=stitch_internal_seams(groups)
     import facade_pattern
     cap=facade_pattern.capture(source,source_textures) if source_textures else None
-    pattern=facade_pattern.detect(source,source_textures,capture_groups,cap) if cap else {}
+    if detected_pattern is not None:pattern=detected_pattern
+    else:pattern=facade_pattern.detect(source,source_textures,capture_groups,cap) if cap else {}
     reference=facade_pattern.reference_luminance(pattern)
     color=tuple(pattern.get('appearance',{}).get('rgb',(139,148,151)))
+    color=tuple(parameters.get('wall_color',color))
+    glass_color=tuple(parameters.get('glass_color',(52,86,108)))
     panel_material=4 if wall_finish=='metal' else 3
-    bay_nominal=bay=pattern.get('bay',{}).get('spacing',BAY)
+    bay_nominal=pattern.get('bay',{}).get('spacing',BAY)*parameters.get('bay_scale',1.)
     floor=pattern.get('floor',{}).get('spacing',FLOOR)
     floor_anchor=pattern.get('floor',{}).get('anchor_z',center[2])
     group_floors=pattern.get('group',{}).get('floors',0)
+    band_anchor=pattern.get('group',{}).get('anchor_z',floor_anchor)
+    floor_offset=parameters.get('floor_offset',0.);bay_offset=parameters.get('bay_offset',0.)
+    sill_fraction=parameters.get('sill_fraction');jamb_fraction=parameters.get('jamb_fraction')
+    axes=wall_directions([g['n'] for g in groups],
+        [sum(np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0])) for t in g['tri']) for g in groups]) if parameters.get('align_grid') else []
+    palettes=parameters.get('face_colors',[])
+    # The building's own palette owns the first atlas so the roof membrane
+    # always sits at texture_base+3; per-face palettes append further atlases.
+    atlases={(color,glass_color):texture_base};generated_textures=list(_textures(color,wall_finish,glass_color))
     batches=defaultdict(list); windows=0; tile_count=0; area_source=0.; area_new=0.
     counts=defaultdict(int)
     # Every patch frame first: the entrance goes on the widest ground-level patch.
@@ -254,6 +334,18 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         if np.dot(n,g['n'])<0:n=-n
         # A small or degenerate patch keeps its source normal.
         if np.dot(n,g['n'])<.99:n=g['n'];anchor=g['anchor']
+        if axes:
+            direction=max(axes,key=lambda a:np.dot(a,n))
+            if np.dot(direction,n)>np.cos(np.deg2rad(12)):n=direction
+        local_color,local_glass=color,glass_color
+        if palettes:
+            palette=max(palettes,key=lambda p:np.dot(p['normal'],n))
+            if np.dot(palette['normal'],n)>.90:
+                local_color=tuple(palette['wall_color']);local_glass=tuple(palette['glass_color'])
+        atlas_key=(local_color,local_glass)
+        if atlas_key not in atlases:
+            atlases[atlas_key]=texture_base+len(generated_textures)
+            generated_textures.extend(_textures(local_color,wall_finish,local_glass))
         u=np.cross([0.,0.,1.],n);u/=np.linalg.norm(u);v=np.cross(n,u)
         t=np.asarray(g['tri'])
         xy=np.stack([(t-anchor)@u,(t-anchor)@v],axis=-1)
@@ -265,6 +357,25 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         # sliver window; the bay stretches or shrinks by less than half a module.
         columns=max(1,int(round(x1/bay_nominal)))
         bay=x1/columns
+        # Global floor datum aligns levels across the different facade patches.
+        floor_phase=((origin[2]-floor_anchor)/max(v[2],.9)-floor_offset*floor)%floor
+        bay_phase=(bay_offset%1.)*bay
+        if axes:bay_phase=((origin-center)@u+bay_offset*bay)%bay
+        row_offsets=parameters.get('row_offsets',[0.]);row_anchor=floor_anchor
+        # Per-face captured phases anchor the grid where detection found them.
+        if pattern.get('faces') and (parameters.get('capture_layout') or any('rows' in f for f in pattern['faces'])):
+            face=max(pattern['faces'],key=lambda f:np.dot(f['normal'],n))
+            if np.dot(face['normal'],n)>.97:
+                if 'bay' in face:
+                    bay_phase=((origin-np.array(face['origin']))@u-face['bay']['phase']+bay_offset*bay)%bay
+                if 'floor' in face:
+                    floor_phase=(origin[2]-face['origin'][2]-face['floor']['phase']-floor_offset*floor)%floor
+                if 'rows' in face and 'row_offsets' not in parameters:
+                    row_offsets=face['rows']['offsets']
+                    row_anchor=face['rows']['anchor_z']
+                    bay_phase=((origin-np.array(face['origin']))@u-face['rows']['phase']+bay_offset*bay)%bay
+        if not isinstance(row_offsets,(list,tuple)) or not row_offsets or not np.isfinite(row_offsets).all():
+            raise ValueError('row_offsets must be a non-empty list of finite bay fractions')
         if cap is not None and x1>=bay_nominal and y1>=1.:
             res=max(.15,float(max(x1,y1))/1024)
             image,mask=facade_pattern.project_patch(cap,origin,u,v,n,(x1,y1),res)
@@ -277,13 +388,15 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
             strip=region.intersection(box(col*bay,y0-1,(col+1)*bay,y1+1))
             spans.append(strip.bounds if not strip.is_empty else None)
         frames.append({'origin':origin,'u':u,'v':v,'n':n,'xy':xy,'t':t,'region':region,'bay':bay,
-                       'classes':classes['columns'],'spans':spans,'columns':columns,'stats':classes})
+                       'classes':classes['columns'],'spans':spans,'columns':columns,'stats':classes,
+                       'floor_phase':floor_phase,'bay_phase':bay_phase,'row_offsets':row_offsets,
+                       'row_anchor':row_anchor,'texture':atlases[atlas_key]})
     # Ground-level columns: the lowest module row on the building base that is
     # tall enough for a storefront, above a short plinth stub where one exists.
     def ground_row(f,col):
         span=f['spans'][col]
         if span is None or f['classes'][col]=='pier' or f['origin'][2]+span[1]>zmin+1.4:return None
-        phase=(f['origin'][2]-floor_anchor)%floor
+        phase=f['floor_phase']
         cy=-phase+floor*np.floor((span[1]+phase)/floor+1e-9)
         if min(cy+floor,span[3])-span[1]<1.2:cy+=floor
         return cy if min(cy+floor,span[3])-max(cy,span[1])>=2.4 else None
@@ -297,20 +410,8 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     def world(xy,depth):
         # Keep the original surface's position while sharing one window grid
         # across its triangulation. This avoids cracks at neighboring patches.
-        xy=np.asarray(xy)
-        p=xy[:,None,:]-surface_xy[None,:,0,:]
-        v1=(p[:,:,0]*surface_b[None,:,1]-p[:,:,1]*surface_b[None,:,0])*surface_inv
-        v2=(surface_a[None,:,0]*p[:,:,1]-surface_a[None,:,1]*p[:,:,0])*surface_inv
-        inside=(v1>=-1e-5)&(v2>=-1e-5)&(v1+v2<=1.00001)&(surface_inv!=0)
-        choice=inside.argmax(axis=1);rows=np.arange(len(xy))
-        heights=surface_depth[choice,0]+v1[rows,choice]*(surface_depth[choice,1]-surface_depth[choice,0])+v2[rows,choice]*(surface_depth[choice,2]-surface_depth[choice,0])
-        heights[~inside.any(axis=1)]=np.nan
-        # Only numerical boundary points should fall outside the projected union.
-        missing=np.isnan(heights)
-        if missing.any():
-            flat=surface_xy.reshape(-1,2);z=surface_depth.ravel()
-            nearest=np.argmin(((xy[missing,None,:]-flat[None,:,:])**2).sum(2),axis=1)
-            heights[missing]=z[nearest]
+        xy=np.asarray(xy,dtype=np.float64)
+        heights=_surface_heights(xy,surface_xy,surface_depth,surface_a,surface_b,surface_inv)
         return origin+xy[:,0,None]*u+xy[:,1,None]*v+(heights+depth)[:,None]*n
 
     def emit(poly,depth,mat,tex,uv_mode,origin,u,v,n,cx,cy,swatch):
@@ -351,6 +452,11 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         corners=np.concatenate([inner,inner+n*reach])
         order=[0,1,3,0,3,2, 4,6,7,4,7,5, 0,4,5,0,5,1, 2,3,7,2,7,6, 0,2,6,0,6,4, 1,5,7,1,7,3]
         batches[(mat,0xffffffff)].append((corners[order],np.zeros((36,2))))
+    def sill_height(default,strong):
+        # A fitted sill replaces the module's default but keeps the stronger
+        # spandrel at the detected multi-floor cadence.
+        if sill_fraction is None:return default
+        return sill_fraction*floor+(.25 if strong else 0.)
     for fi,f in enumerate(frames):
         origin,u,v,n,xy,t,region=f['origin'],f['u'],f['v'],f['n'],f['xy'],f['t'],f['region']
         surface_xy=xy
@@ -360,12 +466,20 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         surface_inv=np.divide(1.,det,out=np.zeros_like(det),where=np.abs(det)>1e-9)
         area_source+=region.area
         x0,y0,x1,y1=region.bounds
-        bay=f['bay'];columns=f['columns']
-        # Global floor datum aligns levels across the different facade patches.
-        floor_phase=(origin[2]-floor_anchor)%floor
+        bay=f['bay'];columns=f['columns'];wall_texture=f['texture']
+        floor_phase=f['floor_phase'];row_offsets=f['row_offsets']
         for row,cy in enumerate(np.arange(-floor_phase,y1,floor)):
-            for col in range(columns):
-                cx=col*bay
+            # Staggered rows shift the whole column grid by a bay fraction, with
+            # row indices counted from the building datum, not from the patch.
+            row_level=int(round((origin[2]+cy-f['row_anchor'])/floor-floor_offset))
+            shift=float(row_offsets[row_level%len(row_offsets)])%1.
+            row_phase=(f['bay_phase']-shift*bay)%bay
+            if row_phase<1e-9 or bay-row_phase<1e-9:row_phase=0.
+            starts=np.arange(-row_phase,x1,bay);starts=starts[starts<x1-1e-6]
+            for ci,cx in enumerate(starts):
+                # The nominal column whose centre holds this cell supplies its
+                # captured class and extent even when the row is shifted.
+                col=int(np.clip(np.floor((cx+bay/2)/bay),0,columns-1))
                 cell=region.intersection(box(cx,cy,cx+bay,cy+floor))
                 if cell.area<1e-5:continue
                 tile_count+=1
@@ -378,11 +492,13 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                 cb,ct=cell.bounds[1],cell.bounds[3]
                 top=span is not None and ct>=span[3]-.02
                 base=span is not None and cb<=span[1]+.02 and origin[2]+cb<=zmin+1.4
-                # Stronger spandrels repeat at the observed multi-floor cadence.
-                strong=group_floors and level%group_floors==0
+                # Stronger spandrels repeat at the observed multi-floor cadence,
+                # from the band's own captured datum.
+                band_level=int(round((origin[2]+cy-band_anchor)/floor))
+                strong=group_floors and band_level%group_floors==0
                 # Solid corner posts where a patch ends: glass never runs into a
                 # corner or an open edge without a mullion-sized pier.
-                left=.25 if col==0 else 0.;right=.25 if col==columns-1 else 0.
+                left=.25 if ci==0 else 0.;right=.25 if ci==len(starts)-1 else 0.
                 door=None;canopy=False
                 if kind=='pier':
                     opening=Polygon();counts['piers']+=1
@@ -395,12 +511,14 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                 elif top and ct-cb<.7*floor:
                     opening=Polygon();counts['parapets']+=1       # solid parapet, no sliver window
                 elif kind=='glazed':
-                    sill=.50 if strong else .32
-                    opening=box(cx+.05+left,cy+sill,cx+bay-.05-right,cy+floor-.10);counts['glazed']+=1
+                    sill=sill_height(.50 if strong else .32,strong)
+                    jamb=.05 if jamb_fraction is None else jamb_fraction*bay
+                    opening=box(cx+jamb+left,cy+sill,cx+bay-jamb-right,cy+floor-.10);counts['glazed']+=1
                 else:
                     # Cladding reads as solid: punched windows between wide piers.
-                    sill=1.15 if strong else .95
-                    opening=box(cx+.30+left*.6,cy+sill,cx+bay-.30-right*.6,cy+floor-.25);counts['clad']+=1
+                    sill=sill_height(1.15 if strong else .95,strong)
+                    jamb=.30 if jamb_fraction is None else jamb_fraction*bay
+                    opening=box(cx+jamb+left*.6,cy+sill,cx+bay-jamb-right*.6,cy+floor-.25);counts['clad']+=1
                 frame=.045 if kind=='glazed' else .065
                 # Boundary modules get supported smaller rectangles instead of missing panes.
                 outer=fit_window(tile,opening) if not opening.is_empty else Polygon()
@@ -413,13 +531,13 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                     door=box(cx+.14,lo_y,cx+bay-.14,min(lo_y+2.4,hi_y-.4)).intersection(inner) if not inner.is_empty else None
                     if door is not None and door.area>=1.:canopy=True
                     else:door=None
-                swatch=((level%max(1,group_floors))*11+col*7)%64
+                swatch=((level%max(1,group_floors))*11+ci*7)%64
                 args=(origin,u,v,n,cx,cy,swatch)
                 panel_depth=.06 if kind=='pier' else 0.
                 # Continuous dark backing covers panel seams and window openings.
-                emit(cell,-.55,2,texture_base+2,'tile',*args)
-                emit(tile.difference(outer),panel_depth,panel_material,texture_base,'tile',*args)
-                sides(tile.difference(outer),panel_depth,-.055,panel_material,origin,u,v,n,texture_base)
+                emit(cell,-.55,2,wall_texture+2,'tile',*args)
+                emit(tile.difference(outer),panel_depth,panel_material,wall_texture,'tile',*args)
+                sides(tile.difference(outer),panel_depth,-.055,panel_material,origin,u,v,n,wall_texture)
                 if top:
                     # Parapet coping: a proud metal cap along every patch top edge.
                     cap_strip=cell.intersection(box(cx,ct-.22,cx+bay,ct))
@@ -429,13 +547,13 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
                     glazing=inner.difference(door) if door is not None else inner
                     emit(outer.difference(inner),.035,4,0xffffffff,'tile',*args)
                     sides(inner,.035,-.14,4,origin,u,v,n)
-                    emit(glazing,-.14,1,texture_base+1,'pane',*args)
+                    emit(glazing,-.14,1,wall_texture+1,'pane',*args)
                     if door is not None:
                         # Entrance: deeper recessed doors under a projecting canopy.
                         leaf=door.buffer(-.05,join_style=2)
                         emit(door.difference(leaf),-.14,4,0xffffffff,'tile',*args)
                         sides(leaf,-.14,-.40,4,origin,u,v,n)
-                        emit(leaf,-.40,1,texture_base+1,'pane',*args)
+                        emit(leaf,-.40,1,wall_texture+1,'pane',*args)
                         counts['entrance']+=1
                 if canopy:
                     yc=min(cb+2.9,cy+floor-.36)
@@ -455,13 +573,14 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
         meshes.append(mtscene.Mesh(tex,oid,center,(pos-center).astype(np.float32),uv,None,
             [(4,np.arange(len(pos),dtype=np.uint32))],mat,2))
     sampled=sum(1 for f in frames if f['stats']['sampled'])
-    return meshes,_textures(color,wall_finish),{'windows':windows,'tiles':tile_count,'patches':len(groups),
+    return meshes,generated_textures,{'windows':windows,'tiles':tile_count,'patches':len(groups),
         'replaced_triangles':len(wall_tri),'roof_triangles':len(roof_pts),'source_area':area_source,'covered_area':area_new,
         'pattern':pattern,'bay':bay_nominal,'floor':floor,'wall_color':color,'wall_finish':wall_finish,'stitched_seams':stitched_seams,
         'modules':dict(counts),'sampled_patches':sampled,'entrance':entrance is not None,'flipped_patches':flipped}
 
 
-def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete"):
+def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete",
+          fit_iterations=0,debug_dir=None):
     done=total=0
     for bi,batch in enumerate(batches):
         if batch.is_spline or (target is not None and bi!=target[0]):continue
@@ -481,7 +600,18 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                 source=original or [m for m in group.meshes if m.object_id==oid and m.material in (0,1,2,3)]
                 base=len(group.textures)
                 try:
-                    new,textures,stats=build(source,oid,base,group.textures,wall_finish)
+                    import base_recovery
+                    recovery=base_recovery.infer(source,group)
+                    parameters={'base_recovery':recovery} if recovery else {}
+                    if recovery:
+                        print(f"  {name}: completing lower walls to local ground {recovery['ground_z']:.2f} m using {len(recovery['planes'])} supported facade spans",flush=True)
+                    new,textures,stats=build(source,oid,base,group.textures,wall_finish,parameters=parameters)
+                    if fit_iterations and stats['windows']:
+                        import multiview
+                        from pathlib import Path
+                        report_dir=Path(debug_dir)/f'{bi}_{gi}_{oid}' if debug_dir else None
+                        new,textures,stats=multiview.fit(source,oid,base,group.textures,wall_finish,
+                            (new,textures,stats),fit_iterations,report_dir,progress,initial_parameters=parameters)
                 except (ValueError,shapely.errors.GEOSException) as e:
                     print(f"  {name}: facade unchanged ({e})",flush=True);continue
                 if not stats['windows']:
@@ -489,14 +619,21 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                 if not original:
                     original=[copy.copy(m) for m in source]
                     for m in original:m.model_variant=1
-                existing=next((i for i in atlas_candidates if group.textures[i:i+TEXTURE_COUNT]==textures),None)
+                # A building may carry several palettes, so its atlas run is a
+                # multiple of TEXTURE_COUNT; compare the whole run.
+                existing=next((i for i in atlas_candidates if group.textures[i:i+len(textures)]==textures),None)
                 if existing is None:
                     group.textures+=textures;atlas_candidates.append(base)
                 else:
                     for mesh in new:
-                        if base<=mesh.tex_index<base+TEXTURE_COUNT:mesh.tex_index=existing+mesh.tex_index-base
+                        if base<=mesh.tex_index<base+len(textures):mesh.tex_index=existing+mesh.tex_index-base
                 group.meshes=[m for m in group.meshes if m.object_id!=oid]+original+new
                 done+=1
+                if stats.get('regularization'):
+                    regular=stats['regularization']
+                    print(f"  {name}: recovered {regular['planes']} continuous facade planes from {regular['replaced_capture_triangles']} capture triangles",flush=True)
+                    if regular.get('recovered_base_area',0)>0:
+                        print(f"  {name}: added {regular['recovered_base_area']:.1f} square metres of lower facade from context and inferred wall continuation",flush=True)
                 print(f"  {name}: stitched {stats['stitched_seams']} internal diagonal patch joins; {stats['flipped_patches']} patch(es) turned outward by ray parity",flush=True)
                 rgb=stats['wall_color'];estimated='capture color estimate' if 'appearance' in stats['pattern'] else 'default color'
                 print(f"  {name}: {wall_finish}, RGB {rgb}, {estimated}",flush=True)
@@ -505,7 +642,9 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                     if found:
                         label='inferred floor subdivision' if found.get('derived') else f'detected {axis} repeat'
                         print(f"  {name}: {label} {found['spacing']:.2f} m, correlation {found['confidence']:.2f}, {found['samples']} agreeing patch(es)",flush=True)
-                    else:print(f"  {name}: no reliable {axis} pattern; using {default:.2f} m",flush=True)
+                    else:print(f"  {name}: no reliable {axis} pattern; using {stats[axis]:.2f} m (default {default:.2f} m)",flush=True)
+                    if found and abs(stats[axis]-found['spacing'])>.001:
+                        print(f"  {name}: fitted {axis} spacing {stats[axis]:.2f} m",flush=True)
                 if 'group' in stats['pattern']:
                     pattern_group=stats['pattern']['group']
                     print(f"  {name}: detected facade group {pattern_group['spacing']:.2f} m; {pattern_group.get('floors','unknown')} floors per repeat",flush=True)

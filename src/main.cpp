@@ -92,12 +92,26 @@ static int RunRefineCommand(int argc, char* argv[])
         if (!strcmp(argv[i], "--no-glass")) settings.glass = false;
         else if (!strcmp(argv[i], "--pcg")) settings.pcg = true;
         else if (!strcmp(argv[i], "--tiled-facade")) settings.tiledFacade = true;
+        else if (!strcmp(argv[i], "--auto-fit")) settings.autoFit = true;
+        else if (!strcmp(argv[i], "--fit-iterations") && i + 1 < argc) settings.fitIterations = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--wall-finish") && i + 1 < argc) settings.wallFinish = argv[++i];
         else if (!strcmp(argv[i], "--reflective-glass")) settings.reflectiveGlass = true;
         else if (!strcmp(argv[i], "--no-sam")) settings.noSam = true;
         else if (!strcmp(argv[i], "--target") && i + 1 < argc) settings.target = argv[++i];
         else if (!strcmp(argv[i], "--clean")) settings.clean = true;
         else if (!strcmp(argv[i], "--cull")) settings.cull = true;
+    std::error_code pathError;
+    if (std::filesystem::weakly_canonical(argv[2]) == std::filesystem::weakly_canonical(argv[3]) ||
+        std::filesystem::equivalent(argv[2], argv[3], pathError))
+    {
+        fprintf(stderr, "Input and output must differ; preserve the original capture.\n");
+        return 2;
+    }
+    if (settings.autoFit && (!settings.tiledFacade || settings.fitIterations < 1 || settings.fitIterations > 6))
+    {
+        fprintf(stderr, "--auto-fit requires --tiled-facade and 1-6 --fit-iterations.\n");
+        return 2;
+    }
     settings.workDir = std::filesystem::path(argv[3]).parent_path().string();
     if (settings.workDir.empty()) settings.workDir = ".";
     BuildingRefiner refiner;

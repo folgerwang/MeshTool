@@ -122,6 +122,9 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     if (!settings.target.empty())
         cmd += " --target " + Quote(settings.target);
     if (settings.tiledFacade) cmd += " --tiled-facade --wall-finish " + Quote(settings.wallFinish);
+    if (settings.tiledFacade && settings.autoFit)
+        cmd += " --auto-fit --fit-iterations " + std::to_string(settings.fitIterations) +
+               " --debug-dir " + Quote((work / "camera_fit").string());
     if (settings.reflectiveGlass) cmd += " --reflective-glass";
     if (!settings.glass)
         cmd += " --no-glass";
