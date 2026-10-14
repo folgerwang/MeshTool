@@ -47,7 +47,11 @@ A typical session, from an empty scene to an exported model:
 5. **Capture.** Frame the area in Google Earth and press **F12** there (or
    F5 / Capture > Capture Frame in MeshTool). Move on to a neighbouring or
    overlapping spot and capture again: captures stitch into one scene, at any
-   zoom or camera angle.
+   zoom or camera angle. A capture keeps only the tiles at its finest level
+   of detail: Google Earth also draws coarser parent tiles under them and
+   towards the horizon, and those are skipped (Live Capture panel > *Finest
+   tiles only*; off, coarse tiles are kept wherever no finer tile covers
+   them).
 6. **Drive from MeshTool (optional).** Press **G**: Google Earth now flies to
    wherever you leave the MeshTool viewport camera. Its overlay shows
    *F12: WAIT - SETTLING* while it flies and loads, then *F12: CAPTURE READY*.

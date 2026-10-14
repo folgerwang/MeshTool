@@ -67,6 +67,11 @@ public:
     // with it, captures are placed in real GPS coordinates.
     void SetGeoView(const GeoView& view) { m_geo_view = view; }
 
+    // Keep only a capture's finest tiles: Google Earth draws coarser parent
+    // tiles under the fine ones (and far from the camera in a tilted view),
+    // and those are dropped before the capture is placed.
+    bool keep_finest_only = true;
+
 private:
     HANDLE              m_mapping;
     void*               m_shared_mem;
@@ -151,6 +156,9 @@ private:
     // Smallest tile edge (metres) among the meshes: the level of detail a
     // capture or area reaches, unaffected by tilt (horizon tiles are coarse).
     double FinestTile(const std::vector<MeshData*>& meshes) const;
+    // Deletes the current frame's tiles coarser than its finest level (they
+    // were never uploaded). Returns how many were dropped.
+    int DropCoarserTiles();
     // Moves an area by d metres in the scene, its frame included.
     void ShiftArea(Area& area, const core::vec3d& d);
     // Moves areas captured without GPS off the others (they have no true place).

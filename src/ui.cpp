@@ -626,6 +626,12 @@ void MeshToolUI::DrawScenePanel()
                                   "Google Earth you started yourself. Use when the link shows None/Stale.");
         }
         ImGui::Spacing();
+        ImGui::Checkbox("Finest tiles only", &captureFinestOnly);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("A capture keeps only the tiles at its finest level of detail. Google\n"
+                              "Earth also draws coarser parent tiles under them and towards the\n"
+                              "horizon; those are skipped. Off: coarse tiles are kept where no finer\n"
+                              "tile covers them.");
         ImGui::Checkbox("Google Earth follows viewport (G)", &geFollowViewport);
         if (geFollowViewport)
         {

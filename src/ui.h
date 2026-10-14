@@ -113,6 +113,9 @@ public:
     bool  debugCaptures = false;
     // Google Earth flies to the viewport camera whenever it comes to rest (G).
     bool  geFollowViewport = false;
+    // Captures keep only their finest tiles (the coarse parents GE draws
+    // under them and towards the horizon are dropped).
+    bool  captureFinestOnly = true;
     std::string captureGate;   // while following: why captures are held back ("" = ready)
     void  ActionConnectGoogleEarth();   // load MeshTool's view/follow links into Google Earth
 

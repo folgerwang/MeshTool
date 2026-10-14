@@ -1825,6 +1825,7 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->captureProcessor->SetGeoView(m_geoServer->Latest());
         // While following, a capture (F12 in GE) taken before GE settled on
         // the viewport camera is replayed but not kept.
+        m_ui->captureProcessor->keep_finest_only = m_ui->captureFinestOnly;
         m_ui->captureProcessor->processFrame(captureSettled);
         if (!captureSettled)
         {

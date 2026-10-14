@@ -282,6 +282,11 @@ void LiveCaptureProcessor::processFrame(bool keepMeshes)
            unsigned(m_buffer_store.size()), unsigned(m_texture_store.size()), g_meshes_from_frame,
            (m_header->status_flags & GLCAPTURE_STATUS_OVERFLOW) ? "  (hook reported RING OVERFLOW)" : "");
 
+    // Only the finest tiles are wanted: the coarse parents GE draws under
+    // them (and towards the horizon) never reach the scene.
+    if (keepMeshes && keep_finest_only)
+        DropCoarserTiles();
+
     // Add captured meshes to output
     int mesh_count = (int)m_current_group->meshes.size();
     if (keepMeshes && mesh_count > 0 && m_output_batch)
@@ -970,6 +975,44 @@ double LiveCaptureProcessor::FinestTile(const std::vector<MeshData*>& meshes) co
             finest = it->second;
     }
     return finest;
+}
+
+int LiveCaptureProcessor::DropCoarserTiles()
+{
+    if (!m_current_group)
+        return 0;
+    const double finest = FinestTile(m_current_group->meshes);
+    if (!(finest > 0.0))
+        return 0;
+    // Same level as RemoveCoveredLods: each level halves the tile edge.
+    const int finest_level = int(floor(log2(finest) + 0.5));
+    int dropped = 0, kept = 0;
+    auto& meshes = m_current_group->meshes;
+    for (size_t k = 0; k < meshes.size();)
+    {
+        MeshData* mesh = meshes[k];
+        auto it = m_tile_size.find(mesh);
+        if (it == m_tile_size.end() || !(it->second > 0.0))
+        {
+            k++;   // not a GE tile: untouched
+            continue;
+        }
+        if (int(floor(log2(it->second) + 0.5)) <= finest_level)
+        {
+            kept++;
+            k++;
+            continue;
+        }
+        m_tile_size.erase(mesh);
+        m_tile_origin.erase(mesh);
+        m_tile_key.erase(mesh);
+        delete mesh;   // never uploaded
+        meshes.erase(meshes.begin() + k);
+        dropped++;
+    }
+    CapLog("  finest tiles only: level %d (tile %.1f m), %d tiles kept, %d coarser tiles dropped\n",
+           finest_level, finest, kept, dropped);
+    return dropped;
 }
 
 void LiveCaptureProcessor::RemoveCoveredLods(Area& area_info)
