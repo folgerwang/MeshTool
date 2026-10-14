@@ -62,6 +62,7 @@ public:
     float simRoadWidth = 7.0f;     // metres of asphalt
     float simTreeHeight = 2.5f;    // surface this far above the guide height is canopy
     bool  simCutCanopy = true;     // clear canopy triangles over the road while the sim runs
+    bool  simCutBlack = true;      // with it: also the corridor's black (unphotographed) faces
     float simClearWidth = 20.0f;   // width of the cleared corridor (m)
     float simClearHeight = 1.5f;   // the corridor is cleared above this height over the road (m)
     bool  simHeightCheck = true;   // check the car's height every few metres while driving

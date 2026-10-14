@@ -44,6 +44,8 @@ struct DriveRoadParams
     double maxGrade = 0.25;         // steepest climb a road stretch may have (station to station)
     double smoothSigma = 6.0;       // metres, final height smoothing
     bool   cutCanopy = true;        // remove canopy triangles over the corridor
+    bool   cutBlack = true;         // with cutCanopy: also remove the corridor's black faces (the unphotographed
+                                    // undersides and sides of the tree lumps, which cross the road and flicker)
     double clearWidth = 20.0;       // width of the corridor the canopy cut clears (the chase camera looks through it)
     double clearHeight = 1.5;       // the cut removes what sits higher than this over the road (above the car's roof)
 };
@@ -146,14 +148,17 @@ SkyDome BuildSkyDome();
 void CarModelMatrix(const core::vec3d& posRelEye, double heading, double pitch,
                     const core::vec3d& local, double spin, float out[16]);
 
-// Cuts canopy triangles over the road corridor out of the scene meshes and
-// puts them back later. The caller releases the GPU buffers of Touched()
-// meshes after Apply/Restore (they re-upload on the next draw).
+// Cuts canopy triangles over the road corridor out of the scene meshes, and
+// the corridor's black faces (the parts of the tree lumps no photo covered,
+// which reach down through the road surface), and puts them back later. The
+// caller releases the GPU buffers of Touched() meshes after Apply/Restore
+// (they re-upload on the next draw).
 class CanopyCut
 {
 public:
-    // Returns the number of triangles removed.
+    // Returns the number of triangles removed (canopy; black faces counted separately).
     int  Apply(const DriveRoad& road, const DriveRoadParams& params, const std::vector<BatchMeshData*>& batches);
+    int  BlackRemoved() const { return m_blackRemoved; }
     // Returns the meshes that were put back.
     std::vector<MeshData*> Restore();
     // Forget the backups without touching the meshes (the scene was deleted).
@@ -175,4 +180,5 @@ private:
         std::vector<DrawCallBackup> drawCalls;
     };
     std::vector<Backup> m_backups;
+    int m_blackRemoved = 0;
 };

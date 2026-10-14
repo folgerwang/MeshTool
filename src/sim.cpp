@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <GeographicLib/LocalCartesian.hpp>
 #include "meshdata.h"
+#include "segment/segmenter.h"   // DecodeTexture
 
 namespace
 {
@@ -66,8 +67,9 @@ namespace
         return true;
     }
 
-    // Every drawn mesh of the scene, with the class of the segmented object it
-    // belongs to (kObjUnknown when the scene is not segmented).
+    // Every drawn mesh of the scene with its group, and the class of the
+    // segmented object it belongs to (kObjUnknown when the scene is not
+    // segmented).
     template<class F> void ForEachMesh(const std::vector<BatchMeshData*>& batches, F&& f)
     {
         for (BatchMeshData* batch : batches)
@@ -83,7 +85,7 @@ namespace
                     ObjectClass cls = kObjUnknown;
                     if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
                         cls = ObjectClass(group->objects[size_t(mesh->object_id)].cls);
-                    f(mesh, cls);
+                    f(mesh, group, cls);
                 }
             }
         }
@@ -404,7 +406,7 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
     // lowest hit (a bridge deck over water, a canopy over ground). Segmented
     // tree objects do not count on the road band; segmented buildings do not
     // count beside it (only trees measure the tree height).
-    ForEachMesh(batches, [&](MeshData* mesh, ObjectClass cls) {
+    ForEachMesh(batches, [&](MeshData* mesh, GroupMeshData*, ObjectClass cls) {
         if (mesh->bbox_ws.b_valid && !sampleBox.OverlapsBounds(mesh->bbox_ws)) return;
         const bool isTree = cls == kObjTree, isBuilding = cls == kObjBuilding;
         for (const DrawCallInfo& dc : mesh->draw_call_list)
@@ -1144,11 +1146,40 @@ int CanopyCut::Apply(const DriveRoad& road, const DriveRoadParams& p, const std:
         return best <= half;
     };
 
+    // Black faces: the parts of a tree lump no photo covered are textured
+    // black. A corridor triangle is black when its texture is black at its
+    // corners, edge midpoints and centre (a face only partly black is the
+    // edge of the photographed part, and stays). Textures decode on first
+    // use, once each.
+    std::unordered_map<const core::Texture2DInfo*, DecodedTexture> decoded;
+    const uint32_t kBlack = 20;   // per channel, 0..255: DXT compression leaves black a little grey
+    auto blackAt = [&](const DecodedTexture& tex, double u, double v) {
+        u -= floor(u); v -= floor(v);
+        const int tx = (std::min)(tex.w - 1, (std::max)(0, int(u * tex.w)));
+        const int ty = (std::min)(tex.h - 1, (std::max)(0, int(v * tex.h)));
+        const uint32_t c = tex.rgb[size_t(ty) * size_t(tex.w) + size_t(tx)];
+        return ((c >> 16) & 0xFF) <= kBlack && ((c >> 8) & 0xFF) <= kBlack && (c & 0xFF) <= kBlack;
+    };
+
     int removed = 0;
-    ForEachMesh(batches, [&](MeshData* mesh, ObjectClass) {
-        if (mesh->bbox_ws.b_valid &&
-            (!corridorBox.OverlapsBounds(mesh->bbox_ws) || mesh->bbox_ws.bb_max.z < lowestRoad + p.clearHeight))
-            return;
+    m_blackRemoved = 0;
+    ForEachMesh(batches, [&](MeshData* mesh, GroupMeshData* group, ObjectClass) {
+        if (mesh->bbox_ws.b_valid && !corridorBox.OverlapsBounds(mesh->bbox_ws)) return;
+        const bool aboveClear = !mesh->bbox_ws.b_valid || mesh->bbox_ws.bb_max.z >= lowestRoad + p.clearHeight;
+        const DecodedTexture* tex = nullptr;
+        if (p.cutBlack && mesh->uv_list && mesh->idx_in_texture_list < group->loaded_textures.size())
+        {
+            const core::Texture2DInfo* info = group->loaded_textures[mesh->idx_in_texture_list];
+            auto it = decoded.find(info);
+            if (it == decoded.end())
+            {
+                DecodedTexture d;
+                if (!DecodeTexture(info, d)) d.w = 0;
+                it = decoded.emplace(info, std::move(d)).first;
+            }
+            if (it->second.w > 0) tex = &it->second;
+        }
+        if (!aboveClear && !tex) return;
         std::vector<DrawCallBackup> backups;
         for (size_t d = 0; d < mesh->draw_call_list.size(); d++)
         {
@@ -1158,17 +1189,36 @@ int CanopyCut::Apply(const DriveRoad& road, const DriveRoadParams& p, const std:
             bool any = false;
             ForEachTriangle(mesh, dc, [&](uint32_t i0, uint32_t i1, uint32_t i2) {
                 const core::vec3d a = WorldVertex(mesh, i0), b = WorldVertex(mesh, i1), c = WorldVertex(mesh, i2);
+                const double centreZ = (a.z + b.z + c.z) / 3.0;
+                double roadZ = 0.0;
+                const bool inCorridor = (aboveClear || tex) &&
+                                        corridor((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, roadZ);
                 // Judged by the triangle's centre: the big tree-side triangles
                 // that reach down to the ground go too, or they wall the
                 // chase camera in. A bank beside the road keeps its lower part.
-                const double centreZ = (a.z + b.z + c.z) / 3.0;
-                double roadZ = 0.0;
-                if (centreZ > lowestRoad + p.clearHeight &&
-                    corridor((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, roadZ) && centreZ > roadZ + p.clearHeight)
+                if (inCorridor && centreZ > lowestRoad + p.clearHeight && centreZ > roadZ + p.clearHeight)
                 {
                     any = true;
                     removed++;
                     return;
+                }
+                if (inCorridor && tex)
+                {
+                    const core::vec2f& u0 = mesh->uv_list[i0];
+                    const core::vec2f& u1 = mesh->uv_list[i1];
+                    const core::vec2f& u2 = mesh->uv_list[i2];
+                    const bool black =
+                        blackAt(*tex, u0.x, u0.y) && blackAt(*tex, u1.x, u1.y) && blackAt(*tex, u2.x, u2.y) &&
+                        blackAt(*tex, 0.5 * (u0.x + u1.x), 0.5 * (u0.y + u1.y)) &&
+                        blackAt(*tex, 0.5 * (u1.x + u2.x), 0.5 * (u1.y + u2.y)) &&
+                        blackAt(*tex, 0.5 * (u2.x + u0.x), 0.5 * (u2.y + u0.y)) &&
+                        blackAt(*tex, (u0.x + u1.x + u2.x) / 3.0, (u0.y + u1.y + u2.y) / 3.0);
+                    if (black)
+                    {
+                        any = true;
+                        m_blackRemoved++;
+                        return;
+                    }
                 }
                 kept.push_back(i0); kept.push_back(i1); kept.push_back(i2);
             });

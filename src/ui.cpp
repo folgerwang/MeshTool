@@ -1939,6 +1939,11 @@ void MeshToolUI::DrawSimDialog()
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Everything in the corridor higher than this over the road is cleared: canopy, and the\n"
                               "undergrowth blobs the mesh has where trees reach the ground. Larger keeps more banks.");
+        ImGui::Checkbox("Remove black faces in the corridor", &simCutBlack);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The undersides and sides of the tree lumps were never photographed and are textured\n"
+                              "black; they reach down through the road and flicker against it. Faces in the corridor\n"
+                              "whose texture is black all over are cleared at any height.");
     }
 
     ImGui::Spacing();

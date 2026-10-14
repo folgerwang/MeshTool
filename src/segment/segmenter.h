@@ -9,6 +9,15 @@
 #include <thread>
 #include <vector>
 #include "meshdata.h"
+#include "coretexture.h"
+
+// A captured texture (DXT1/3/5 or RGBA8) decoded to pixels.
+struct DecodedTexture
+{
+    int w = 0, h = 0;
+    std::vector<uint32_t> rgb;   // 0x00RRGGBB
+};
+bool DecodeTexture(const core::Texture2DInfo* info, DecodedTexture& out);
 
 // Splits captured meshes into semantic objects (buildings, cars, trees,
 // plants, water, road, ground) for later per-object AI detail enhancement.

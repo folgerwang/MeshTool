@@ -2139,6 +2139,7 @@ void MeshToolApp::StartDriveSim()
     sim.params.roadWidth = m_ui->simRoadWidth;
     sim.params.treeHeight = m_ui->simTreeHeight;
     sim.params.cutCanopy = m_ui->simCutCanopy;
+    sim.params.cutBlack = m_ui->simCutBlack;
     sim.params.clearWidth = m_ui->simClearWidth;
     sim.params.clearHeight = m_ui->simClearHeight;
     sim.road = BuildDriveRoad(m_sceneRoute.polyline, geo->reference_pos.x, geo->reference_pos.y,
@@ -2184,9 +2185,9 @@ void MeshToolApp::StartDriveSim()
         snprintf(trees, sizeof(trees), "tree tops %.1f m over the road (%d samples)", sim.road.canopyHeight,
                  sim.road.canopySamples);
     snprintf(buf, sizeof(buf), "road recovered over %.1f km: %d stations, %d under trees, %d without a surface; "
-             "%d canopy triangles cleared; %s; height guessed under trees at %d checks",
+             "%d canopy and %d black triangles cleared; %s; height guessed under trees at %d checks",
              sim.road.length / 1000.0, int(sim.road.stations.size()), sim.road.rejected, sim.road.missing,
-             sim.canopyRemoved, trees, sim.baked);
+             sim.canopyRemoved, sim.cut.BlackRemoved(), trees, sim.baked);
     m_ui->simStatus = buf;
     m_ui->statusMessage = std::string("Drive simulation: ") + buf;
     m_ui->statusTimeout = 8.0f;

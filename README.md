@@ -95,8 +95,10 @@ A typical session, from an empty scene to an exported model:
    file` writes the recovered road with the check's result). A sky dome
    surrounds the view. The mesh over the road corridor (*Clear width*, 20 m) higher than
    *Clear above road* (1.5 m) can be cut out of the view while the simulation
-   runs, so the car stays visible under trees (Stop puts it back; the saved
-   scene is not changed). A scene saved without a route takes two addresses in
+   runs, so the car stays visible under trees, and with it the corridor's
+   black faces: the undersides and sides of the tree lumps no photo covered,
+   which reach down through the road and flicker against it (Stop puts it
+   all back; the saved scene is not changed). A scene saved without a route takes two addresses in
    the dialog and looks the route up. `MeshTool scene.mtscene --shots prefix --sim [0..1]` screenshots
    the car parked part way along the route.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
