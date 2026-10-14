@@ -32,6 +32,7 @@ public:
     bool captureWaiting = false;    // set by the app while a requested capture hasn't arrived
     bool wantStopCapture = false;
     bool wantFrameAll = false;      // point the camera at everything loaded
+    bool topDownOrtho = false;      // bird's-eye orthographic projection (O)
     bool wantCheckScreenshots = false;   // Tools > Save Check Screenshots
 
     // Route capture (Capture > Route Capture): settings and requests for the

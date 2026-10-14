@@ -311,6 +311,10 @@ void MeshToolUI::DrawMenuBar()
         {
             if (ImGui::MenuItem("Frame All", "F", false, !g_world.mesh_data_batches.empty()))
                 wantFrameAll = true;
+            ImGui::MenuItem("Top-down orthographic", "O", &topDownOrtho);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Bird's-eye view with a parallel projection, like an orthophoto: no perspective\n"
+                                  "lean on buildings. Turns the camera straight down, north up; pan and zoom as usual.");
             ImGui::EndMenu();
         }
 

@@ -48,6 +48,12 @@ void ViewCamera::Frame(const core::bounds3d& bbox, float aspect)
     distance = radius / sin(halfFov) * 1.05;
 }
 
+void ViewCamera::LookStraightDown()
+{
+    pitch = -kMaxPitch;
+    yaw = 0.0;
+}
+
 void ViewCamera::Pan(double dx, double dy, float viewportH)
 {
     // Move the pivot so the point under the cursor follows it.
@@ -184,6 +190,19 @@ void ViewCamera::BuildViewProj(float aspect, float out[16]) const
         0.0,        0.0, farZ / (nearZ - farZ),           -1.0,
         0.0,        0.0, nearZ * farZ / (nearZ - farZ),    0.0,
     };
+    if (orthographic)
+    {
+        // Parallel projection of the same extent at the pivot; depth stays
+        // 0..1 over the same range, so the far plane and LOD push still hold.
+        const double h = OrthoHalfHeight();
+        const double O[16] = {
+            1.0 / (h * aspect), 0.0,      0.0,                      0.0,
+            0.0,                -1.0 / h, 0.0,                      0.0,
+            0.0,                0.0,      1.0 / (nearZ - farZ),     0.0,
+            0.0,                0.0,      nearZ / (nearZ - farZ),   1.0,
+        };
+        for (int i = 0; i < 16; i++) P[i] = O[i];
+    }
 
     for (int c = 0; c < 4; c++)
         for (int rr = 0; rr < 4; rr++)

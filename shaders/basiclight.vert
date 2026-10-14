@@ -20,5 +20,13 @@ void main(void)
     // Positions are camera-relative, so scaling them moves the mesh along the
     // view rays only: same pixels, later depth (LOD depth order; 0 = off).
     float depthScale = uScreenPosition.x > 0.0 ? uScreenPosition.x : 1.0;
-    gl_Position = uViewProjMatrix * vec4(vPositionWS * depthScale, 1.0);
+    if (uScreenPosition.w > 0.5)
+    {
+        // Orthographic: scaling would shift pixels sideways, so push the
+        // coarser tile back in depth only (0..1 range).
+        gl_Position = uViewProjMatrix * vec4(vPositionWS, 1.0);
+        gl_Position.z += (depthScale - 1.0) * gl_Position.w;
+    }
+    else
+        gl_Position = uViewProjMatrix * vec4(vPositionWS * depthScale, 1.0);
 }

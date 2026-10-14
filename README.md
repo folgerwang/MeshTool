@@ -63,6 +63,10 @@ A typical session, from an empty scene to an exported model:
    panel, where Stop ends the run; captures stitch into one scene as usual.
    `MeshTool --route "from" "to" [--spacing m] [--look-back]` prints the
    cameras without Google Earth. Needs an internet connection.
+   View > Top-down orthographic (O) reviews the result like an orthophoto:
+   a parallel projection straight down, north up, without perspective lean.
+   `--shots ... --ortho` saves check screenshots that way, and a route
+   capture started from the command line ends with them.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
    highlighted / as captured).
@@ -291,7 +295,7 @@ efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
 MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 150] [--look-back]
 MeshTool --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg] [--dwell s] [--look-back] [--save out.mtscene]
-MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..]
+MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..] [--ortho]
 ```
 
 `--objects` lists a segmented scene's objects (name, class, size, centre) and

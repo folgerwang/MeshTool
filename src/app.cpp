@@ -308,6 +308,7 @@ void MeshToolApp::MainLoop()
         drawFrame.glass = m_ui->glass;
         drawFrame.glassOpacity = m_ui->glassOpacity;
         drawFrame.glassReflect = m_ui->glassReflect;
+        drawFrame.orthographic = m_camera->orthographic;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
 
         if (!m_shotPending)
@@ -445,6 +446,11 @@ void MeshToolApp::UpdateAutoShots()
                         if (g) box += g->bbox_ws;
         m_camera->yaw = m_auto.yawDeg * 3.14159265358979 / 180.0;
         m_camera->pitch = m_auto.pitchDeg * 3.14159265358979 / 180.0;
+        if (m_auto.ortho)
+        {
+            m_ui->topDownOrtho = m_camera->orthographic = true;
+            m_camera->LookStraightDown();
+        }
         FrameBounds(box);
         m_camera->distance *= m_auto.zoom;
         m_ui->classColors = true;
@@ -1207,10 +1213,17 @@ void MeshToolApp::PickAt(float mouseX, float mouseY)
     const double ndcX = 2.0 * (mouseX - m_ui->viewportX) / vw - 1.0;
     const double ndcY = 1.0 - 2.0 * (mouseY - m_ui->viewportY) / vh;   // +1 = top
     const double tanHalf = tan(m_camera->fovY * 0.5);
-    const core::vec3d eye = m_camera->Eye();
+    core::vec3d eye = m_camera->Eye();
     core::vec3d dir = m_camera->Forward() + m_camera->Right() * (ndcX * tanHalf * vw / vh) +
                       m_camera->Up() * (ndcY * tanHalf);
     dir = dir * (1.0 / length(dir));
+    if (m_camera->orthographic)
+    {
+        // Parallel rays: the pixel offsets move the origin, not the direction.
+        const double h = m_camera->OrthoHalfHeight();
+        eye = eye + m_camera->Right() * (ndcX * h * vw / vh) + m_camera->Up() * (ndcY * h);
+        dir = m_camera->Forward();
+    }
 
     double best = std::numeric_limits<double>::max();
     BatchMeshData* bestBatch = nullptr;
@@ -1587,6 +1600,8 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->wantFrameAll = true;
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false))
             m_ui->geFollowViewport = !m_ui->geFollowViewport;
+        else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false))
+            m_ui->topDownOrtho = !m_ui->topDownOrtho;
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && m_ui->selection.active)
             m_ui->selectionView = m_ui->selectionView == MeshToolUI::kSelActual ? MeshToolUI::kSelSegment
                                                                                 : MeshToolUI::kSelActual;
@@ -1599,6 +1614,12 @@ void MeshToolApp::ProcessPendingActions()
         OpenScene(path);
     }
 
+    if (m_ui->topDownOrtho != m_camera->orthographic)
+    {
+        m_camera->orthographic = m_ui->topDownOrtho;
+        if (m_ui->topDownOrtho)
+            m_camera->LookStraightDown();
+    }
     if (m_ui->wantFrameAll)
     {
         m_ui->wantFrameAll = false;
@@ -1801,6 +1822,8 @@ void MeshToolApp::UpdateRouteCapture()
         {
             if (!g_world.mesh_data_batches.empty())
             {
+                // Review the route as an orthophoto: bird's-eye, orthographic.
+                m_ui->topDownOrtho = true;
                 m_ui->wantFrameAll = true;
                 SaveSceneTo(m_autoRoute.savePath);
                 log("saved " + m_autoRoute.savePath);

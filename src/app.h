@@ -50,6 +50,7 @@ public:
         bool        hasBox = false;  // frame this world box instead (same camera across scenes)
         double      box[6] = {};     // min x, y, z, max x, y, z
         bool        glass = true;    // draw glass facades as glass (false: as captured)
+        bool        ortho = false;   // bird's-eye orthographic view instead of yaw/pitch
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     // MeshTool.exe --capture-route "from" "to" [...]: start a route capture as

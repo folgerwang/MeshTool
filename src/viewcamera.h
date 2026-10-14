@@ -27,6 +27,13 @@ public:
     double      sceneRadius = 10.0; // for the far plane
     double      flySpeedScale = 1.0;
     float       fovY = 3.14159265f / 4.0f;
+    // Orthographic projection: the view spans what the perspective view
+    // would at the pivot (half height = distance * tan(fovY / 2)), so zoom,
+    // pan and framing keep working unchanged.
+    bool        orthographic = false;
+    double      OrthoHalfHeight() const { return distance * tan(fovY * 0.5); }
+    // Straight down, north up: the bird's-eye view used for top-down screenshots.
+    void        LookStraightDown();
 
     // Point the camera at a bounding box, keeping the current view direction.
     void Frame(const core::bounds3d& bbox, float aspect);

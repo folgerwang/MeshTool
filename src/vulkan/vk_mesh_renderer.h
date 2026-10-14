@@ -45,6 +45,7 @@ struct MeshDrawFrame {
     bool  glass = true;
     float glassOpacity = 0.85f;      // panes facing the viewer; grazing views turn mirror-like
     float glassReflect = 0.95f;
+    bool  orthographic = false;      // parallel projection: LOD order is a depth offset, not a scale
 
     bool IsSelected(const GroupMeshData* group, const MeshData* mesh) const;
 };

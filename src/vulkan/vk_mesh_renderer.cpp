@@ -284,6 +284,7 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     // one is in front instead of z-fighting it.
     if (mesh->lod_size > 0.0f)
         pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
+    pc.screenPosition[3] = frame.orthographic ? 1.0f : 0.0f;
     pc.textureIndex[0] = TextureSlot(hasTexture ? mesh->tex_id : 0xFFFFFFFF);
     pc.textureIndex[1] = flatColor ? 0 : mesh->material;
     if (!flatColor && !hasTexture)

@@ -320,6 +320,7 @@ int main(int argc, char* argv[])
             else if (!strcmp(argv[i], "--pitch") && i + 1 < argc) shots.pitchDeg = atof(argv[++i]);
             else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) shots.zoom = atof(argv[++i]);
             else if (!strcmp(argv[i], "--no-glass")) shots.glass = false;
+            else if (!strcmp(argv[i], "--ortho")) shots.ortho = true;
             else if (!strcmp(argv[i], "--original-models")) shots.originalModels = true;
             else if (!strcmp(argv[i], "--box") && i + 6 < argc)
             {
