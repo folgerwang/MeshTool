@@ -885,6 +885,10 @@ void MeshToolUI::DrawSelectionContextMenu()
     if (ImGui::MenuItem("Segment highlight", "T", selectionView == kSelSegment)) selectionView = kSelSegment;
     if (ImGui::MenuItem("Actual materials", "T", selectionView == kSelActual)) selectionView = kSelActual;
     ImGui::Separator();
+    if (ImGui::MenuItem("Delete selected", "Del")) wantDeleteSelection = true;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Removes the selected mesh (or every mesh of the selected object) from the scene.\n"
+                          "Not undoable; the file changes only when you save.");
     if (ImGui::MenuItem("Clear selection")) wantClearSelection = true;
     ImGui::EndPopup();
 }

@@ -103,7 +103,11 @@ A typical session, from an empty scene to an exported model:
    the car parked part way along the route.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
-   highlighted / as captured).
+   highlighted / as captured). Delete (or the context menu's Delete
+   selected) removes the selected mesh, or every mesh of the selected
+   object, from the scene; the file changes only when you save. Opening a
+   scene drops meshes that are exact copies of another (same vertices,
+   triangles and place), which captures can leave behind.
 8. **Segment.** Tools > Segment Scene (AI) splits the scene into buildings,
    trees, cars, road, plants, water (needs Ollama for best results; see
    below).

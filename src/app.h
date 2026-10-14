@@ -203,6 +203,7 @@ private:
     void UpdateSelection();                   // clicks, validity, UI requests, overlay
     void PickAt(float mouseX, float mouseY);  // ray-cast the visible meshes
     void ClearSelection();
+    void DeleteSelection();   // removes the selected mesh / object's meshes from the scene
     bool SelectionBounds(core::bounds3d& box, int* meshes = nullptr, size_t* triangles = nullptr) const;
     void DrawSelectionOverlay();
     struct OverlayView;                       // scene -> viewport pixels for ImGui overlays

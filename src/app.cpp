@@ -1256,6 +1256,54 @@ size_t TriangleCount(const MeshData* mesh)
 
 } // namespace
 
+void MeshToolApp::DeleteSelection()
+{
+    GroupMeshData* group = m_selGroup;
+    if (!group || (!m_selMesh && m_selObject < 0))
+        return;
+    // The drive simulation's canopy cut holds backups of meshes: put them
+    // back first, then nothing refers to what goes.
+    if (m_sim.active)
+        StopDriveSim(true);
+    if (m_renderer)
+        vkDeviceWaitIdle(m_renderer->GetContext().device);
+    int removed = 0;
+    for (size_t k = 0; k < group->meshes.size();)
+    {
+        MeshData* mesh = group->meshes[k];
+        if (mesh && (m_selMesh ? mesh == m_selMesh : mesh->object_id == m_selObject))
+        {
+            m_meshRenderer->ReleaseMesh(mesh);
+            delete mesh;
+            group->meshes.erase(group->meshes.begin() + ptrdiff_t(k));
+            removed++;
+            continue;
+        }
+        k++;
+    }
+    group->bbox_ws.Reset();
+    for (const MeshData* mesh : group->meshes)
+        if (mesh && mesh->bbox_ws.b_valid) group->bbox_ws += mesh->bbox_ws;
+    for (BatchMeshData* b : g_world.mesh_data_batches)
+    {
+        if (!b) continue;
+        bool mine = false;
+        for (const GroupMeshData* g : b->group_meshes) mine = mine || g == group;
+        if (!mine) continue;
+        b->bbox_ws.Reset();
+        for (const GroupMeshData* g : b->group_meshes)
+            if (g && g->bbox_ws.b_valid) b->bbox_ws += g->bbox_ws;
+    }
+    RecomputeWorldBounds();
+    const std::string what = m_ui->selection.name;
+    ClearSelection();
+    char buf[160];
+    snprintf(buf, sizeof(buf), "Deleted %s: %d mesh%s removed (save the scene to keep this)", what.c_str(), removed,
+             removed == 1 ? "" : "es");
+    m_ui->statusMessage = buf;
+    m_ui->statusTimeout = 6.0f;
+}
+
 void MeshToolApp::ClearSelection()
 {
     m_selGroup = nullptr;
@@ -1522,6 +1570,11 @@ void MeshToolApp::UpdateSelection()
         if (SelectionBounds(box))
             FrameBounds(box);
     }
+    if (m_ui->wantDeleteSelection)
+    {
+        m_ui->wantDeleteSelection = false;
+        DeleteSelection();
+    }
 
     DrawSelectionOverlay();
 }
@@ -1684,6 +1737,8 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->geFollowViewport = !m_ui->geFollowViewport;
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false))
             m_ui->topDownOrtho = !m_ui->topDownOrtho;
+        else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && m_ui->selection.active)
+            m_ui->wantDeleteSelection = true;
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && m_ui->selection.active)
             m_ui->selectionView = m_ui->selectionView == MeshToolUI::kSelActual ? MeshToolUI::kSelSegment
                                                                                 : MeshToolUI::kSelActual;

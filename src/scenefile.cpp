@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <unordered_map>
 #include "meshdata.h"
 #include "coretexture.h"
 #include "route.h"
@@ -193,12 +194,105 @@ namespace
         if (version < 7 && m->bbox_ws.b_valid && m->material == kMatCaptured && m->model_variant == 0 &&
             !m->draw_call_list.empty() && m->draw_call_list[0].is_ge_mesh())
         {
+            // No upper bound: the overview tiles of a capture zoomed far out
+            // span kilometres, and they of all tiles must draw behind the
+            // detailed ones (the renderer caps the push distance).
             const double edge = (std::max)(m->bbox_ws.bb_max.x - m->bbox_ws.bb_min.x,
                                            m->bbox_ws.bb_max.y - m->bbox_ws.bb_min.y);
-            if (edge >= 1.0 && edge <= 512.0)
+            if (edge >= 1.0)
                 m->lod_size = float(pow(2.0, floor(log2(edge) + 0.5)));
         }
         return m;
+    }
+
+    // A captured scene can hold the same tile several times over: the same
+    // vertices, the same triangles, the same place, only under another
+    // texture slot (a later capture brought its own copy of the texture).
+    // Drawn twice at the same depth, the copies fight for pixels, and they
+    // cost memory and draw time for nothing. Keep the first of each.
+    void DropDuplicateMeshes(GroupMeshData* g)
+    {
+        struct Key
+        {
+            int32_t  object;
+            uint8_t  material, variant;
+            uint32_t vertices, indices;
+            int64_t  tx, ty, tz;
+            uint64_t vhash, ihash;
+            bool operator==(const Key& o) const
+            {
+                return object == o.object && material == o.material && variant == o.variant &&
+                       vertices == o.vertices && indices == o.indices && tx == o.tx && ty == o.ty && tz == o.tz &&
+                       vhash == o.vhash && ihash == o.ihash;
+            }
+        };
+        struct Hash
+        {
+            size_t operator()(const Key& k) const
+            {
+                uint64_t h = k.vhash ^ (k.ihash * 0x9E3779B97F4A7C15ull) ^ (uint64_t(k.vertices) << 32) ^ k.indices;
+                h ^= uint64_t(k.tx) * 0xBF58476D1CE4E5B9ull;
+                h ^= uint64_t(k.ty) * 0x94D049BB133111EBull;
+                return size_t(h);
+            }
+        };
+        auto fnv = [](const void* data, size_t bytes, uint64_t h) {
+            const uint8_t* p = static_cast<const uint8_t*>(data);
+            for (size_t i = 0; i < bytes; i++) { h ^= p[i]; h *= 0x100000001B3ull; }
+            return h;
+        };
+        std::unordered_map<Key, const MeshData*, Hash> seen;
+        std::vector<MeshData*> kept;
+        kept.reserve(g->meshes.size());
+        for (MeshData* m : g->meshes)
+        {
+            if (!m || !m->vertex_list || m->num_vertex <= 0 || m->draw_call_list.empty())
+            {
+                kept.push_back(m);
+                continue;
+            }
+            Key k;
+            k.object = m->object_id;
+            k.material = m->material;
+            k.variant = m->model_variant;
+            k.vertices = uint32_t(m->num_vertex);
+            k.tx = int64_t(floor(m->translation.x * 1000.0));
+            k.ty = int64_t(floor(m->translation.y * 1000.0));
+            k.tz = int64_t(floor(m->translation.z * 1000.0));
+            k.vhash = fnv(m->vertex_list.get(), sizeof(core::vec3f) * size_t(m->num_vertex), 0xCBF29CE484222325ull);
+            k.indices = 0;
+            k.ihash = 0xCBF29CE484222325ull;
+            for (const DrawCallInfo& dc : m->draw_call_list)
+            {
+                k.indices += uint32_t(dc.get_index_count());
+                const uint32_t prim = uint32_t(dc.get_primitive_type());
+                k.ihash = fnv(&prim, sizeof(prim), k.ihash);
+                k.ihash = fnv(dc.get_index_buffer(), size_t(dc.get_index_count()) * (dc.get_index_type() == kGlUInt ? 4 : 2), k.ihash);
+            }
+            auto it = seen.find(k);
+            if (it != seen.end())
+            {
+                const MeshData* first = it->second;
+                bool same = memcmp(first->vertex_list.get(), m->vertex_list.get(), sizeof(core::vec3f) * size_t(m->num_vertex)) == 0 &&
+                            first->draw_call_list.size() == m->draw_call_list.size();
+                for (size_t d = 0; same && d < m->draw_call_list.size(); d++)
+                {
+                    const DrawCallInfo& a = first->draw_call_list[d];
+                    const DrawCallInfo& b = m->draw_call_list[d];
+                    same = a.get_index_count() == b.get_index_count() && a.get_index_type() == b.get_index_type() &&
+                           memcmp(a.get_index_buffer(), b.get_index_buffer(),
+                                  size_t(a.get_index_count()) * (a.get_index_type() == kGlUInt ? 4 : 2)) == 0;
+                }
+                if (same)
+                {
+                    delete m;
+                    continue;
+                }
+            }
+            seen.emplace(k, m);
+            kept.push_back(m);
+        }
+        g->meshes.swap(kept);
     }
 
     void DeleteBatches(std::vector<BatchMeshData*>& batches)
@@ -339,6 +433,7 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
                 if (m->bbox_ws.b_valid)
                     g->bbox_ws += m->bbox_ws;
             }
+            DropDuplicateMeshes(g);
             if (version >= 3)
             {
                 uint32_t num_objects = r.count(1u << 24);

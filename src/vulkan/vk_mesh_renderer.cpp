@@ -291,7 +291,7 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     // projection the push goes into the depth directly.
     if (mesh->lod_size > 0.0f)
     {
-        const float push = 0.05f * mesh->lod_size;
+        const float push = (std::min)(0.05f * mesh->lod_size, 100.0f);
         pc.screenPosition[0] = frame.orthographic ? push * frame.orthoDepthPerMetre : push;
     }
     pc.screenPosition[3] = frame.orthographic ? 1.0f : 0.0f;

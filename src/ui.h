@@ -136,6 +136,7 @@ public:
     enum SelectionView { kSelSegment = 0, kSelActual = 1 };
     int   selectionView = kSelSegment;   // T toggles: highlighted segment / actual textured object
     bool  wantFrameSelection = false;
+    bool  wantDeleteSelection = false;   // remove the selected mesh / object's meshes from the scene
     bool  wantClearSelection = false;
     int   wantModelVersion = -1;
     int   wantAllModelVersion = -1;
