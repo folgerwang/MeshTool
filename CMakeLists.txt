@@ -108,6 +108,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${TP}/cpp-httplib
 )
 
+# Release builds keep symbols (a .pdb next to the .exe), so a crash dump from
+# Windows Error Reporting resolves to source lines.
+target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Release>:/Zi>)
+target_link_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
     glfw
