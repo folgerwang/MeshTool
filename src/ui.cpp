@@ -1912,6 +1912,19 @@ void MeshToolUI::DrawSimDialog()
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("A flat stretch of surface stepping up this far from the road is tree canopy:\n"
                           "it is dropped from the driving profile and cut away over the road while driving.");
+    ImGui::Checkbox("Check the car's height while driving", &simHeightCheck);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Every few metres: where the road is in view from above the car stays on it; where trees\n"
+                          "cover the road its height is guessed as the tree tops minus the tree height measured\n"
+                          "nearby where the road is exposed beside trees, held within a road-like grade of the\n"
+                          "exposed road either side, and the car is moved there.");
+    if (simHeightCheck)
+    {
+        ImGui::SliderFloat("Check every (m)", &simHeightCheckM, 2.0f, 50.0f, "%.0f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Distance between height checks. Each check looks this far ahead of the car and\n"
+                              "the height eases in over the distance.");
+    }
     ImGui::Checkbox("Cut the canopy over the road", &simCutCanopy);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Removes the tree triangles over the road corridor from the view while the\n"

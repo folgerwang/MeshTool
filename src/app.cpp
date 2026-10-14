@@ -460,6 +460,7 @@ void MeshToolApp::UpdateAutoShots()
             // The chase camera frames the car once the simulation is up.
             m_ui->wantStartSim = true;
             m_ui->simCamera = m_auto.ortho ? 2 : 0;
+            m_ui->simHeightCheck = m_auto.heightCheck;
             m_autoSimParked = false;
         }
         m_ui->classColors = true;
@@ -482,10 +483,59 @@ void MeshToolApp::UpdateAutoShots()
                 m_sim.s = (std::min)(1.0, m_auto.sim) * m_sim.road.length;
                 m_sim.playing = false;
                 m_sim.camInit = false;
+                m_sim.nextCheckAt = m_sim.s;
+                m_sim.liftSnap = true;
                 m_autoFrames = 0;
                 return;
             }
             fprintf(stderr, "--sim: %s\n", m_ui->simStatus.c_str());
+        }
+        if (m_auto.sim >= 0.0 && m_sim.active)
+        {
+            fprintf(stderr, "--sim: %s\n--sim: %s\n", m_ui->simStatus.c_str(), m_ui->simHud.c_str());
+            // Where the height check guesses the road: stretches every 10 m, with the lift range.
+            const double every = (std::max)(2.0, double(m_ui->simHeightCheckM));
+            double from = -1.0, lo = 0.0, hi = 0.0;
+            auto flush = [&](double to) {
+                if (from >= 0.0)
+                    fprintf(stderr, "--sim: road guessed under trees %.2f-%.2f km, %+.1f..%+.1f m (%.0f%%-%.0f%%)\n",
+                            from / 1000.0, to / 1000.0, lo, hi, 100.0 * from / m_sim.road.length,
+                            100.0 * to / m_sim.road.length);
+                from = -1.0;
+            };
+            for (double s = 0.0; s <= m_sim.road.length; s += every)
+            {
+                const double l = m_sim.road.LiftAt(s) + CheckRoadHeight(m_sim.road, s, 0.5 * every, 0.3, m_sim.params.treeHeight).lift;
+                if (fabs(l) <= 0.3) { flush(s); continue; }
+                if (from < 0.0) { from = s; lo = hi = l; }
+                lo = (std::min)(lo, l); hi = (std::max)(hi, l);
+            }
+            flush(m_sim.road.length);
+            if (!m_auto.roadCsv.empty())
+            {
+                // The recovered road, one station per line, with the check's result every metre.
+                FILE* f = fopen(m_auto.roadCsv.c_str(), "w");
+                if (f)
+                {
+                    fprintf(f, "s,x,y,z,surfaceZ,rough,tree,missing,guided,seen,treeHeight,baked,lift,chordZ,clamped\n");
+                    const size_t perM = std::max<size_t>(1, size_t(1.0 / m_sim.params.stationStep + 0.5));
+                    for (size_t i = 0; i < m_sim.road.stations.size(); i++)
+                    {
+                        const RoadStation& st = m_sim.road.stations[i];
+                        fprintf(f, "%.1f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%.1f,%.2f", st.s, st.pos.x, st.pos.y, st.pos.z,
+                                st.surfaceZ, st.rough, st.tree, st.missing, st.guided, st.seen, st.treeHeight, st.lift);
+                        if (i % perM == 0)
+                        {
+                            const HeightCheck c = CheckRoadHeight(m_sim.road, st.s, 0.5 * every, 0.3, m_sim.params.treeHeight);
+                            fprintf(f, ",%.2f,%.2f,%d\n", c.lift, c.chordZ, c.clamped);
+                        }
+                        else
+                            fprintf(f, ",,,\n");
+                    }
+                    fclose(f);
+                    fprintf(stderr, "--sim: road written to %s\n", m_auto.roadCsv.c_str());
+                }
+            }
         }
         StartCheckScreenshots(m_auto.prefix);
         m_autoStage = 3;
@@ -2097,6 +2147,11 @@ void MeshToolApp::StartDriveSim()
         fail(sim.road.error);
         return;
     }
+    // The height checks go into the profile first, so the canopy cut follows
+    // the corrected road (the checks made while driving then find it right).
+    sim.baked = 0;
+    if (m_ui->simHeightCheck)
+        sim.baked = ApplyHeightChecks(sim.road, (std::max)(2.0, double(m_ui->simHeightCheckM)), 0.3, sim.params.treeHeight);
     sim.car = BuildCarMeshes();
     sim.sky = BuildSkyDome();
     sim.skyTexture = m_texManager->UploadRGBA(sim.sky.gradient.data(), 1, sim.sky.gradientHeight);
@@ -2113,13 +2168,24 @@ void MeshToolApp::StartDriveSim()
     sim.elapsed = 0.0;
     sim.wheelSpin = 0.0;
     sim.camInit = false;
+    sim.lift = sim.liftTarget = 0.0;
+    sim.nextCheckAt = 0.0;
+    sim.liftSnap = true;
+    sim.lifted = 0;
+    sim.liftKind = HeightCheck::kNone;
     sim.active = true;
     sim.playing = true;
-    char buf[256];
+    char buf[320];
+    char trees[96];
+    if (std::isnan(sim.road.canopyHeight))
+        snprintf(trees, sizeof(trees), "no trees seen beside the exposed road");
+    else
+        snprintf(trees, sizeof(trees), "tree tops %.1f m over the road (%d samples)", sim.road.canopyHeight,
+                 sim.road.canopySamples);
     snprintf(buf, sizeof(buf), "road recovered over %.1f km: %d stations, %d under trees, %d without a surface; "
-             "%d canopy triangles cleared",
+             "%d canopy triangles cleared; %s; height guessed under trees at %d checks",
              sim.road.length / 1000.0, int(sim.road.stations.size()), sim.road.rejected, sim.road.missing,
-             sim.canopyRemoved);
+             sim.canopyRemoved, trees, sim.baked);
     m_ui->simStatus = buf;
     m_ui->statusMessage = std::string("Drive simulation: ") + buf;
     m_ui->statusTimeout = 8.0f;
@@ -2236,6 +2302,8 @@ void MeshToolApp::UpdateDriveSim(double dt)
         sim.s = 0.0;
         sim.elapsed = 0.0;
         sim.camInit = false;
+        sim.nextCheckAt = 0.0;
+        sim.liftSnap = true;
     }
     ui.simActive = sim.active;
     ui.simPlaying = sim.playing;
@@ -2259,8 +2327,43 @@ void MeshToolApp::UpdateDriveSim(double dt)
             ui.simStatus = "arrived";
         }
     }
+    // Height check every few metres, made a check ahead of the car so the
+    // lift eases in by the time it gets there (at once after a jump).
+    const double checkEvery = (std::max)(2.0, double(ui.simHeightCheckM));
+    if (ui.simHeightCheck)
+    {
+        if (sim.s >= sim.nextCheckAt)
+        {
+            const double at = sim.liftSnap ? sim.s : (std::min)(sim.road.length, sim.s + checkEvery);
+            const HeightCheck check = CheckRoadHeight(sim.road, at, 0.5 * checkEvery, 0.3, sim.params.treeHeight);
+            sim.liftTarget = check.lift;
+            sim.liftKind = check.kind;
+            sim.liftTrees = check.treeHeight;
+            if (check.kind != HeightCheck::kNone) sim.lifted++;
+            sim.nextCheckAt = sim.s + checkEvery;
+            if (sim.liftSnap)
+            {
+                sim.lift = sim.liftTarget;
+                sim.liftSnap = false;
+            }
+        }
+        if (sim.lift != sim.liftTarget)
+        {
+            // Ease at a road-like grade, and at least slowly when stopped.
+            const double maxMove = (std::max)(0.15 * speed, 0.5) * dt;
+            const double d = sim.liftTarget - sim.lift;
+            sim.lift += fabs(d) <= maxMove ? d : (d > 0.0 ? maxMove : -maxMove);
+        }
+    }
+    else
+    {
+        sim.lift = sim.liftTarget = 0.0;
+        sim.liftKind = HeightCheck::kNone;
+        sim.nextCheckAt = sim.s;
+        sim.liftSnap = true;
+    }
     double heading = 0.0, pitch = 0.0;
-    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift);
+    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift + sim.lift);
 
     // Camera.
     const double kPi = 3.14159265358979323846;
@@ -2291,10 +2394,14 @@ void MeshToolApp::UpdateDriveSim(double dt)
     else if (mode == 2)
         m_camera->target = carPos + core::vec3d(0.0, 0.0, 1.0);   // follow: pivot on the car, orbit freely
 
-    char hud[256];
+    char hud[320];
     const int secs = int(sim.elapsed);
-    snprintf(hud, sizeof(hud), "Drive  %.0f mph   %.2f / %.2f km   %d:%02d   grade %+.1f%%%s", ui.simSpeedMph,
-             sim.s / 1000.0, sim.road.length / 1000.0, secs / 60, secs % 60, tan(pitch) * 100.0,
+    char liftText[64] = "";
+    const double baked = sim.road.LiftAt(sim.s);
+    if (fabs(baked + sim.lift) > 0.05 || sim.liftKind != HeightCheck::kNone)
+        snprintf(liftText, sizeof(liftText), "   under trees: road guessed %+.1f m", baked + sim.lift);
+    snprintf(hud, sizeof(hud), "Drive  %.0f mph   %.2f / %.2f km   %d:%02d   grade %+.1f%%%s%s", ui.simSpeedMph,
+             sim.s / 1000.0, sim.road.length / 1000.0, secs / 60, secs % 60, tan(pitch) * 100.0, liftText,
              sim.playing ? "" : sim.s >= sim.road.length ? "   arrived" : "   paused (Space)");
     ui.simHud = hud;
     ui.simProgress = sim.road.length > 0.0 ? float(sim.s / sim.road.length) : 0.0f;
@@ -2319,7 +2426,7 @@ void MeshToolApp::DrawDriveSim(VkCommandBuffer cmd, const float* viewProj, const
         m_meshRenderer->DrawMesh(cmd, sim.sky.mesh.get(), viewProj, frame, nullptr, false, dome);
     }
     double heading = 0.0, pitch = 0.0;
-    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift);
+    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift + sim.lift);
     const core::vec3d rel(carPos.x - frame.refPos[0], carPos.y - frame.refPos[1], carPos.z - frame.refPos[2]);
     float model[16];
     CarModelMatrix(rel, heading, pitch, core::vec3d(0.0, 0.0, 0.0), 0.0, model);

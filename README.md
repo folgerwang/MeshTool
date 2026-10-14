@@ -83,8 +83,17 @@ A typical session, from an empty scene to an exported model:
    profile climbs hills through holes in the canopy), a long stretch of solid
    canopy follows the canopy floor lowered by the tree height seen where the
    road enters and leaves it, and the result is smoothed. The profile only
-   guides the car (nothing is drawn for the road). A sky dome surrounds the
-   view. The mesh over the road corridor (*Clear width*, 20 m) higher than
+   guides the car (nothing is drawn for the road). While driving, the car's
+   height is checked every 10 m (*Check every*): where the road is in view
+   from above the car stays on the profile; where trees cover it the road
+   height is guessed as the local tree tops minus the tree height, measured
+   nearby where the road is exposed with trees beside it (the median rise of
+   the surface beside the road over the road, within 100 m), held within a
+   road-like grade (12%) of the exposed road on either side, and the car
+   eases to that height (the viewport readout shows the correction;
+   `--no-height-check` turns it off for `--shots --sim`, and `--road-csv
+   file` writes the recovered road with the check's result). A sky dome
+   surrounds the view. The mesh over the road corridor (*Clear width*, 20 m) higher than
    *Clear above road* (1.5 m) can be cut out of the view while the simulation
    runs, so the car stays visible under trees (Stop puts it back; the saved
    scene is not changed). A scene saved without a route takes two addresses in

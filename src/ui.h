@@ -64,6 +64,8 @@ public:
     bool  simCutCanopy = true;     // clear canopy triangles over the road while the sim runs
     float simClearWidth = 20.0f;   // width of the cleared corridor (m)
     float simClearHeight = 1.5f;   // the corridor is cleared above this height over the road (m)
+    bool  simHeightCheck = true;   // check the car's height every few metres while driving
+    float simHeightCheckM = 10.0f; // metres between checks
     int   simCamera = 0;           // 0 chase, 1 driver, 2 follow (orbit around the car), 3 free
     bool  simActive = false;
     bool  simPlaying = false;

@@ -66,8 +66,9 @@ namespace
         return true;
     }
 
-    // Every drawn mesh of the scene. `skipTrees` leaves out segmented tree objects.
-    template<class F> void ForEachMesh(const std::vector<BatchMeshData*>& batches, bool skipTrees, F&& f)
+    // Every drawn mesh of the scene, with the class of the segmented object it
+    // belongs to (kObjUnknown when the scene is not segmented).
+    template<class F> void ForEachMesh(const std::vector<BatchMeshData*>& batches, F&& f)
     {
         for (BatchMeshData* batch : batches)
         {
@@ -79,10 +80,10 @@ namespace
                 {
                     if (!mesh || !mesh->vertex_list || mesh->num_vertex <= 0) continue;
                     if (!IsMeshModelVisible(group, mesh)) continue;
-                    if (skipTrees && mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size() &&
-                        group->objects[size_t(mesh->object_id)].cls == kObjTree)
-                        continue;
-                    f(mesh);
+                    ObjectClass cls = kObjUnknown;
+                    if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
+                        cls = ObjectClass(group->objects[size_t(mesh->object_id)].cls);
+                    f(mesh, cls);
                 }
             }
         }
@@ -276,6 +277,19 @@ core::vec3d DriveRoad::PoseAt(double s, double* heading, double* pitch) const
     return a.pos + (b.pos - a.pos) * t;
 }
 
+double DriveRoad::LiftAt(double s) const
+{
+    if (stations.empty()) return 0.0;
+    if (s <= stations.front().s) return stations.front().lift;
+    if (s >= stations.back().s) return stations.back().lift;
+    size_t hi = size_t(std::upper_bound(stations.begin(), stations.end(), s,
+                                        [](double v, const RoadStation& st) { return v < st.s; }) - stations.begin());
+    const RoadStation& a = stations[hi - 1];
+    const RoadStation& b = stations[hi];
+    const double t = (s - a.s) / (std::max)(b.s - a.s, 1e-6);
+    return a.lift + (b.lift - a.lift) * t;
+}
+
 DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline, double refLon, double refLat,
                          const std::vector<BatchMeshData*>& batches, const DriveRoadParams& p)
 {
@@ -356,31 +370,43 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
 
     // Sample points across the inner part of the road at every station. The
     // band stays well inside the carriageway, so a ditch or a bank beside a
-    // route line that sits a little off the real road does not count.
-    const int kLateral = 7;
+    // route line that sits a little off the real road does not count. Beside
+    // the road, a few samples per side (past the asphalt edge) see the trees
+    // standing next to it: where the road is exposed, their height over it
+    // is the tree height.
+    const int kLateral = 7, kSide = 3;
     const double bandHalf = (std::min)(0.3 * p.roadWidth, 2.5);
-    std::vector<double> sx(n * kLateral), sy(n * kLateral), top(n * kLateral, -kInf), low(n * kLateral, kInf);
+    const double sideFrom = 0.5 * p.roadWidth + 1.5, sideStep = 1.5;
+    const size_t bandCount = n * kLateral, total = bandCount + n * 2 * kSide;
+    std::vector<double> sx(total), sy(total), top(total, -kInf), low(total, kInf);
     PointGrid grid;
     grid.cell = 4.0;
     Box2 sampleBox;
     for (size_t i = 0; i < n; i++)
     {
         const core::vec3d right = RightOf(road.stations[i].heading);
-        for (int k = 0; k < kLateral; k++)
-        {
-            const double off = bandHalf * (2.0 * k / (kLateral - 1) - 1.0);
-            const size_t idx = i * kLateral + k;
+        auto put = [&](size_t idx, double off) {
             sx[idx] = road.stations[i].pos.x + right.x * off;
             sy[idx] = road.stations[i].pos.y + right.y * off;
             grid.Add(sx[idx], sy[idx], int(idx));
             sampleBox.Add(sx[idx], sy[idx]);
+        };
+        for (int k = 0; k < kLateral; k++)
+            put(i * kLateral + k, bandHalf * (2.0 * k / (kLateral - 1) - 1.0));
+        for (int k = 0; k < kSide; k++)
+        {
+            put(bandCount + i * 2 * kSide + k, sideFrom + sideStep * k);
+            put(bandCount + i * 2 * kSide + kSide + k, -(sideFrom + sideStep * k));
         }
     }
 
     // One pass over the scene's triangles: each sample keeps its highest and
-    // lowest hit (a bridge deck over water, a canopy over ground).
-    ForEachMesh(batches, true, [&](MeshData* mesh) {
+    // lowest hit (a bridge deck over water, a canopy over ground). Segmented
+    // tree objects do not count on the road band; segmented buildings do not
+    // count beside it (only trees measure the tree height).
+    ForEachMesh(batches, [&](MeshData* mesh, ObjectClass cls) {
         if (mesh->bbox_ws.b_valid && !sampleBox.OverlapsBounds(mesh->bbox_ws)) return;
+        const bool isTree = cls == kObjTree, isBuilding = cls == kObjBuilding;
         for (const DrawCallInfo& dc : mesh->draw_call_list)
         {
             if (!dc.is_drawable()) continue;
@@ -390,6 +416,8 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
                 tb.Add(a.x, a.y); tb.Add(b.x, b.y); tb.Add(c.x, c.y);
                 if (!tb.Overlaps(sampleBox)) return;
                 grid.ForRange(tb.x0, tb.y0, tb.x1, tb.y1, [&](int idx) {
+                    const bool band = size_t(idx) < bandCount;
+                    if (band ? isTree : isBuilding) return;
                     double z;
                     if (!TriangleHeight(a, b, c, sx[idx], sy[idx], z)) return;
                     if (z > top[idx]) top[idx] = z;
@@ -527,6 +555,64 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
             road.stations[i].tree = true;   // canopy, or clutter on the road (parked cars)
             road.rejected++;
         }
+    // The tree height: at the kept stations (the road is exposed there) the
+    // surface beside the road that stands more than the canopy step above it
+    // is a tree; the median rise over the road is what the height check
+    // subtracts from the canopy top where trees cover the road. Anything far
+    // taller is a building or a wall and does not count. Trees differ along
+    // a route, so every station gets the median of the rises seen within
+    // 100 m of it (300 m when few were seen there, the whole route when
+    // still few).
+    {
+        const double kMaxTreeRise = 40.0, kLocal = 100.0;
+        const size_t kEnough = 12;
+        std::vector<double> rises, riseS;   // rise, and the station distance it was seen at (ascending)
+        for (size_t i = 0; i < n; i++)
+        {
+            if (std::isnan(z[i])) continue;
+            for (int k = 0; k < 2 * kSide; k++)
+            {
+                const double tz = top[bandCount + i * 2 * kSide + size_t(k)];
+                if (tz == -kInf) continue;
+                const double rise = tz - z[i];
+                if (rise > p.treeHeight && rise < kMaxTreeRise)
+                {
+                    rises.push_back(rise);
+                    riseS.push_back(s[i]);
+                }
+            }
+        }
+        road.canopySamples = int(rises.size());
+        if (rises.empty())
+        {
+            road.canopyHeight = kNaN;
+            for (size_t i = 0; i < n; i++) road.stations[i].treeHeight = kNaN;
+        }
+        else
+        {
+            std::vector<double> tmp;
+            auto medianOf = [&](std::vector<double>& v) {
+                std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+                return v[v.size() / 2];
+            };
+            tmp = rises;
+            road.canopyHeight = medianOf(tmp);
+            // Evaluated every 5 m, held in between.
+            const size_t stride = std::max<size_t>(1, size_t(5.0 / step + 0.5));
+            for (size_t i = 0; i < n; i += stride)
+            {
+                auto within = [&](double radius) {
+                    const size_t a = size_t(std::lower_bound(riseS.begin(), riseS.end(), s[i] - radius) - riseS.begin());
+                    const size_t b = size_t(std::upper_bound(riseS.begin(), riseS.end(), s[i] + radius) - riseS.begin());
+                    tmp.assign(rises.begin() + ptrdiff_t(a), rises.begin() + ptrdiff_t(b));
+                };
+                within(kLocal);
+                if (tmp.size() < kEnough) within(3.0 * kLocal);
+                const double v = tmp.size() >= kEnough ? medianOf(tmp) : road.canopyHeight;
+                for (size_t j = i; j < n && j < i + stride; j++) road.stations[j].treeHeight = v;
+            }
+        }
+    }
     // Fill the dropped and missing stations between the kept ones. Start
     // from a straight chord across each gap, then let the profile follow the
     // captured surface wherever that stays near it: the local median of the
@@ -538,6 +624,7 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
     // neither comes near, follows the canopy floor lowered by the tree height
     // seen where the road enters and leaves it. What remains stays straight.
     std::vector<bool> underCanopy(n, false);   // filled from the surface: smoothed harder
+    std::vector<bool> seenSurface(n, false);   // filled from a surface near the profile (not a canopy guess)
     {
         // Local median of the top surface over +-2 m, and its floor over +-8 m.
         std::vector<double> zMed(n, kNaN), zFloor(n, kNaN);
@@ -631,15 +718,18 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
                 {
                     const double base = ref[j];
                     const double t = closed ? (s[j] - s[prev]) / (std::max)(gap, 1e-6) : 0.0;
+                    seenSurface[j] = false;
                     if (!std::isnan(zMed[j]) && fabs(zMed[j] - base) <= p.treeHeight)
                     {
                         z[j] = zMed[j];
                         underCanopy[j] = true;
+                        seenSurface[j] = true;
                     }
                     else if (!std::isnan(zFloor[j]) && fabs(zFloor[j] - base) <= p.treeHeight)
                     {
                         z[j] = zFloor[j];
                         underCanopy[j] = true;
+                        seenSurface[j] = true;
                     }
                     else if (canopy && !std::isnan(zFloor[j]) && zFloor[j] - base > p.treeHeight)
                     {
@@ -674,6 +764,7 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
     }
     for (size_t i = 0; i < n; i++)
         if (underCanopy[i]) { road.stations[i].guided = true; road.guided++; }
+    for (size_t i = 0; i < n; i++) road.stations[i].seen = seenSurface[i];
 
     // Smoothing: light everywhere, heavy where the profile follows the bumpy
     // canopy top, blended over 10 m so the two meet without a step.
@@ -727,6 +818,148 @@ DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline,
     for (size_t i = 0; i < n; i++) road.stations[i].pos.z = z[i];
     road.ok = true;
     return road;
+}
+
+HeightCheck CheckRoadHeight(const DriveRoad& road, double s, double window, double tolerance, double treeHeight)
+{
+    HeightCheck r;
+    if (!road.ok || road.stations.size() < 2) return r;
+    const auto& st = road.stations;
+    const size_t lo = size_t(std::lower_bound(st.begin(), st.end(), s - window,
+                                              [](const RoadStation& a, double v) { return a.s < v; }) - st.begin());
+    const size_t hi = size_t(std::upper_bound(st.begin(), st.end(), s + window,
+                                              [](double v, const RoadStation& a) { return v < a.s; }) - st.begin());
+    if (hi <= lo) return r;
+    // How much of the road is exposed over the window (stations whose
+    // surface the profile follows), and the surface and tree height over a
+    // wider stretch (the canopy top is bumpy: a short window would send the
+    // guess up and down from one check to the next).
+    size_t exposed = 0;
+    for (size_t i = lo; i < hi; i++)
+        if (!st[i].missing && (!st[i].tree || st[i].seen)) exposed++;   // the road, or the ground through the trees, is in view
+    const size_t count = hi - lo;
+    if (exposed * 2 >= count) return r;   // the road is in view from above: the profile is on it
+    const double wide = (std::max)(window, 20.0);
+    const size_t wlo = size_t(std::lower_bound(st.begin(), st.end(), s - wide,
+                                               [](const RoadStation& a, double v) { return a.s < v; }) - st.begin());
+    const size_t whi = size_t(std::upper_bound(st.begin(), st.end(), s + wide,
+                                               [](double v, const RoadStation& a) { return v < a.s; }) - st.begin());
+    std::vector<double> all, trees;
+    for (size_t i = wlo; i < whi; i++)
+    {
+        if (st[i].missing || std::isnan(st[i].surfaceZ)) continue;
+        all.push_back(st[i].surfaceZ);
+        if (!std::isnan(st[i].treeHeight)) trees.push_back(st[i].treeHeight);
+    }
+    if (all.size() * 2 < whi - wlo || trees.empty()) return r;   // nothing to guess from
+    auto median = [](std::vector<double>& v) {
+        std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+        return v[v.size() / 2];
+    };
+    const double top = median(all);
+    const double carZ = road.PoseAt(s, nullptr, nullptr).z;
+    if (top - carZ <= treeHeight) return r;   // not under trees: clutter on the road, which the profile follows
+    // Trees over the road: the road is the tree height under their tops.
+    const double trees_ = median(trees);
+    double guess = top - trees_;
+    // A road climbs only so fast: the guess stays within 12% of the distance
+    // to the nearest exposed road of the chord between the exposed road on
+    // either side (flat from one side when the other is never exposed).
+    {
+        const double kClimb = 0.12, kReach = 2000.0;
+        auto isExposed = [&](size_t i) { return !st[i].missing && (!st[i].tree || st[i].seen); };
+        size_t a = lo, b = hi;
+        bool hasA = false, hasB = false;
+        for (size_t i = lo; i-- > 0 && s - st[i].s <= kReach;)
+            if (isExposed(i)) { a = i; hasA = true; break; }
+        for (size_t i = hi; i < st.size() && st[i].s - s <= kReach; i++)
+            if (isExposed(i)) { b = i; hasB = true; break; }
+        if (hasA || hasB)
+        {
+            double chord, dist;
+            if (hasA && hasB)
+            {
+                const double t = (s - st[a].s) / (std::max)(st[b].s - st[a].s, 1e-6);
+                chord = st[a].pos.z + (st[b].pos.z - st[a].pos.z) * t;
+                dist = (std::min)(s - st[a].s, st[b].s - s);
+            }
+            else if (hasA) { chord = st[a].pos.z; dist = s - st[a].s; }
+            else { chord = st[b].pos.z; dist = st[b].s - s; }
+            const double allow = kClimb * dist + 0.3;
+            r.chordZ = chord;
+            if (guess > chord + allow) { guess = chord + allow; r.clamped = true; }
+            if (guess < chord - allow) { guess = chord - allow; r.clamped = true; }
+        }
+    }
+    const double d = guess - carZ;
+    if (fabs(d) > tolerance)
+    {
+        r.kind = HeightCheck::kUnderCanopy;
+        r.lift = d;
+        r.surfaceZ = top;
+        r.treeHeight = trees_;
+    }
+    return r;
+}
+
+int ApplyHeightChecks(DriveRoad& road, double every, double tolerance, double treeHeight)
+{
+    if (!road.ok || road.stations.size() < 2) return 0;
+    every = (std::max)(1.0, every);
+    // All checks first, on the profile as recovered.
+    std::vector<double> at, lift;
+    int changed = 0;
+    for (double s = 0.0;; s += every)
+    {
+        s = (std::min)(s, road.length);
+        const HeightCheck c = CheckRoadHeight(road, s, 0.5 * every, tolerance, treeHeight);
+        at.push_back(s);
+        lift.push_back(c.lift);
+        if (c.kind != HeightCheck::kNone) changed++;
+        if (s >= road.length) break;
+    }
+    // Then the profile moves by the lift, interpolated between the checks.
+    size_t k = 0;
+    for (RoadStation& st : road.stations)
+    {
+        while (k + 1 < at.size() && at[k + 1] < st.s) k++;
+        double v = lift[k];
+        if (k + 1 < at.size())
+        {
+            const double t = (std::min)(1.0, (std::max)(0.0, (st.s - at[k]) / (std::max)(at[k + 1] - at[k], 1e-6)));
+            v = lift[k] + (lift[k + 1] - lift[k]) * t;
+        }
+        st.lift = v;
+    }
+    // Smoothed over the check distance, so the car does not pitch up and
+    // down between one guess and the next.
+    {
+        const size_t n = road.stations.size();
+        const double sigma = every;
+        std::vector<double> sm(n);
+        for (size_t i = 0; i < n; i++)
+        {
+            const double si = road.stations[i].s;
+            double acc = 0.0, wsum = 0.0;
+            for (size_t j = i; j < n && road.stations[j].s - si <= 3.0 * sigma; j++)
+            {
+                const double d = road.stations[j].s - si, w = exp(-0.5 * d * d / (sigma * sigma));
+                acc += w * road.stations[j].lift; wsum += w;
+            }
+            for (size_t j = i; j-- > 0 && si - road.stations[j].s <= 3.0 * sigma;)
+            {
+                const double d = road.stations[j].s - si, w = exp(-0.5 * d * d / (sigma * sigma));
+                acc += w * road.stations[j].lift; wsum += w;
+            }
+            sm[i] = wsum > 0.0 ? acc / wsum : road.stations[i].lift;
+        }
+        for (size_t i = 0; i < n; i++)
+        {
+            road.stations[i].lift = sm[i];
+            road.stations[i].pos.z += sm[i];
+        }
+    }
+    return changed;
 }
 
 // ---------------------------------------------------------------------------
@@ -912,7 +1145,7 @@ int CanopyCut::Apply(const DriveRoad& road, const DriveRoadParams& p, const std:
     };
 
     int removed = 0;
-    ForEachMesh(batches, false, [&](MeshData* mesh) {
+    ForEachMesh(batches, [&](MeshData* mesh, ObjectClass) {
         if (mesh->bbox_ws.b_valid &&
             (!corridorBox.OverlapsBounds(mesh->bbox_ws) || mesh->bbox_ws.bb_max.z < lowestRoad + p.clearHeight))
             return;

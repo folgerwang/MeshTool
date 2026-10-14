@@ -14,6 +14,13 @@
 // smoothed. The profile only guides the car; nothing is drawn for the road.
 // Optionally the canopy triangles over the corridor are cut out of the scene
 // meshes so the car is visible from above (undone when the simulation ends).
+//
+// While driving, the car's height is checked every few metres (see
+// CheckRoadHeight): where the road is exposed to the view from above the
+// profile is on it and nothing changes; where trees cover it the road height
+// is guessed as the canopy top minus the tree height, measured along the
+// route where the road is exposed with trees beside it, and the car is moved
+// to that height.
 #include <memory>
 #include <string>
 #include <utility>
@@ -50,7 +57,11 @@ struct RoadStation
     bool        tree = false;       // surface rejected: canopy (or clutter on the road)
     bool        missing = false;    // no captured surface under this station
     bool        guided = false;     // height taken from the captured surface although the station was rejected
+    bool        seen = false;       // guided by a surface near the profile: the road (or the ground under the
+                                    // trees) is in view here, so the height is not a guess
     bool        rough = false;      // the top surface here is too uneven to be road
+    double      treeHeight = 0.0;   // height of the tree tops over the road near here (NaN: no trees seen)
+    double      lift = 0.0;         // metres the height checks moved the profile here (ApplyHeightChecks)
 };
 
 struct DriveRoad
@@ -61,10 +72,18 @@ struct DriveRoad
     double      length = 0.0;
     int         sampled = 0, rejected = 0, missing = 0;   // stations with a surface / dropped as canopy / without any
     int         guided = 0;                               // rejected stations whose height still follows the surface
+    // Height of the tree tops over the road: the median rise of the surface
+    // beside the road over the road height, at stations where the road is
+    // exposed and trees stand next to it (NaN when no trees were seen). The
+    // whole route here; each station carries the value measured near it.
+    double      canopyHeight = 0.0;
+    int         canopySamples = 0;
 
     // Centre-line pose at `s` metres: position, heading (rad, clockwise from
     // north) and pitch (rad, positive climbing).
     core::vec3d PoseAt(double s, double* heading, double* pitch) const;
+    // Metres the height checks moved the profile at `s` (0 before ApplyHeightChecks).
+    double LiftAt(double s) const;
 };
 
 // Recovers the road along `polyline` (lon, lat) over the scene's meshes.
@@ -72,6 +91,33 @@ struct DriveRoad
 // segmented tree objects are ignored when sampling.
 DriveRoad BuildDriveRoad(const std::vector<std::pair<double, double>>& polyline, double refLon, double refLat,
                          const std::vector<BatchMeshData*>& batches, const DriveRoadParams& params);
+
+// The height check made while driving: the lift to add to the profile height
+// at `s` so the car sits at a reasonable height there. Over +-`window` metres
+// around `s`: when the road is mostly exposed to the view from above, the
+// profile follows it and the lift is zero. Otherwise, when the captured
+// surface is more than `treeHeight` above the profile (trees over the road),
+// the road is guessed at the surface minus the tree height measured near
+// there, kept within a road-like grade of the nearest exposed road on either
+// side (a straight chord between them, +-12% of the distance to the nearer
+// one), and the lift moves the car there, up or down, when it is off by more
+// than `tolerance`.
+struct HeightCheck
+{
+    enum Kind { kNone = 0, kUnderCanopy };
+    Kind   kind = kNone;
+    double lift = 0.0;        // metres to add to the profile height (negative lowers)
+    double surfaceZ = 0.0;    // the surface the check measured against
+    double treeHeight = 0.0;  // the tree height subtracted from it
+    double chordZ = 0.0;      // the chord between the nearest exposed road either side
+    bool   clamped = false;   // the guess was held to the chord's grade allowance
+};
+HeightCheck CheckRoadHeight(const DriveRoad& road, double s, double window, double tolerance, double treeHeight);
+
+// Makes the height check every `every` metres along the road and moves the
+// profile by the lifts, interpolated between the checks, so the canopy cut
+// and the car agree. Returns the number of checks that moved it.
+int ApplyHeightChecks(DriveRoad& road, double every, double tolerance, double treeHeight);
 
 // Car geometry in car space: x right, y forward, z up, origin on the ground
 // under the car's centre. The wheel mesh is drawn once per `wheelOffsets`.

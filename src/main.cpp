@@ -345,6 +345,8 @@ int main(int argc, char* argv[])
                 if (i + 1 < argc) { double f = strtod(argv[i + 1], &end); if (end && *end == '\0' && end != argv[i + 1]) { shots.sim = f; i++; } }
             }
             else if (!strcmp(argv[i], "--original-models")) shots.originalModels = true;
+            else if (!strcmp(argv[i], "--no-height-check")) shots.heightCheck = false;
+            else if (!strcmp(argv[i], "--road-csv") && i + 1 < argc) shots.roadCsv = argv[++i];
             else if (!strcmp(argv[i], "--box") && i + 6 < argc)
             {
                 for (int k = 0; k < 6; k++) shots.box[k] = atof(argv[++i]);
