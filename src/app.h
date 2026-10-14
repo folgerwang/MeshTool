@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <future>
 #include "route.h"
+#include "sim.h"
 #include "coremath.h"
 
 class VulkanRenderer;
@@ -18,6 +19,8 @@ class InputHandler;
 class ViewCamera;
 class ProcessManager;
 class LiveCaptureProcessor;
+struct MeshDrawFrame;
+typedef struct VkCommandBuffer_T* VkCommandBuffer;
 struct GroupMeshData;
 struct MeshData;
 struct BatchMeshData;
@@ -51,6 +54,7 @@ public:
         double      box[6] = {};     // min x, y, z, max x, y, z
         bool        glass = true;    // draw glass facades as glass (false: as captured)
         bool        ortho = false;   // bird's-eye orthographic view instead of yaw/pitch
+        double      sim = -1.0;      // >= 0: start the drive simulation, park the car this far along (0..1), chase camera
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     // MeshTool.exe --capture-route "from" "to" [...]: start a route capture as
@@ -60,7 +64,7 @@ public:
     {
         bool        enabled = false;
         std::string from, to, savePath;
-        double      spacing = 150.0, height = 250.0, tilt = 0.0, dwell = 4.0;
+        double      spacing = 100.0, height = 100.0, tilt = 0.0, dwell = 4.0;
         bool        lookBack = false;
     };
     void SetAutoRoute(const AutoRoute& route) { m_autoRoute = route; }
@@ -99,6 +103,7 @@ private:
     AutoShots m_auto;
     int  m_autoStage = 0;          // 0 off, 1 wait for scene, 2 settle, 3 shooting
     int  m_autoFrames = 0;
+    bool m_autoSimParked = false;
     void UpdateAutoShots();
     int  m_shotStage = 0;          // 0 idle, 1 class colours, 2 original colours
     bool m_shotPending = false;    // readback requested for this frame
@@ -143,6 +148,34 @@ private:
     void UpdateRouteCapture();
     AutoRoute m_autoRoute;
     bool      m_autoRouteStarted = false;
+    // The driving route the scene was captured along: set when a route
+    // capture has planned it, saved in the scene file, restored on open.
+    RoutePlan m_sceneRoute;
+
+    // Tools > Drive Simulation: a car drives the scene route at a set speed
+    // over a road recovered from the mesh (see sim.h).
+    struct DriveSim
+    {
+        bool   active = false, playing = false;
+        double s = 0.0;              // metres along the road
+        double elapsed = 0.0;        // seconds driven
+        double wheelSpin = 0.0;      // radians
+        double camYaw = 0.0;         // chase camera, smoothed
+        bool   camInit = false;
+        DriveRoadParams params;
+        DriveRoad  road;
+        CarMeshes  car;
+        SkyDome    sky;
+        uint32_t   skyTexture = 0xFFFFFFFF;
+        CanopyCut  cut;
+        int        canopyRemoved = 0;
+        std::future<RoutePlan> planning;   // route looked up for a scene saved without one
+        bool   planningRoute = false;
+    } m_sim;
+    void StartDriveSim();
+    void StopDriveSim(bool restoreCanopy);
+    void UpdateDriveSim(double dt);
+    void DrawDriveSim(VkCommandBuffer cmd, const float* viewProj, const MeshDrawFrame& frame);
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet

@@ -232,6 +232,7 @@ void MeshToolApp::MainLoop()
         UpdateGeoReadout();
         UpdateGeFollow();
         UpdateSelection();
+        UpdateDriveSim(dt);
         DrawCaptureOverlay();
 
         ImGui::Render();
@@ -310,6 +311,7 @@ void MeshToolApp::MainLoop()
         drawFrame.glassReflect = m_ui->glassReflect;
         drawFrame.orthographic = m_camera->orthographic;
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
+        DrawDriveSim(cmd, viewProj, drawFrame);
 
         if (!m_shotPending)
         {
@@ -453,6 +455,13 @@ void MeshToolApp::UpdateAutoShots()
         }
         FrameBounds(box);
         m_camera->distance *= m_auto.zoom;
+        if (m_auto.sim >= 0.0)
+        {
+            // The chase camera frames the car once the simulation is up.
+            m_ui->wantStartSim = true;
+            m_ui->simCamera = m_auto.ortho ? 2 : 0;
+            m_autoSimParked = false;
+        }
         m_ui->classColors = true;
         m_ui->glass = m_auto.glass;
         for (auto* batch : g_world.mesh_data_batches)
@@ -464,6 +473,20 @@ void MeshToolApp::UpdateAutoShots()
     }
     else if (m_autoStage == 2 && m_autoFrames >= 3)
     {
+        if (m_auto.sim >= 0.0 && !m_autoSimParked)
+        {
+            // Park the car along the route and give the camera a frame to follow.
+            m_autoSimParked = true;
+            if (m_sim.active)
+            {
+                m_sim.s = (std::min)(1.0, m_auto.sim) * m_sim.road.length;
+                m_sim.playing = false;
+                m_sim.camInit = false;
+                m_autoFrames = 0;
+                return;
+            }
+            fprintf(stderr, "--sim: %s\n", m_ui->simStatus.c_str());
+        }
         StartCheckScreenshots(m_auto.prefix);
         m_autoStage = 3;
     }
@@ -709,6 +732,8 @@ void MeshToolApp::ReleaseGroup(GroupMeshData* group)
 void MeshToolApp::ClearScene()
 {
     vkDeviceWaitIdle(m_renderer->GetContext().device);
+    StopDriveSim(false);   // its canopy cut refers to meshes that are about to go
+    m_sceneRoute = RoutePlan();
     BatchMeshData* live = m_ui ? m_ui->liveBatch : nullptr;
     if (m_ui && m_ui->captureProcessor)
         m_ui->captureProcessor->ResetMerge();   // the group it merges into is about to go
@@ -808,6 +833,7 @@ void MeshToolApp::UpdateSegmentation()
 
     // Split meshes into per-object meshes; the old ones may be on the GPU.
     vkDeviceWaitIdle(m_renderer->GetContext().device);
+    StopDriveSim(true);   // its canopy cut refers to meshes that are about to change
     ClearSelection();   // object indices and meshes are about to change
     std::vector<MeshData*> replaced = ApplySegmentation(*result);
     for (MeshData* m : replaced)
@@ -987,7 +1013,8 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
     }
     std::vector<BatchMeshData*> loaded;
     std::string error;
-    if (!LoadScene(path, loaded, error))
+    RoutePlan route;
+    if (!LoadScene(path, loaded, error, &route))
     {
         m_ui->statusMessage = "Open failed: " + error;
         m_ui->statusTimeout = 10.0f;
@@ -995,6 +1022,7 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
     }
 
     ClearScene();
+    m_sceneRoute = route;
     size_t meshes = 0;
     for (BatchMeshData* batch : loaded)
     {
@@ -1026,9 +1054,10 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
 void MeshToolApp::SaveSceneTo(const std::string& path)
 {
     std::string error;
-    if (SaveScene(path, g_world.mesh_data_batches, error))
+    if (SaveScene(path, g_world.mesh_data_batches, error, &m_sceneRoute))
         m_ui->statusMessage = "Saved " + path + " (" +
-                              SegmentationSummary(SegmentationInfo(g_world.mesh_data_batches)) + " included).";
+                              SegmentationSummary(SegmentationInfo(g_world.mesh_data_batches)) +
+                              (m_sceneRoute.ok ? ", route" : "") + " included).";
     else
         m_ui->statusMessage = "Save failed: " + error;
     m_ui->statusTimeout = 6.0f;
@@ -1607,6 +1636,8 @@ void MeshToolApp::ProcessPendingActions()
         else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && m_ui->selection.active)
             m_ui->selectionView = m_ui->selectionView == MeshToolUI::kSelActual ? MeshToolUI::kSelSegment
                                                                                 : MeshToolUI::kSelActual;
+        else if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Space, false) && m_sim.active)
+            m_ui->wantSimPlayPause = true;
     }
 
     if (!m_ui->pendingOpenScenePath.empty())
@@ -1705,6 +1736,7 @@ void MeshToolApp::ProcessPendingActions()
         if (!result.removed.empty() || !result.modified.empty())
         {
             vkDeviceWaitIdle(m_renderer->GetContext().device);
+            StopDriveSim(false);   // its canopy cut may refer to these meshes
             for (MeshData* mesh : result.removed)
             {
                 m_meshRenderer->ReleaseMesh(mesh);
@@ -1901,6 +1933,7 @@ void MeshToolApp::UpdateRouteCapture()
             finish(r.plan.error, false);
             return;
         }
+        m_sceneRoute = r.plan;   // saved with the scene; the drive simulation runs on it
         char buf[512];
         snprintf(buf, sizeof(buf), "%s -> %s: %.1f km, %zu cameras",
                  r.plan.fromName.c_str(), r.plan.toName.c_str(), r.plan.lengthM / 1000.0, r.plan.waypoints.size());
@@ -2028,6 +2061,280 @@ void MeshToolApp::UpdateRouteCapture()
 }
 
 // ---------------------------------------------------------------------------
+// Drive simulation
+// ---------------------------------------------------------------------------
+
+void MeshToolApp::StartDriveSim()
+{
+    DriveSim& sim = m_sim;
+    auto fail = [&](const std::string& text) {
+        m_ui->simStatus = text;
+        m_ui->statusMessage = "Drive simulation: " + text;
+        m_ui->statusTimeout = 8.0f;
+    };
+    const BatchMeshData* geo = GeoreferencedBatch();
+    if (!geo)
+    {
+        fail("the scene is not georeferenced (capture it with the GPS link)");
+        return;
+    }
+    if (!m_sceneRoute.ok || m_sceneRoute.polyline.size() < 2)
+    {
+        fail("the scene has no route");
+        return;
+    }
+    StopDriveSim(true);
+
+    sim.params.roadWidth = m_ui->simRoadWidth;
+    sim.params.treeHeight = m_ui->simTreeHeight;
+    sim.params.cutCanopy = m_ui->simCutCanopy;
+    sim.params.clearWidth = m_ui->simClearWidth;
+    sim.params.clearHeight = m_ui->simClearHeight;
+    sim.road = BuildDriveRoad(m_sceneRoute.polyline, geo->reference_pos.x, geo->reference_pos.y,
+                              g_world.mesh_data_batches, sim.params);
+    if (!sim.road.ok)
+    {
+        fail(sim.road.error);
+        return;
+    }
+    sim.car = BuildCarMeshes();
+    sim.sky = BuildSkyDome();
+    sim.skyTexture = m_texManager->UploadRGBA(sim.sky.gradient.data(), 1, sim.sky.gradientHeight);
+    sim.sky.mesh->tex_id = sim.skyTexture;
+    sim.canopyRemoved = 0;
+    if (sim.params.cutCanopy)
+    {
+        vkDeviceWaitIdle(m_renderer->GetContext().device);
+        sim.canopyRemoved = sim.cut.Apply(sim.road, sim.params, g_world.mesh_data_batches);
+        for (MeshData* mesh : sim.cut.Touched())
+            m_meshRenderer->ReleaseMesh(mesh);   // re-uploaded without the canopy on the next draw
+    }
+    sim.s = 0.0;
+    sim.elapsed = 0.0;
+    sim.wheelSpin = 0.0;
+    sim.camInit = false;
+    sim.active = true;
+    sim.playing = true;
+    char buf[256];
+    snprintf(buf, sizeof(buf), "road recovered over %.1f km: %d stations, %d under trees, %d without a surface; "
+             "%d canopy triangles cleared",
+             sim.road.length / 1000.0, int(sim.road.stations.size()), sim.road.rejected, sim.road.missing,
+             sim.canopyRemoved);
+    m_ui->simStatus = buf;
+    m_ui->statusMessage = std::string("Drive simulation: ") + buf;
+    m_ui->statusTimeout = 8.0f;
+}
+
+void MeshToolApp::StopDriveSim(bool restoreCanopy)
+{
+    DriveSim& sim = m_sim;
+    const bool hadMeshes = sim.car.body || sim.sky.mesh || sim.cut.Active();
+    if (hadMeshes && m_renderer)
+        vkDeviceWaitIdle(m_renderer->GetContext().device);
+    if (sim.cut.Active())
+    {
+        std::vector<MeshData*> touched = restoreCanopy ? sim.cut.Restore() : std::vector<MeshData*>();
+        if (!restoreCanopy) sim.cut.Forget();
+        if (m_meshRenderer)
+            for (MeshData* mesh : touched) m_meshRenderer->ReleaseMesh(mesh);
+    }
+    auto drop = [&](std::unique_ptr<MeshData>& m) {
+        if (m && m_meshRenderer) m_meshRenderer->ReleaseMesh(m.get());
+        m.reset();
+    };
+    drop(sim.car.body); drop(sim.car.glass); drop(sim.car.dark); drop(sim.car.lights); drop(sim.car.wheel);
+    drop(sim.sky.mesh);
+    if (sim.skyTexture != 0xFFFFFFFF && m_texManager)
+    {
+        m_texManager->ReleaseTexture(sim.skyTexture);
+        sim.skyTexture = 0xFFFFFFFF;
+    }
+    sim.road = DriveRoad();
+    sim.active = false;
+    sim.playing = false;
+    if (m_ui)
+    {
+        m_ui->simActive = false;
+        m_ui->simPlaying = false;
+        m_ui->simHud.clear();
+    }
+}
+
+void MeshToolApp::UpdateDriveSim(double dt)
+{
+    DriveSim& sim = m_sim;
+    MeshToolUI& ui = *m_ui;
+    ui.simHasRoute = m_sceneRoute.ok && m_sceneRoute.polyline.size() >= 2;
+    if (ui.simHasRoute)
+    {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s -> %s (%.1f km)", m_sceneRoute.fromName.c_str(), m_sceneRoute.toName.c_str(),
+                 m_sceneRoute.lengthM / 1000.0);
+        ui.simRouteName = buf;
+    }
+    else
+        ui.simRouteName.clear();
+
+    // A scene saved without a route: look one up from the dialog's addresses.
+    if (sim.planningRoute)
+    {
+        ui.simStatus = "looking up the route...";
+        if (sim.planning.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            sim.planningRoute = false;
+            RoutePlan plan = sim.planning.get();
+            if (plan.ok)
+            {
+                m_sceneRoute = plan;
+                StartDriveSim();
+            }
+            else
+            {
+                ui.simStatus = plan.error;
+                ui.statusMessage = "Drive simulation: " + plan.error;
+                ui.statusTimeout = 8.0f;
+            }
+        }
+    }
+    if (ui.wantStartSim)
+    {
+        ui.wantStartSim = false;
+        if (sim.planningRoute)
+            ;
+        else if (ui.simHasRoute)
+            StartDriveSim();
+        else if (ui.routeFrom[0] && ui.routeTo[0])
+        {
+            const std::string from = ui.routeFrom, to = ui.routeTo;
+            sim.planning = std::async(std::launch::async, [=] { return PlanRoute(from, to, 100.0, false); });
+            sim.planningRoute = true;
+        }
+        else
+            ui.simStatus = "the scene has no route: enter the start and the destination";
+    }
+    if (ui.wantStopSim)
+    {
+        ui.wantStopSim = false;
+        if (sim.active)
+        {
+            StopDriveSim(true);
+            ui.simStatus = "stopped";
+        }
+    }
+    if (ui.wantSimPlayPause)
+    {
+        ui.wantSimPlayPause = false;
+        if (sim.active)
+        {
+            if (!sim.playing && sim.s >= sim.road.length) { sim.s = 0.0; sim.elapsed = 0.0; }
+            sim.playing = !sim.playing;
+        }
+    }
+    if (ui.wantSimReset)
+    {
+        ui.wantSimReset = false;
+        sim.s = 0.0;
+        sim.elapsed = 0.0;
+        sim.camInit = false;
+    }
+    ui.simActive = sim.active;
+    ui.simPlaying = sim.playing;
+    if (!sim.active)
+    {
+        ui.simHud.clear();
+        ui.simProgress = 0.0f;
+        return;
+    }
+
+    const double speed = (std::max)(0.0, double(ui.simSpeedMph)) * 0.44704;   // m/s
+    if (sim.playing)
+    {
+        sim.s += speed * dt;
+        sim.elapsed += dt;
+        sim.wheelSpin -= speed * dt / sim.car.wheelRadius;
+        if (sim.s >= sim.road.length)
+        {
+            sim.s = sim.road.length;
+            sim.playing = false;
+            ui.simStatus = "arrived";
+        }
+    }
+    double heading = 0.0, pitch = 0.0;
+    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift);
+
+    // Camera.
+    const double kPi = 3.14159265358979323846;
+    const int mode = m_camera->orthographic && ui.simCamera < 2 ? 2 : ui.simCamera;
+    if (mode == 0)
+    {
+        // Chase: behind and above, turning with the car but a little behind it.
+        if (!sim.camInit) { sim.camYaw = heading; sim.camInit = true; }
+        double d = heading - sim.camYaw;
+        while (d > kPi) d -= 2.0 * kPi;
+        while (d < -kPi) d += 2.0 * kPi;
+        sim.camYaw += d * (std::min)(1.0, dt * 3.0);
+        m_camera->yaw = sim.camYaw;
+        m_camera->pitch = -0.22;
+        m_camera->distance = 16.0;
+        m_camera->target = carPos + core::vec3d(0.0, 0.0, 1.2);
+    }
+    else if (mode == 1)
+    {
+        // Driver: eye in the cabin, looking down the road.
+        m_camera->yaw = heading;
+        m_camera->pitch = pitch;
+        m_camera->distance = 40.0;
+        const core::vec3d fwd(sin(heading), cos(heading), 0.0);
+        const core::vec3d eye = carPos + fwd * 0.3 + core::vec3d(0.0, 0.0, 1.25);
+        m_camera->target = eye + m_camera->Forward() * m_camera->distance;
+    }
+    else if (mode == 2)
+        m_camera->target = carPos + core::vec3d(0.0, 0.0, 1.0);   // follow: pivot on the car, orbit freely
+
+    char hud[256];
+    const int secs = int(sim.elapsed);
+    snprintf(hud, sizeof(hud), "Drive  %.0f mph   %.2f / %.2f km   %d:%02d   grade %+.1f%%%s", ui.simSpeedMph,
+             sim.s / 1000.0, sim.road.length / 1000.0, secs / 60, secs % 60, tan(pitch) * 100.0,
+             sim.playing ? "" : sim.s >= sim.road.length ? "   arrived" : "   paused (Space)");
+    ui.simHud = hud;
+    ui.simProgress = sim.road.length > 0.0 ? float(sim.s / sim.road.length) : 0.0f;
+}
+
+void MeshToolApp::DrawDriveSim(VkCommandBuffer cmd, const float* viewProj, const MeshDrawFrame& frame)
+{
+    DriveSim& sim = m_sim;
+    if (!sim.active) return;
+    auto draw = [&](MeshData* mesh, float r, float g, float b, const float* model = nullptr) {
+        if (!mesh) return;
+        const float rgb[3] = { r, g, b };
+        m_meshRenderer->EnsureUploaded(mesh);
+        m_meshRenderer->DrawMesh(cmd, mesh, viewProj, frame, rgb, false, model);
+    };
+    if (sim.sky.mesh)
+    {
+        // Sky dome around the eye, half way to the far plane (textured gradient).
+        const float radius = float((m_camera->distance + m_camera->sceneRadius * 2.0) * 5.0);
+        const float dome[16] = { radius, 0, 0, 0, 0, radius, 0, 0, 0, 0, radius, 0, 0, 0, 0, 1 };
+        m_meshRenderer->EnsureUploaded(sim.sky.mesh.get());
+        m_meshRenderer->DrawMesh(cmd, sim.sky.mesh.get(), viewProj, frame, nullptr, false, dome);
+    }
+    double heading = 0.0, pitch = 0.0;
+    const core::vec3d carPos = sim.road.PoseAt(sim.s, &heading, &pitch) + core::vec3d(0.0, 0.0, kCarLift);
+    const core::vec3d rel(carPos.x - frame.refPos[0], carPos.y - frame.refPos[1], carPos.z - frame.refPos[2]);
+    float model[16];
+    CarModelMatrix(rel, heading, pitch, core::vec3d(0.0, 0.0, 0.0), 0.0, model);
+    draw(sim.car.body.get(), 0.78f, 0.12f, 0.10f, model);
+    draw(sim.car.glass.get(), 0.10f, 0.13f, 0.18f, model);
+    draw(sim.car.dark.get(), 0.10f, 0.10f, 0.11f, model);
+    draw(sim.car.lights.get(), 0.98f, 0.95f, 0.80f, model);
+    for (const core::vec3d& offset : sim.car.wheelOffsets)
+    {
+        CarModelMatrix(rel, heading, pitch, offset, sim.wheelSpin, model);
+        draw(sim.car.wheel.get(), 0.06f, 0.06f, 0.07f, model);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -2066,7 +2373,10 @@ void MeshToolApp::Shutdown()
     SaveConfig();
 
     if (m_renderer)
+    {
         vkDeviceWaitIdle(m_renderer->GetContext().device);
+        StopDriveSim(false);
+    }
 
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();

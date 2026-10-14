@@ -175,6 +175,7 @@ void MeshToolUI::DrawUI()
     if (showRegionSelectDialog) DrawRegionSelectDialog();
     if (showNavCaptureDialog)   DrawNavCaptureDialog();
     if (showRouteCaptureDialog) DrawRouteCaptureDialog();
+    if (showSimDialog)          DrawSimDialog();
     if (showSegmentDialog)      DrawSegmentDialog();
     if (showRefineDialog)       DrawRefineDialog();
     if (showMessageBox)         DrawMessageBox();
@@ -304,6 +305,12 @@ void MeshToolUI::DrawMenuBar()
             }
             if (ImGui::MenuItem("Save Check Screenshots", nullptr, false, !g_world.mesh_data_batches.empty()))
                 wantCheckScreenshots = true;
+            ImGui::Separator();
+            if (ImGui::MenuItem("Drive Simulation...", nullptr, false, !g_world.mesh_data_batches.empty()))
+                showSimDialog = true;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A car drives the scene's captured route at a set speed over a road\n"
+                                  "recovered from the mesh (trees over the road are seen through).");
             ImGui::EndMenu();
         }
 
@@ -403,6 +410,8 @@ void MeshToolUI::DrawToolbar()
 
     // Capture group
     if (IconBtn(icons::ICON_NAVIGATE,"Navigate & Capture",  white)) showNavCaptureDialog = true;
+    if (IconBtn(icons::ICON_ROUTE,   "Route Capture",       white)) showRouteCaptureDialog = true;
+    if (IconBtn(icons::ICON_SIM,     "Drive Simulation",    white)) showSimDialog = true;
     if (IconBtn(icons::ICON_LAUNCH,  "Launch Google Earth", white)) ActionLiveCapture();
     if (IconBtn(icons::ICON_CAPTURE, "Capture Frame (F5)",  white)) wantCaptureFrame = true;
     if (IconBtn(icons::ICON_STOP,    "Stop Capture",        white)) wantStopCapture = true;
@@ -642,6 +651,17 @@ void MeshToolUI::DrawScenePanel()
                 if (ImGui::SmallButton("Stop route capture")) wantStopRouteCapture = true;
             }
         }
+        if (simActive)
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "Drive simulation:");
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s", simPlaying ? "driving" : "paused");
+            ImGui::ProgressBar(simProgress, ImVec2(-1, 0));
+            if (ImGui::SmallButton(simPlaying ? "Pause" : "Drive")) wantSimPlayPause = true;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Stop simulation")) wantStopSim = true;
+        }
         ImGui::Unindent(8);
     }
 
@@ -690,7 +710,9 @@ void MeshToolUI::DrawViewport()
 
     // Navigation hint (bottom-left)
     {
-        const char* nav = "Click select  Right-click actions  T segment/actual  G GE follow  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
+        const char* nav = simActive
+            ? "Space drive/pause  |  Camera in the Drive Simulation window  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  Wheel zoom"
+            : "Click select  Right-click actions  T segment/actual  G GE follow  |  Alt+LMB orbit  Alt+MMB pan  Alt+RMB dolly  |  RMB look + WASD/QE fly  |  Wheel zoom  F frame";
         float lineH = ImGui::GetTextLineHeight();
         dl->AddText(ImVec2(x + 10, y + h - lineH - 8), IM_COL32(110, 118, 145, 170), nav);
     }
@@ -718,6 +740,8 @@ void MeshToolUI::DrawViewport()
             snprintf(camInfo, sizeof(camInfo), "Lon: %.4f  Lat: %.4f  (not georeferenced)",
                      g_world.reference_pos.x, g_world.reference_pos.y);
         dl->AddText(ImVec2(x + 10, y + 8), IM_COL32(120, 130, 160, 200), camInfo);
+        if (!simHud.empty())
+            dl->AddText(ImVec2(x + 10, y + 8 + ImGui::GetTextLineHeight() + 4), IM_COL32(235, 225, 160, 230), simHud.c_str());
     }
 }
 
@@ -1832,6 +1856,113 @@ void MeshToolUI::DrawRouteCaptureDialog()
         }
         ImGui::EndPopup();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Drive Simulation window
+// ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawSimDialog()
+{
+    ImGui::SetNextWindowSize(ImVec2(440, 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->WorkPos.x + 100, ImGui::GetMainViewport()->WorkPos.y + 60),
+                            ImGuiCond_Appearing);
+    if (!ImGui::Begin("Drive Simulation", &showSimDialog, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::End();
+        return;
+    }
+    ImGui::TextColored(ImVec4(0.5f, 0.85f, 1.0f, 1.0f), "Drive the captured route in a car.");
+    ImGui::TextDisabled("The road is recovered from the mesh along the route: tree tops are bumpy and\n"
+                        "sit above the road, so flat stretches are chained into the road (bridges too)\n"
+                        "and the canopy is cut away while driving.");
+    ImGui::Spacing();
+    if (g_world.mesh_data_batches.empty())
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Open or capture a scene first.");
+    else if (simHasRoute)
+    {
+        ImGui::Text("Route:");
+        ImGui::SameLine();
+        ImGui::TextWrapped("%s", simRouteName.c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Saved with the scene by Route Capture; File > Save Scene keeps it.");
+    }
+    else
+    {
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "This scene carries no route. Enter the drive's ends:");
+        ImGui::InputText("From", routeFrom, sizeof(routeFrom));
+        ImGui::InputText("To", routeTo, sizeof(routeTo));
+        ImGui::TextDisabled("The route is looked up online (Nominatim + OSRM) and then saved with the scene.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::SliderFloat("Speed (mph)", &simSpeedMph, 5.0f, 90.0f, "%.0f");
+    const char* cameras[] = { "Chase (behind the car)", "Driver's seat", "Follow (orbit around the car)", "Free" };
+    ImGui::Combo("Camera", &simCamera, cameras, 4);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Chase and Driver steer the viewport camera; Follow keeps the pivot on the car\n"
+                          "so Alt-drag orbits around it; Free leaves the camera alone.");
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Road recovery (applied at Start):");
+    ImGui::SliderFloat("Road width (m)", &simRoadWidth, 4.0f, 14.0f, "%.1f");
+    ImGui::SliderFloat("Tree height (m)", &simTreeHeight, 1.0f, 8.0f, "%.1f");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("A flat stretch of surface stepping up this far from the road is tree canopy:\n"
+                          "it is dropped from the driving profile and cut away over the road while driving.");
+    ImGui::Checkbox("Cut the canopy over the road", &simCutCanopy);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Removes the tree triangles over the road corridor from the view while the\n"
+                          "simulation runs; Stop puts them back. The saved scene is not changed.");
+    if (simCutCanopy)
+    {
+        ImGui::SliderFloat("Clear width (m)", &simClearWidth, 8.0f, 40.0f, "%.0f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Width of the corridor cleared through the trees. The chase camera sits 16 m behind\n"
+                              "the car, so a narrow corridor leaves it inside the tree canopy.");
+        ImGui::SliderFloat("Clear above road (m)", &simClearHeight, 0.5f, 6.0f, "%.1f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Everything in the corridor higher than this over the road is cleared: canopy, and the\n"
+                              "undergrowth blobs the mesh has where trees reach the ground. Larger keeps more banks.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    if (simActive)
+    {
+        ImGui::ProgressBar(simProgress, ImVec2(-1, 0));
+        if (ImGui::Button(simPlaying ? "Pause" : "Drive", ImVec2(100, 0))) wantSimPlayPause = true;
+        ImGui::SameLine();
+        if (ImGui::Button("Restart", ImVec2(100, 0))) wantSimReset = true;
+        ImGui::SameLine();
+        if (ImGui::Button("Stop", ImVec2(100, 0))) wantStopSim = true;
+        ImGui::SameLine();
+        if (ImGui::Button("Rebuild road", ImVec2(110, 0))) wantStartSim = true;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Recover the road again with the settings above.");
+    }
+    else
+    {
+        if (ImGui::Button("Start", ImVec2(120, 0)))
+        {
+            if (g_world.mesh_data_batches.empty())
+                ShowMessage("Drive Simulation", "Open or capture a scene first.");
+            else if (!simHasRoute && (!routeFrom[0] || !routeTo[0]))
+                ShowMessage("Drive Simulation", "Enter both the start and the destination.");
+            else
+                wantStartSim = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(120, 0))) showSimDialog = false;
+    }
+    if (!simStatus.empty())
+    {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", simStatus.c_str());
+    }
+    ImGui::End();
 }
 
 void MeshToolUI::ActionLiveCapture()

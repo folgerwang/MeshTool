@@ -244,7 +244,8 @@ void VulkanMeshRenderer::DrawBatchMeshes(VkCommandBuffer cmd,
 }
 
 void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix,
-                                  const MeshDrawFrame& frame, const float* flatColor, bool asGlass)
+                                  const MeshDrawFrame& frame, const float* flatColor, bool asGlass,
+                                  const float* modelMatrix)
 {
     if (!mesh) return;
 
@@ -269,6 +270,8 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     pc.modelMatrix[13] = static_cast<float>((mesh->translation.y - frame.refPos[1]) * s);
     pc.modelMatrix[14] = static_cast<float>((mesh->translation.z - frame.refPos[2]) * s);
     pc.modelMatrix[15] = 1.0f;
+    if (modelMatrix)
+        memcpy(pc.modelMatrix, modelMatrix, 16 * sizeof(float));
 
     // Set boxColor: w > 0.5 signals "use texture"
     bool hasTexture = !flatColor && (mesh->tex_id != 0xFFFFFFFF) && m_texMgr->GetTexture(mesh->tex_id);

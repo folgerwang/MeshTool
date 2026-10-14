@@ -85,8 +85,10 @@ public:
     void DrawBatchMeshes(VkCommandBuffer cmd, const std::vector<BatchMeshData*>& batches,
                          const float* viewProjMatrix, const MeshDrawFrame& frame, bool culling);
     // flatColor: draw untextured in this RGB colour instead (nullptr = textured).
+    // modelMatrix: column-major camera-relative placement replacing the
+    // mesh's translation (nullptr = translation - refPos, as usual).
     void DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const float* viewProjMatrix, const MeshDrawFrame& frame,
-                  const float* flatColor = nullptr, bool asGlass = false);
+                  const float* flatColor = nullptr, bool asGlass = false, const float* modelMatrix = nullptr);
     void DrawSelectionBox(VkCommandBuffer cmd, const float* viewProj, const float* lo, const float* hi);
     void DrawQuad(VkCommandBuffer cmd, float x, float y, float w, float h, uint32_t texHandle);
 

@@ -55,7 +55,7 @@ A typical session, from an empty scene to an exported model:
 6b. **Route capture (optional).** Capture > Route Capture... takes two
    addresses (or "lat, lon"), looks them up with OpenStreetMap Nominatim,
    asks the OSRM demo server for the driving route, and places a camera every
-   150 m along it (height 250 m above ground, bird's-eye view straight down,
+   100 m along it (height 100 m above ground, bird's-eye view straight down,
    turned along the route; tilt adjustable). Google Earth is started if needed, flown to each
    camera through the follow link, and a frame is captured once the view has
    settled and the tiles have loaded. "Also capture looking back" adds a
@@ -66,7 +66,30 @@ A typical session, from an empty scene to an exported model:
    View > Top-down orthographic (O) reviews the result like an orthophoto:
    a parallel projection straight down, north up, without perspective lean.
    `--shots ... --ortho` saves check screenshots that way, and a route
-   capture started from the command line ends with them.
+   capture started from the command line ends with them. The route is kept
+   with the scene (File > Save Scene) for the drive simulation below.
+6c. **Drive simulation (optional).** Tools > Drive Simulation (toolbar Sim)
+   drives a car along the scene's saved route at a set speed (40 mph by
+   default), with a chase, driver's-seat, follow or free camera; Space
+   pauses. The road is recovered from the mesh along the route: the captured
+   surface is sampled across the road width every 0.1 m along it. Trees
+   overhanging a road put the photogrammetry surface at the canopy top, which
+   is bumpy and metres above the road, while the road itself (bridge decks
+   included) is flat and continuous: the flat stretches are chained together
+   from the longest one outward, a stretch that steps up by more than *Tree
+   height* (2.5 m) is dropped as canopy (one that steps down is water or a
+   hole), short gaps are bridged straight, a rejected stretch follows the
+   captured surface wherever it stays near the profile (iterated, so the
+   profile climbs hills through holes in the canopy), a long stretch of solid
+   canopy follows the canopy floor lowered by the tree height seen where the
+   road enters and leaves it, and the result is smoothed. The profile only
+   guides the car (nothing is drawn for the road). A sky dome surrounds the
+   view. The mesh over the road corridor (*Clear width*, 20 m) higher than
+   *Clear above road* (1.5 m) can be cut out of the view while the simulation
+   runs, so the car stays visible under trees (Stop puts it back; the saved
+   scene is not changed). A scene saved without a route takes two addresses in
+   the dialog and looks the route up. `MeshTool scene.mtscene --shots prefix --sim [0..1]` screenshots
+   the car parked part way along the route.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
    highlighted / as captured).
@@ -293,9 +316,9 @@ MeshTool --refine in.mtscene out.mtscene [--no-glass] [--clean] [--cull]
 python toolsuilding_refine
 efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--clean] [--cull] [--no-lama] [--debug-dir d]
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
-MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 150] [--look-back]
+MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 100] [--look-back]
 MeshTool --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg] [--dwell s] [--look-back] [--save out.mtscene]
-MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..] [--ortho]
+MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..] [--ortho] [--sim [fraction]]
 ```
 
 `--objects` lists a segmented scene's objects (name, class, size, centre) and
@@ -306,7 +329,9 @@ up for before/after comparison.
 
 File > Save Scene / Open Scene (Ctrl+S / Ctrl+O): `.mtscene`, MeshTool's
 lossless native format - meshes, textures as captured, GPS origin, segmented
-objects and (version 4) each mesh's material (captured, glass, interior).
+objects, (version 4) each mesh's material (captured, glass, interior) and
+(version 6) the driving route the scene was captured along, which the drive
+simulation uses.
 
 ## Viewport
 
@@ -321,7 +346,8 @@ Wheel zooms to the pivot, F frames everything.
 
 Click a mesh to select it (Scene panel > Selected Object: class, size, GPS,
 capture; Isolate / Frame / Clear); T switches the selection between highlighted
-and as captured. G toggles Google Earth following the viewport.
+and as captured. G toggles Google Earth following the viewport. Space pauses
+and resumes a running drive simulation.
 
 ## Export
 

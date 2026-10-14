@@ -266,7 +266,7 @@ int main(int argc, char* argv[])
     // camera waypoints a route capture would fly (no Google Earth needed).
     if (argc >= 4 && !strcmp(argv[1], "--route"))
     {
-        double spacing = 150.0;
+        double spacing = 100.0;
         bool lookBack = false;
         for (int i = 4; i < argc; i++)
         {
@@ -324,7 +324,9 @@ int main(int argc, char* argv[])
         }
 
         // MeshTool.exe scene.mtscene --shots prefix [--frame object | --box x0 y0 z0 x1 y1 z1]
-        //   [--yaw deg] [--pitch deg] [--zoom k] [--no-glass]: check screenshots, then exit.
+        //   [--yaw deg] [--pitch deg] [--zoom k] [--no-glass] [--ortho] [--sim [fraction]]: check
+        //   screenshots, then exit. --sim starts the drive simulation on the scene's route and
+        //   parks the car part way along it (chase camera).
         MeshToolApp::AutoShots shots;
         for (int i = 2; i < argc; i++)
         {
@@ -335,6 +337,13 @@ int main(int argc, char* argv[])
             else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) shots.zoom = atof(argv[++i]);
             else if (!strcmp(argv[i], "--no-glass")) shots.glass = false;
             else if (!strcmp(argv[i], "--ortho")) shots.ortho = true;
+            else if (!strcmp(argv[i], "--sim"))
+            {
+                // Optional fraction along the route (default: half way).
+                shots.sim = 0.5;
+                char* end = nullptr;
+                if (i + 1 < argc) { double f = strtod(argv[i + 1], &end); if (end && *end == '\0' && end != argv[i + 1]) { shots.sim = f; i++; } }
+            }
             else if (!strcmp(argv[i], "--original-models")) shots.originalModels = true;
             else if (!strcmp(argv[i], "--box") && i + 6 < argc)
             {

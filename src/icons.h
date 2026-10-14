@@ -226,6 +226,65 @@ inline void GenSegmentIcon(uint8_t* buf)
     DrawTriangle(buf, cx, cy - P(1), cx + P(5), cy, cx, cy + P(1), 255, 255, 255);
 }
 
+// Route capture: a winding route from a start marker to a destination pin,
+// with the camera waypoints the capture visits along it.
+inline void GenRouteIcon(uint8_t* buf)
+{
+    memset(buf, 0, ICON_BYTES);
+    // Road: a light grey polyline stamped from discs for an even, solid stroke
+    // (DrawLine's thickness leaves diagonals thin). Markers go on top.
+    const int route[][2] = { {6, 25}, {13, 22}, {12, 15}, {20, 12}, {26, 6} };
+    for (int i = 0; i + 1 < 5; i++)
+    {
+        const int x0 = P(route[i][0]), y0 = P(route[i][1]), x1 = P(route[i+1][0]), y1 = P(route[i+1][1]);
+        const int steps = abs(x1 - x0) > abs(y1 - y0) ? abs(x1 - x0) : abs(y1 - y0);
+        for (int s = 0; s <= steps; s++)
+            FillCircle(buf, x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps, P(2), 200, 205, 215);
+    }
+    // Camera waypoints: blue dots with a dark ring so they read on the road.
+    const int stops[][2] = { {13, 22}, {12, 15}, {20, 12} };
+    for (const int* w : stops)
+    {
+        FillCircle(buf, P(w[0]), P(w[1]), P(3), 20, 22, 28);
+        FillCircle(buf, P(w[0]), P(w[1]), P(2), 100, 200, 255);
+    }
+    // Start: green marker.
+    FillCircle(buf, P(6), P(25), P(5), 100, 230, 120);
+    FillCircle(buf, P(6), P(25), P(2), 20, 22, 28);
+    // Destination: red pin with a white centre.
+    FillCircle(buf, P(26), P(6), P(5), 240, 80, 80);
+    DrawTriangle(buf, P(22), P(8), P(26), P(14), P(30), P(8), 240, 80, 80);
+    FillCircle(buf, P(26), P(6), P(2), 255, 240, 240);
+}
+
+// Drive simulation: a car on a road, seen from the side, heading right.
+inline void GenSimIcon(uint8_t* buf)
+{
+    memset(buf, 0, ICON_BYTES);
+    // Road with a dashed centre line.
+    FillRect(buf, P(2), P(24), P(30), P(28), 95, 98, 108);
+    for (int x = 4; x < 30; x += 6)
+        FillRect(buf, P(x), P(26), P(x + 2), P(26), 230, 200, 90);
+    // Body: lower box plus a cabin, in a warm orange that reads on the dark toolbar.
+    FillRect(buf, P(5), P(16), P(27), P(22), 245, 150, 50);
+    DrawTriangle(buf, P(9), P(16), P(12), P(10), P(13), P(16), 245, 150, 50);
+    FillRect(buf, P(12), P(10), P(21), P(16), 245, 150, 50);
+    DrawTriangle(buf, P(21), P(10), P(25), P(16), P(21), P(16), 245, 150, 50);
+    // Windows.
+    FillRect(buf, P(13), P(11), P(16), P(15), 40, 50, 70);
+    FillRect(buf, P(18), P(11), P(21), P(15), 40, 50, 70);
+    // Headlight.
+    FillRect(buf, P(26), P(17), P(27), P(18), 255, 245, 200);
+    // Wheels: dark tyres with grey hubs, overlapping the road.
+    FillCircle(buf, P(10), P(22), P(3), 25, 27, 32);
+    FillCircle(buf, P(22), P(22), P(3), 25, 27, 32);
+    FillCircle(buf, P(10), P(22), P(1), 170, 175, 185);
+    FillCircle(buf, P(22), P(22), P(1), 170, 175, 185);
+    // Motion lines behind the car.
+    FillRect(buf, P(1), P(17), P(3), P(17), 200, 205, 215);
+    FillRect(buf, P(1), P(20), P(3), P(20), 200, 205, 215);
+}
+
 #undef P
 #undef S
 
@@ -243,6 +302,8 @@ enum IconID
     ICON_REGION,
     ICON_NAVIGATE,
     ICON_SEGMENT,
+    ICON_ROUTE,
+    ICON_SIM,
     ICON_COUNT
 };
 
@@ -262,7 +323,9 @@ inline IconGenFunc GetIconGenerator(IconID id)
         GenPinIcon,
         GenRegionIcon,
         GenNavigateIcon,
-        GenSegmentIcon
+        GenSegmentIcon,
+        GenRouteIcon,
+        GenSimIcon
     };
     return funcs[id];
 }

@@ -39,8 +39,8 @@ public:
     // app, which flies Google Earth along the route and captures; its progress.
     char  routeFrom[256] = "Bowman Bay, Washington";
     char  routeTo[256] = "Cranberry Lake Campground, Washington";
-    float routeSpacing = 150.0f;   // metres between cameras along the route
-    float routeHeight = 250.0f;    // camera height above the ground (m)
+    float routeSpacing = 100.0f;   // metres between cameras along the route
+    float routeHeight = 100.0f;    // camera height above the ground (m)
     float routeTilt = 0.0f;        // degrees, 0 = straight down (bird's-eye)
     float routeDwell = 4.0f;       // seconds for tiles to stream in after Google Earth settles
     bool  routeLookBack = false;   // a second, turned-around capture at each position
@@ -50,6 +50,28 @@ public:
     float routeProgress = 0.0f;
     std::string routeStatus;
     void ActionLiveCapture();      // launch Google Earth Pro with the hook and the GPS links
+
+    // Drive simulation (Tools > Drive Simulation, toolbar Sim): a car drives
+    // the scene's route over a road recovered from the mesh. Requests for the
+    // app, and its state reported back.
+    bool  wantStartSim = false;
+    bool  wantStopSim = false;
+    bool  wantSimPlayPause = false;
+    bool  wantSimReset = false;
+    float simSpeedMph = 40.0f;
+    float simRoadWidth = 7.0f;     // metres of asphalt
+    float simTreeHeight = 2.5f;    // surface this far above the guide height is canopy
+    bool  simCutCanopy = true;     // clear canopy triangles over the road while the sim runs
+    float simClearWidth = 20.0f;   // width of the cleared corridor (m)
+    float simClearHeight = 1.5f;   // the corridor is cleared above this height over the road (m)
+    int   simCamera = 0;           // 0 chase, 1 driver, 2 follow (orbit around the car), 3 free
+    bool  simActive = false;
+    bool  simPlaying = false;
+    bool  simHasRoute = false;     // the scene carries a route
+    std::string simRouteName;      // "from -> to (km)"
+    std::string simStatus;
+    std::string simHud;            // viewport readout while driving
+    float simProgress = 0.0f;
 
     // Segmentation (Tools > Segment Scene): settings and requests for the app,
     // progress reported back by it.
@@ -143,6 +165,10 @@ private:
     // Route Capture dialog
     bool showRouteCaptureDialog = false;
     void DrawRouteCaptureDialog();
+
+    // Drive Simulation window
+    bool showSimDialog = false;
+    void DrawSimDialog();
 
     // Navigate & Capture dialog
     bool showNavCaptureDialog = false;

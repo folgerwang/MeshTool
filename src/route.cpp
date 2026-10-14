@@ -87,9 +87,12 @@ bool JsonNumber(const std::string& json, const char* key, size_t from, double& o
 std::string HttpGet(const std::string& url, std::string* error, int* statusOut)
 {
     if (statusOut) *statusOut = 0;
+    // Closing the WinHTTP handles resets the last error, so the failing
+    // call's code is captured first and reported after cleanup.
+    DWORD lastError = 0;
     auto fail = [&](const char* what) {
         char buf[160];
-        snprintf(buf, sizeof(buf), "%s (error %lu)", what, GetLastError());
+        snprintf(buf, sizeof(buf), "%s (error %lu)", what, lastError ? lastError : GetLastError());
         if (error) *error = buf;
         return std::string();
     };
@@ -106,6 +109,13 @@ std::string HttpGet(const std::string& url, std::string* error, int* statusOut)
                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return fail("WinHttpOpen failed");
     WinHttpSetTimeouts(session, 10000, 10000, 20000, 20000);
+    // WinHTTP's default protocol set stops at TLS 1.2 and the OSRM demo server
+    // is TLS 1.3-only, so opt in explicitly (error 12175 otherwise).
+#ifndef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
+#define WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3 0x00002000
+#endif
+    DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+    WinHttpSetOption(session, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
     std::string body;
     HINTERNET connect = WinHttpConnect(session, host, parts.nPort, 0);
     HINTERNET request = connect ? WinHttpOpenRequest(connect, L"GET", path, nullptr, WINHTTP_NO_REFERER,
@@ -115,6 +125,7 @@ std::string HttpGet(const std::string& url, std::string* error, int* statusOut)
     bool ok = request &&
               WinHttpSendRequest(request, L"Accept: application/json\r\n", (DWORD)-1, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
               WinHttpReceiveResponse(request, nullptr);
+    if (!connect || !request || !ok) lastError = GetLastError();
     DWORD status = 0, statusSize = sizeof(status);
     if (ok)
         WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,

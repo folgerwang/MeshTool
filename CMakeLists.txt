@@ -55,6 +55,7 @@ set(NEW_SOURCES
     src/segment/refiner.cpp
     src/file_downloader.cpp
     src/route.cpp
+    src/sim.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp
     src/vulkan/vk_texture_manager.cpp

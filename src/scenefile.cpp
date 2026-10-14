@@ -5,11 +5,13 @@
 #include <memory>
 #include "meshdata.h"
 #include "coretexture.h"
+#include "route.h"
 
 namespace
 {
     const char     kMagic[8] = { 'M', 'T', 'S', 'C', 'E', 'N', 'E', '\0' };
-    const uint32_t kVersion = 5;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material
+    const uint32_t kVersion = 6;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material,
+                                          // 5: model variants, 6: driving route
     const uint32_t kOldestVersion = 1;
 
     // Sanity limits so a corrupt file fails cleanly instead of allocating wildly.
@@ -195,7 +197,8 @@ namespace
     }
 }
 
-bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batches, std::string& error)
+bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batches, std::string& error,
+               const RoutePlan* route)
 {
     Writer w;
     w.f = fopen(path.c_str(), "wb");
@@ -241,13 +244,29 @@ bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batch
         }
     }
 
+    // Version 6: the driving route (none = 0 points).
+    {
+        const bool has = route && route->polyline.size() >= 2;
+        w.pod(uint32_t(has ? route->polyline.size() : 0));
+        if (has)
+        {
+            for (const auto& p : route->polyline) { w.pod(p.first); w.pod(p.second); }
+            auto str = [&](const std::string& s) { w.pod(uint32_t(s.size())); w.bytes(s.data(), s.size()); };
+            str(route->fromName);
+            str(route->toName);
+            w.pod(route->fromLon); w.pod(route->fromLat); w.pod(route->toLon); w.pod(route->toLat);
+            w.pod(route->lengthM);
+        }
+    }
+
     bool ok = w.ok;
     if (fclose(w.f) != 0) ok = false;
     if (!ok) { error = "Write failed (disk full?)."; remove(path.c_str()); }
     return ok;
 }
 
-bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches, std::string& error)
+bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches, std::string& error,
+               RoutePlan* route)
 {
     Reader r;
     r.f = fopen(path.c_str(), "rb");
@@ -328,6 +347,31 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
                 b->bbox_ws += g->bbox_ws;
         }
     }
+    RoutePlan loadedRoute;
+    if (version >= 6 && r.ok)
+    {
+        uint32_t points = r.count(1u << 22);
+        for (uint32_t i = 0; i < points && r.ok; i++)
+        {
+            double lon = r.pod<double>(), lat = r.pod<double>();
+            loadedRoute.polyline.emplace_back(lon, lat);
+        }
+        if (points)
+        {
+            auto str = [&]() {
+                uint32_t len = r.count(4096);
+                std::string s(len, ' ');
+                r.bytes(s.data(), len);
+                return s;
+            };
+            loadedRoute.fromName = str();
+            loadedRoute.toName = str();
+            loadedRoute.fromLon = r.pod<double>(); loadedRoute.fromLat = r.pod<double>();
+            loadedRoute.toLon = r.pod<double>();   loadedRoute.toLat = r.pod<double>();
+            loadedRoute.lengthM = r.pod<double>();
+            loadedRoute.ok = r.ok && loadedRoute.polyline.size() >= 2;
+        }
+    }
     fclose(r.f);
 
     if (!r.ok)
@@ -337,5 +381,7 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
         return false;
     }
     outBatches.insert(outBatches.end(), batches.begin(), batches.end());
+    if (route && loadedRoute.ok)
+        *route = std::move(loadedRoute);
     return true;
 }
