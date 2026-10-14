@@ -466,7 +466,8 @@ def main():
 
     t0 = time.time()
     progress(0, 1, "Loading scene...")
-    batches = mtscene.load(args.input)
+    route = {}   # driving route of a route capture, kept with the scene
+    batches = mtscene.load(args.input, route)
     if target is not None:
         try:
             obj = batches[target[0]].groups[target[1]].objects[target[2]]
@@ -478,7 +479,7 @@ def main():
         done,total=facade.apply(batches,target,set(args.only.split(",")) if args.only else None,progress,args.wall_finish,
             args.fit_iterations if args.auto_fit else 0,args.debug_dir)
         progress(98,100,"Saving tiled facades...")
-        mtscene.save(args.output,batches)
+        mtscene.save(args.output, batches, route)
         progress(100,100,"Tiled facade replacement complete")
         print(f"Refined {done} of {total} buildings with tiled window facades in {time.time()-t0:.0f} s; saved {args.output}",flush=True)
         return 0
@@ -825,7 +826,7 @@ def main():
             group.meshes += originals
 
     progress(98, 100, "Saving the refined scene...")
-    mtscene.save(args.output, batches)
+    mtscene.save(args.output, batches, route)
     progress(100, 100, "Refinement complete")
     print(f"Refined {done} of {total} buildings{' and rebuilt the terrain' if args.clean else ''} in "
           f"{time.time() - t0:.0f} s; saved {args.output}", flush=True)

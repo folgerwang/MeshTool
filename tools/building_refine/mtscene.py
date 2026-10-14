@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 MAGIC = b"MTSCENE\0"
-VERSION = 5
+VERSION = 6   # 6: driving route trailer after the batches
 MAT_CAPTURED, MAT_GLASS, MAT_INTERIOR = 0, 1, 2
 
 
@@ -72,7 +72,10 @@ class _Reader:
         return np.frombuffer(self.take(dt.itemsize * count), dtype=dt).copy()
 
 
-def load(path):
+def load(path, route=None):
+    """Read a scene. `route`, if a dict, receives the driving route a version 6
+    file carries (polyline of (lon, lat), from_name, to_name, from, to,
+    length_m); it is left empty when the file has none."""
     with open(path, "rb") as f:
         r = _Reader(f.read())
     if bytes(r.take(8)) != MAGIC:
@@ -124,10 +127,23 @@ def load(path):
                     objects.append(SceneObject(name, r.pod("<B")))
             groups.append(Group(textures, meshes, objects))
         batches.append(Batch(is_spline, is_dump, georef, ref, groups))
+    if version >= 6 and r.p < len(r.d):
+        points = r.pod("<I")
+        if points > (1 << 22): raise ValueError("invalid route point count")
+        polyline = [(r.pod("<d"), r.pod("<d")) for _ in range(points)]
+        if points:
+            text = lambda: bytes(r.take(r.pod("<I"))).decode("utf-8", "replace")
+            from_name, to_name = text(), text()
+            ends = [r.pod("<d") for _ in range(4)]
+            length = r.pod("<d")
+            if route is not None:
+                route.update(polyline=polyline, from_name=from_name, to_name=to_name,
+                             **{"from": (ends[0], ends[1]), "to": (ends[2], ends[3])}, length_m=length)
     return batches
 
 
-def save(path, batches):
+def save(path, batches, route=None):
+    """Write a version 6 scene; `route` is a dict as filled by load (or None)."""
     out = bytearray()
     w = lambda fmt, *v: out.extend(struct.pack(fmt, *v))
     out += MAGIC
@@ -169,5 +185,19 @@ def save(path, batches):
                 w("<I", len(nb))
                 out += nb
                 w("<B", o.cls)
+    # Version 6 trailer: the driving route (0 points = none), as scenefile.cpp writes it.
+    polyline = list(route.get("polyline", [])) if route else []
+    if len(polyline) < 2: polyline = []
+    w("<I", len(polyline))
+    if polyline:
+        for lon, lat in polyline:
+            w("<dd", float(lon), float(lat))
+        for key in ("from_name", "to_name"):
+            nb = str(route.get(key, "")).encode("utf-8")
+            w("<I", len(nb))
+            out += nb
+        a, b = route.get("from", polyline[0]), route.get("to", polyline[-1])
+        w("<dddd", float(a[0]), float(a[1]), float(b[0]), float(b[1]))
+        w("<d", float(route.get("length_m", 0.0)))
     with open(path, "wb") as f:
         f.write(out)
