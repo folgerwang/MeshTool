@@ -180,26 +180,31 @@ void ViewCamera::BuildViewProj(float aspect, float out[16]) const
         0.0, 0.0,  0.0, 1.0,
     };
 
-    // Projection: right-handed, Vulkan clip (Y down, depth 0..1).
-    double nearZ = (std::max)(distance * 0.002, 0.02);
-    double farZ = (distance + sceneRadius * 2.0) * 10.0;
+    // Projection: right-handed, Vulkan clip (Y down), reversed depth: 1 at
+    // the near plane, 0 at the far one. With a float depth buffer this
+    // spreads the precision evenly over the distance, where the usual 0..1
+    // mapping packs nearly all of it into the first few metres and lets the
+    // stacked capture tiles a few hundred metres out flicker through each
+    // other (the depth test is GREATER, the buffer clears to 0).
+    const double nearZ = NearZ();
+    const double farZ = FarZ();
     double t = 1.0 / tan(fovY * 0.5);
     double P[16] = {
         t / aspect, 0.0, 0.0,                              0.0,
         0.0,        -t,  0.0,                              0.0,
-        0.0,        0.0, farZ / (nearZ - farZ),           -1.0,
-        0.0,        0.0, nearZ * farZ / (nearZ - farZ),    0.0,
+        0.0,        0.0, nearZ / (farZ - nearZ),          -1.0,
+        0.0,        0.0, nearZ * farZ / (farZ - nearZ),    0.0,
     };
     if (orthographic)
     {
         // Parallel projection of the same extent at the pivot; depth stays
-        // 0..1 over the same range, so the far plane and LOD push still hold.
+        // 1..0 over the same range, so the far plane and LOD push still hold.
         const double h = OrthoHalfHeight();
         const double O[16] = {
             1.0 / (h * aspect), 0.0,      0.0,                      0.0,
             0.0,                -1.0 / h, 0.0,                      0.0,
-            0.0,                0.0,      1.0 / (nearZ - farZ),     0.0,
-            0.0,                0.0,      nearZ / (nearZ - farZ),   1.0,
+            0.0,                0.0,      1.0 / (farZ - nearZ),     0.0,
+            0.0,                0.0,      farZ / (farZ - nearZ),    1.0,
         };
         for (int i = 0; i < 16; i++) P[i] = O[i];
     }

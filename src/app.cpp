@@ -310,6 +310,7 @@ void MeshToolApp::MainLoop()
         drawFrame.glassOpacity = m_ui->glassOpacity;
         drawFrame.glassReflect = m_ui->glassReflect;
         drawFrame.orthographic = m_camera->orthographic;
+        drawFrame.orthoDepthPerMetre = float(1.0 / (std::max)(m_camera->FarZ() - m_camera->NearZ(), 1e-3));
         m_meshRenderer->DrawBatchMeshes(cmd, g_world.mesh_data_batches, viewProj, drawFrame, true);
         DrawDriveSim(cmd, viewProj, drawFrame);
 

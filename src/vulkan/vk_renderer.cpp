@@ -148,7 +148,7 @@ bool VulkanRenderer::BeginFrame()
 
     VkClearValue clearValues[2];
     clearValues[0].color = {{0.03f, 0.04f, 0.07f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
+    clearValues[1].depthStencil = {0.0f, 0};   // reversed depth: far is 0 (ViewCamera::BuildViewProj)
     rpInfo.clearValueCount = 2;
     rpInfo.pClearValues = clearValues;
 

@@ -7,6 +7,6 @@ void main() {
     int c = corners[gl_VertexIndex];
     vec3 p = vec3(float(c & 1), float((c >> 1) & 1), float((c >> 2) & 1));
     gl_Position = pc.viewProj * pc.model * vec4(p, 1.0);
-    // Small forward offset keeps surface-coincident edges stable.
-    gl_Position.z -= gl_Position.w * 0.00001;
+    // Small forward offset keeps surface-coincident edges stable (reversed depth: nearer is greater).
+    gl_Position.z += gl_Position.w * 0.00001;
 }

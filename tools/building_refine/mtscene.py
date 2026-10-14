@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 MAGIC = b"MTSCENE\0"
-VERSION = 6   # 6: driving route trailer after the batches
+VERSION = 7   # 6: driving route trailer after the batches; 7: mesh lod_size
 MAT_CAPTURED, MAT_GLASS, MAT_INTERIOR = 0, 1, 2
 
 
@@ -28,6 +28,7 @@ class Mesh:
     draw_calls: list                   # [(primitive_type, uint32[count])]
     material: int = MAT_CAPTURED
     model_variant: int = 0 # 0 shared, 1 original, 2 refined
+    lod_size: float = 0.0  # GE tile edge (metres): coarser draws behind finer; 0 = not a GE tile
 
 
 @dataclass
@@ -109,6 +110,7 @@ def load(path, route=None):
                 mat = r.pod("<B") if version >= 4 else MAT_CAPTURED
                 variant = r.pod("<B") if version >= 5 else 0
                 if variant > 2: raise ValueError("invalid model variant")
+                lod = r.pod("<f") if version >= 7 else 0.0
                 tr = np.array([r.pod("<d"), r.pod("<d"), r.pod("<d")])
                 has_uv, has_color = r.pod("<B"), r.pod("<B")
                 verts = r.array("<f4", n * 3).reshape(n, 3) if n else np.zeros((0, 3), np.float32)
@@ -119,7 +121,7 @@ def load(path, route=None):
                     prim = r.pod("<I")
                     count = r.pod("<I")
                     dcs.append((prim, r.array("<u4", count)))
-                meshes.append(Mesh(tex, obj, tr, verts, uvs, cols, dcs, mat, variant))
+                meshes.append(Mesh(tex, obj, tr, verts, uvs, cols, dcs, mat, variant, lod))
             objects = []
             if version >= 3:
                 for _ in range(r.pod("<I")):
@@ -143,7 +145,7 @@ def load(path, route=None):
 
 
 def save(path, batches, route=None):
-    """Write a version 6 scene; `route` is a dict as filled by load (or None)."""
+    """Write a version 7 scene; `route` is a dict as filled by load (or None)."""
     out = bytearray()
     w = lambda fmt, *v: out.extend(struct.pack(fmt, *v))
     out += MAGIC
@@ -165,7 +167,7 @@ def save(path, batches, route=None):
             w("<I", len(g.meshes))
             for m in g.meshes:
                 n = len(m.vertices)
-                w("<IIiBB", n, m.tex_index & 0xFFFFFFFF, m.object_id, m.material, m.model_variant)
+                w("<IIiBBf", n, m.tex_index & 0xFFFFFFFF, m.object_id, m.material, m.model_variant, float(m.lod_size))
                 w("<ddd", *map(float, m.translation))
                 has_uv = m.uvs is not None and n > 0
                 has_col = m.colors is not None and n > 0

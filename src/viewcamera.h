@@ -50,6 +50,9 @@ public:
     // Column-major view-projection for camera-relative positions (eye at the
     // origin), Vulkan clip space (Y down, depth 0..1).
     void BuildViewProj(float aspect, float outViewProj[16]) const;
+    // The projection's near and far planes (metres from the eye).
+    double NearZ() const { return (std::max)(distance * 0.002, 0.02); }
+    double FarZ() const { return (distance + sceneRadius * 2.0) * 10.0; }
 
 private:
     enum DragMode { kNone, kOrbit, kPan, kDolly, kLook, kWalk };

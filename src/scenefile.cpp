@@ -10,7 +10,8 @@
 namespace
 {
     const char     kMagic[8] = { 'M', 'T', 'S', 'C', 'E', 'N', 'E', '\0' };
-    const uint32_t kVersion = 6;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material,
+    const uint32_t kVersion = 7;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material,
+                                          // 7: mesh lod_size (GE tile edge, the LOD depth order),
                                           // 5: model variants, 6: driving route
     const uint32_t kOldestVersion = 1;
 
@@ -96,6 +97,7 @@ namespace
         w.pod(m->object_id);
         w.pod(m->material);
         w.pod(m->model_variant);
+        w.pod(m->lod_size);
         w.pod(m->translation.x); w.pod(m->translation.y); w.pod(m->translation.z);
         uint8_t has_uv = (n && m->uv_list) ? 1 : 0;
         uint8_t has_color = (n && m->color_list) ? 1 : 0;
@@ -133,6 +135,11 @@ namespace
         {
             m->model_variant = r.pod<uint8_t>();
             if (m->model_variant > 2) r.ok = false;
+        }
+        if (version >= 7)
+        {
+            m->lod_size = r.pod<float>();
+            if (!(m->lod_size >= 0.0f && m->lod_size < 1e6f)) m->lod_size = 0.0f;
         }
         double t[3] = { r.pod<double>(), r.pod<double>(), r.pod<double>() };
         m->translation = core::vec3d(t[0], t[1], t[2]);
@@ -175,6 +182,21 @@ namespace
         {
             const core::vec3f& v = m->vertex_list[i];
             m->bbox_ws += core::vec3d(v.x, v.y, v.z) + m->translation;
+        }
+        // Scenes saved before version 7 lost the tile edge, and without it
+        // the stacked tiles of overlapping captures z-fight (the renderer
+        // draws a coarser tile behind a finer one by its lod_size). Estimate
+        // it for the captured meshes from the footprint, rounded to the
+        // power of two GE's quadtree levels are near: a tile the LOD filter
+        // trimmed may come out a level too fine, which is still better than
+        // no order at all.
+        if (version < 7 && m->bbox_ws.b_valid && m->material == kMatCaptured && m->model_variant == 0 &&
+            !m->draw_call_list.empty() && m->draw_call_list[0].is_ge_mesh())
+        {
+            const double edge = (std::max)(m->bbox_ws.bb_max.x - m->bbox_ws.bb_min.x,
+                                           m->bbox_ws.bb_max.y - m->bbox_ws.bb_min.y);
+            if (edge >= 1.0 && edge <= 512.0)
+                m->lod_size = float(pow(2.0, floor(log2(edge) + 0.5)));
         }
         return m;
     }
