@@ -289,6 +289,26 @@ int main(int argc, char* argv[])
         if (argc >= 2 && argv[1][0] != '-')
             app.OpenOnStart(argv[1]);
 
+        // MeshTool.exe --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg]
+        //   [--dwell s] [--look-back] [--save scene.mtscene]: run a route capture at startup.
+        if (argc >= 4 && !strcmp(argv[1], "--capture-route"))
+        {
+            MeshToolApp::AutoRoute route;
+            route.enabled = true;
+            route.from = argv[2];
+            route.to = argv[3];
+            for (int i = 4; i < argc; i++)
+            {
+                if (!strcmp(argv[i], "--spacing") && i + 1 < argc) route.spacing = atof(argv[++i]);
+                else if (!strcmp(argv[i], "--height") && i + 1 < argc) route.height = atof(argv[++i]);
+                else if (!strcmp(argv[i], "--tilt") && i + 1 < argc) route.tilt = atof(argv[++i]);
+                else if (!strcmp(argv[i], "--dwell") && i + 1 < argc) route.dwell = atof(argv[++i]);
+                else if (!strcmp(argv[i], "--look-back")) route.lookBack = true;
+                else if (!strcmp(argv[i], "--save") && i + 1 < argc) route.savePath = argv[++i];
+            }
+            app.SetAutoRoute(route);
+        }
+
         // MeshTool.exe scene.mtscene --shots prefix [--frame object | --box x0 y0 z0 x1 y1 z1]
         //   [--yaw deg] [--pitch deg] [--zoom k] [--no-glass]: check screenshots, then exit.
         MeshToolApp::AutoShots shots;

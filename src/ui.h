@@ -40,7 +40,7 @@ public:
     char  routeTo[256] = "Cranberry Lake Campground, Washington";
     float routeSpacing = 150.0f;   // metres between cameras along the route
     float routeHeight = 250.0f;    // camera height above the ground (m)
-    float routeTilt = 55.0f;       // degrees, 0 = straight down
+    float routeTilt = 0.0f;        // degrees, 0 = straight down (bird's-eye)
     float routeDwell = 4.0f;       // seconds for tiles to stream in after Google Earth settles
     bool  routeLookBack = false;   // a second, turned-around capture at each position
     bool  wantStartRouteCapture = false;

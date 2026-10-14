@@ -1780,8 +1780,8 @@ void MeshToolUI::DrawRouteCaptureDialog()
         ImGui::SliderFloat("Spacing (m)", &routeSpacing, 50.0f, 500.0f, "%.0f");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Distance between camera stops along the route.");
         ImGui::SliderFloat("Height above ground (m)", &routeHeight, 60.0f, 600.0f, "%.0f");
-        ImGui::SliderFloat("Tilt (deg)", &routeTilt, 20.0f, 75.0f, "%.0f");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 looks straight down, 90 at the horizon. The camera looks along the route.");
+        ImGui::SliderFloat("Tilt (deg)", &routeTilt, 0.0f, 75.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 is a bird's-eye view straight down (default); larger values lean forward along the route.");
         ImGui::SliderFloat("Load wait (s)", &routeDwell, 1.0f, 20.0f, "%.0f");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Extra seconds after Google Earth settles, for the tiles to stream in.");
         ImGui::Checkbox("Also capture looking back", &routeLookBack);

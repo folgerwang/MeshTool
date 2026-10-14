@@ -52,6 +52,17 @@ public:
         bool        glass = true;    // draw glass facades as glass (false: as captured)
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
+    // MeshTool.exe --capture-route "from" "to" [...]: start a route capture as
+    // soon as the window is up; with `savePath`, save the scene and check
+    // screenshots when it ends.
+    struct AutoRoute
+    {
+        bool        enabled = false;
+        std::string from, to, savePath;
+        double      spacing = 150.0, height = 250.0, tilt = 0.0, dwell = 4.0;
+        bool        lookBack = false;
+    };
+    void SetAutoRoute(const AutoRoute& route) { m_autoRoute = route; }
     void MainLoop();
     void Shutdown();
 
@@ -129,6 +140,8 @@ private:
         std::string lastStatus;
     } m_route;
     void UpdateRouteCapture();
+    AutoRoute m_autoRoute;
+    bool      m_autoRouteStarted = false;
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet

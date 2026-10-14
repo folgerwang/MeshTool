@@ -1797,7 +1797,34 @@ void MeshToolApp::UpdateRouteCapture()
         status(text);
         m_ui->statusTimeout = 12.0f;
         m_followSent = false;   // viewport follow, if on, resends its own camera
+        if (m_autoRoute.enabled && !m_autoRoute.savePath.empty())
+        {
+            if (!g_world.mesh_data_batches.empty())
+            {
+                m_ui->wantFrameAll = true;
+                SaveSceneTo(m_autoRoute.savePath);
+                log("saved " + m_autoRoute.savePath);
+            }
+            std::string base = m_autoRoute.savePath;
+            size_t dot = base.find_last_of('.');
+            if (dot != std::string::npos && dot > base.find_last_of("\\/")) base.resize(dot);
+            StartCheckScreenshots(base);
+            m_autoRoute.savePath.clear();
+        }
     };
+
+    if (m_autoRoute.enabled && !m_autoRouteStarted)
+    {
+        m_autoRouteStarted = true;
+        snprintf(m_ui->routeFrom, sizeof(m_ui->routeFrom), "%s", m_autoRoute.from.c_str());
+        snprintf(m_ui->routeTo, sizeof(m_ui->routeTo), "%s", m_autoRoute.to.c_str());
+        m_ui->routeSpacing = (float)m_autoRoute.spacing;
+        m_ui->routeHeight = (float)m_autoRoute.height;
+        m_ui->routeTilt = (float)m_autoRoute.tilt;
+        m_ui->routeDwell = (float)m_autoRoute.dwell;
+        m_ui->routeLookBack = m_autoRoute.lookBack;
+        m_ui->wantStartRouteCapture = true;
+    }
     auto summary = [&]() {
         char buf[96];
         snprintf(buf, sizeof(buf), "%d of %zu captures", r.captured, r.plan.waypoints.size());

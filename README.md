@@ -55,8 +55,8 @@ A typical session, from an empty scene to an exported model:
 6b. **Route capture (optional).** Capture > Route Capture... takes two
    addresses (or "lat, lon"), looks them up with OpenStreetMap Nominatim,
    asks the OSRM demo server for the driving route, and places a camera every
-   150 m along it (height 250 m above ground, tilt 55 deg, looking along the
-   route; adjustable). Google Earth is started if needed, flown to each
+   150 m along it (height 250 m above ground, bird's-eye view straight down,
+   turned along the route; tilt adjustable). Google Earth is started if needed, flown to each
    camera through the follow link, and a frame is captured once the view has
    settled and the tiles have loaded. "Also capture looking back" adds a
    turned-around capture at every stop. Progress shows in the Live Capture
@@ -290,6 +290,7 @@ python toolsuilding_refine
 efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass] [--clean] [--cull] [--no-lama] [--debug-dir d]
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
 MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 150] [--look-back]
+MeshTool --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg] [--dwell s] [--look-back] [--save out.mtscene]
 MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..]
 ```
 
