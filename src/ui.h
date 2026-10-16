@@ -62,8 +62,11 @@ public:
     float simRoadWidth = 7.0f;     // metres of asphalt
     float simTreeHeight = 2.5f;    // surface this far above the guide height is canopy
     bool  simCutCanopy = true;     // clear canopy triangles over the road while the sim runs
+    bool  simCutBlack = true;      // with it: also the corridor's black (unphotographed) faces
     float simClearWidth = 20.0f;   // width of the cleared corridor (m)
     float simClearHeight = 1.5f;   // the corridor is cleared above this height over the road (m)
+    bool  simHeightCheck = true;   // check the car's height every few metres while driving
+    float simHeightCheckM = 10.0f; // metres between checks
     int   simCamera = 0;           // 0 chase, 1 driver, 2 follow (orbit around the car), 3 free
     bool  simActive = false;
     bool  simPlaying = false;
@@ -116,6 +119,9 @@ public:
     bool  debugCaptures = false;
     // Google Earth flies to the viewport camera whenever it comes to rest (G).
     bool  geFollowViewport = false;
+    // Captures keep only their finest tiles (the coarse parents GE draws
+    // under them and towards the horizon are dropped).
+    bool  captureFinestOnly = true;
     std::string captureGate;   // while following: why captures are held back ("" = ready)
     void  ActionConnectGoogleEarth();   // load MeshTool's view/follow links into Google Earth
 
@@ -139,6 +145,7 @@ public:
     enum SelectionView { kSelSegment = 0, kSelActual = 1 };
     int   selectionView = kSelSegment;   // T toggles: highlighted segment / actual textured object
     bool  wantFrameSelection = false;
+    bool  wantDeleteSelection = false;   // remove the selected mesh / object's meshes from the scene
     bool  wantClearSelection = false;
     int   wantModelVersion = -1;
     int   wantAllModelVersion = -1;

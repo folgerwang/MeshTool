@@ -47,7 +47,11 @@ A typical session, from an empty scene to an exported model:
 5. **Capture.** Frame the area in Google Earth and press **F12** there (or
    F5 / Capture > Capture Frame in MeshTool). Move on to a neighbouring or
    overlapping spot and capture again: captures stitch into one scene, at any
-   zoom or camera angle.
+   zoom or camera angle. A capture keeps only the tiles at its finest level
+   of detail: Google Earth also draws coarser parent tiles under them and
+   towards the horizon, and those are skipped (Live Capture panel > *Finest
+   tiles only*; off, coarse tiles are kept wherever no finer tile covers
+   them).
 6. **Drive from MeshTool (optional).** Press **G**: Google Earth now flies to
    wherever you leave the MeshTool viewport camera. Its overlay shows
    *F12: WAIT - SETTLING* while it flies and loads, then *F12: CAPTURE READY*.
@@ -83,10 +87,19 @@ A typical session, from an empty scene to an exported model:
    profile climbs hills through holes in the canopy), a long stretch of solid
    canopy follows the canopy floor lowered by the tree height seen where the
    road enters and leaves it, and the result is smoothed. The profile only
-   guides the car (nothing is drawn for the road). A sky dome surrounds the
-   view. The mesh over the road corridor (*Clear width*, 20 m) higher than
+   guides the car (nothing is drawn for the road). While driving, the car's
+   height is checked every 10 m (*Check every*): where the road is in view
+   from above the car stays on the profile; where trees cover it the road
+   height is guessed as the local tree tops minus the tree height, measured
+   nearby where the road is exposed with trees beside it (the median rise of
+   the surface beside the road over the road, within 100 m), held within a
+   road-like grade (12%) of the exposed road on either side, and the car
+   eases to that height (the viewport readout shows the correction;
+   `--no-height-check` turns it off for `--shots --sim`, and `--road-csv
+   file` writes the recovered road with the check's result). A sky dome
+   surrounds the view. The mesh over the road corridor (*Clear width*, 20 m) higher than
    *Clear above road* (1.5 m) can be cut out of the view while the simulation
-   runs, so the car stays visible under trees (Stop puts it back; the saved
+   runs, so the car stays visible under trees; the corridor's uncovered black faces are also hidden (Stop puts it back; the saved
    scene is not changed). *Record video...* saves the drive as an H.264 MP4
    (30 fps, Windows Media Foundation, no extra software): the simulation then
    advances one frame of simulated time per video frame, and the recording
@@ -97,7 +110,11 @@ A typical session, from an empty scene to an exported model:
    the car parked part way along the route.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
-   highlighted / as captured).
+   highlighted / as captured). Delete (or the context menu's Delete
+   selected) removes the selected mesh, or every mesh of the selected
+   object, from the scene; the file changes only when you save. Opening a
+   scene drops meshes that are exact copies of another (same vertices,
+   triangles and place), which captures can leave behind.
 8. **Segment.** Tools > Segment Scene (AI) splits the scene into buildings,
    trees, cars, road, plants, water (needs Ollama for best results; see
    below).

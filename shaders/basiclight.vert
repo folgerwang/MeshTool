@@ -17,16 +17,22 @@ void main(void)
 {
     vPositionWS = (uModelMatrix * vec4(aPosition, 1.0)).xyz;
     vTextureCoord = aTexcoord;
-    // Positions are camera-relative, so scaling them moves the mesh along the
-    // view rays only: same pixels, later depth (LOD depth order; 0 = off).
-    float depthScale = uScreenPosition.x > 0.0 ? uScreenPosition.x : 1.0;
+    // LOD depth order: uScreenPosition.x pushes the mesh back along the view
+    // rays (same pixels, later depth; 0 = off). Positions are camera-relative,
+    // so under perspective the push is a scale that moves each vertex the
+    // given number of metres farther along its ray; under the orthographic
+    // projection (w = 1) scaling would shift pixels sideways, so the push,
+    // given in depth units, goes into the depth directly (reversed depth:
+    // farther is smaller).
+    float push = max(uScreenPosition.x, 0.0);
     if (uScreenPosition.w > 0.5)
     {
-        // Orthographic: scaling would shift pixels sideways, so push the
-        // coarser tile back in depth only (0..1 range).
         gl_Position = uViewProjMatrix * vec4(vPositionWS, 1.0);
-        gl_Position.z += (depthScale - 1.0) * gl_Position.w;
+        gl_Position.z -= push * gl_Position.w;
     }
     else
-        gl_Position = uViewProjMatrix * vec4(vPositionWS * depthScale, 1.0);
+    {
+        float dist = max(length(vPositionWS), 1e-3);
+        gl_Position = uViewProjMatrix * vec4(vPositionWS * (1.0 + push / dist), 1.0);
+    }
 }

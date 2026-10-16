@@ -279,8 +279,9 @@ void VulkanPipelineManager::CreatePipeline(PipelineType type,
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = enableDepth ? VK_TRUE : VK_FALSE;
     depthStencil.depthWriteEnable = enableDepth && depthWrite ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = type == PIPELINE_BOX_HIDDEN ? VK_COMPARE_OP_GREATER :
-        type == PIPELINE_BOX_VISIBLE ? VK_COMPARE_OP_LESS_OR_EQUAL : VK_COMPARE_OP_LESS;
+    // Reversed depth (ViewCamera::BuildViewProj): nearer is greater.
+    depthStencil.depthCompareOp = type == PIPELINE_BOX_HIDDEN ? VK_COMPARE_OP_LESS :
+        type == PIPELINE_BOX_VISIBLE ? VK_COMPARE_OP_GREATER_OR_EQUAL : VK_COMPARE_OP_GREATER;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
 

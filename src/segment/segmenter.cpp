@@ -80,15 +80,11 @@ void RgbToLab(uint8_t r8, uint8_t g8, uint8_t b8, float lab[3])
     lab[2] = 200.0f * (fy - fz);
 }
 
+} // namespace
+
 // ============================================================================
 // Texture decoding (captured textures: DXT1/3/5 or RGBA8)
 // ============================================================================
-struct DecodedTexture
-{
-    int w = 0, h = 0;
-    std::vector<uint32_t> rgb;   // 0x00RRGGBB
-};
-
 bool DecodeTexture(const core::Texture2DInfo* info, DecodedTexture& out)
 {
     if (!info || !info->m_levelCount || !info->m_mips[0].m_imageData)
@@ -129,6 +125,9 @@ bool DecodeTexture(const core::Texture2DInfo* info, DecodedTexture& out)
     for (uint32_t& c : out.rgb) c &= 0x00FFFFFF;
     return true;
 }
+
+namespace
+{
 
 // ============================================================================
 // Ground model (digital terrain model) from the top-surface height map.

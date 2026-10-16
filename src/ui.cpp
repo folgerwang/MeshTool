@@ -626,6 +626,12 @@ void MeshToolUI::DrawScenePanel()
                                   "Google Earth you started yourself. Use when the link shows None/Stale.");
         }
         ImGui::Spacing();
+        ImGui::Checkbox("Finest tiles only", &captureFinestOnly);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("A capture keeps only the tiles at its finest level of detail. Google\n"
+                              "Earth also draws coarser parent tiles under them and towards the\n"
+                              "horizon; those are skipped. Off: coarse tiles are kept where no finer\n"
+                              "tile covers them.");
         ImGui::Checkbox("Google Earth follows viewport (G)", &geFollowViewport);
         if (geFollowViewport)
         {
@@ -885,6 +891,10 @@ void MeshToolUI::DrawSelectionContextMenu()
     if (ImGui::MenuItem("Segment highlight", "T", selectionView == kSelSegment)) selectionView = kSelSegment;
     if (ImGui::MenuItem("Actual materials", "T", selectionView == kSelActual)) selectionView = kSelActual;
     ImGui::Separator();
+    if (ImGui::MenuItem("Delete selected", "Del")) wantDeleteSelection = true;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Removes the selected mesh (or every mesh of the selected object) from the scene.\n"
+                          "Not undoable; the file changes only when you save.");
     if (ImGui::MenuItem("Clear selection")) wantClearSelection = true;
     ImGui::EndPopup();
 }
@@ -1912,6 +1922,19 @@ void MeshToolUI::DrawSimDialog()
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("A flat stretch of surface stepping up this far from the road is tree canopy:\n"
                           "it is dropped from the driving profile and cut away over the road while driving.");
+    ImGui::Checkbox("Check the car's height while driving", &simHeightCheck);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Every few metres: where the road is in view from above the car stays on it; where trees\n"
+                          "cover the road its height is guessed as the tree tops minus the tree height measured\n"
+                          "nearby where the road is exposed beside trees, held within a road-like grade of the\n"
+                          "exposed road either side, and the car is moved there.");
+    if (simHeightCheck)
+    {
+        ImGui::SliderFloat("Check every (m)", &simHeightCheckM, 2.0f, 50.0f, "%.0f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Distance between height checks. Each check looks this far ahead of the car and\n"
+                              "the height eases in over the distance.");
+    }
     ImGui::Checkbox("Cut the canopy over the road", &simCutCanopy);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Removes the tree triangles over the road corridor from the view while the\n"
@@ -1926,6 +1949,11 @@ void MeshToolUI::DrawSimDialog()
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Everything in the corridor higher than this over the road is cleared: canopy, and the\n"
                               "undergrowth blobs the mesh has where trees reach the ground. Larger keeps more banks.");
+        ImGui::Checkbox("Remove black faces in the corridor", &simCutBlack);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The undersides and sides of the tree lumps were never photographed and are textured\n"
+                              "black; they reach down through the road and flicker against it. Faces in the corridor\n"
+                              "whose texture is black all over are cleared at any height.");
     }
 
     ImGui::Spacing();

@@ -86,9 +86,9 @@ void VulkanRenderer::Shutdown()
     for (size_t i = 0; i < VulkanContext::MAX_FRAMES_IN_FLIGHT; i++)
     {
         vkDestroySemaphore(m_ctx.device, m_ctx.imageAvailableSemaphores[i], nullptr);
-        vkDestroySemaphore(m_ctx.device, m_ctx.renderFinishedSemaphores[i], nullptr);
         vkDestroyFence(m_ctx.device, m_ctx.inFlightFences[i], nullptr);
     }
+    DestroyRenderFinishedSemaphores();
 
     if (m_ctx.descriptorPool != VK_NULL_HANDLE)
         vkDestroyDescriptorPool(m_ctx.device, m_ctx.descriptorPool, nullptr);
@@ -148,7 +148,7 @@ bool VulkanRenderer::BeginFrame()
 
     VkClearValue clearValues[2];
     clearValues[0].color = {{0.03f, 0.04f, 0.07f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
+    clearValues[1].depthStencil = {0.0f, 0};   // reversed depth: far is 0 (ViewCamera::BuildViewProj)
     rpInfo.clearValueCount = 2;
     rpInfo.pClearValues = clearValues;
 
@@ -241,7 +241,7 @@ void VulkanRenderer::EndFrame()
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd;
 
-    VkSemaphore signalSemaphores[] = {m_ctx.renderFinishedSemaphores[m_ctx.currentFrame]};
+    VkSemaphore signalSemaphores[] = {m_ctx.renderFinishedSemaphores[m_ctx.imageIndex]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -317,6 +317,26 @@ void VulkanRenderer::RecreateSwapchain(int width, int height)
     CreateImageViews();
     CreateDepthResources();
     CreateFramebuffers();
+    // The image count may have changed, and no presentation is pending after the wait.
+    DestroyRenderFinishedSemaphores();
+    CreateRenderFinishedSemaphores();
+}
+
+void VulkanRenderer::CreateRenderFinishedSemaphores()
+{
+    VkSemaphoreCreateInfo semInfo{};
+    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    m_ctx.renderFinishedSemaphores.assign(m_ctx.swapchainImages.size(), VK_NULL_HANDLE);
+    for (VkSemaphore& s : m_ctx.renderFinishedSemaphores)
+        if (vkCreateSemaphore(m_ctx.device, &semInfo, nullptr, &s) != VK_SUCCESS)
+            throw std::runtime_error("failed to create synchronization objects");
+}
+
+void VulkanRenderer::DestroyRenderFinishedSemaphores()
+{
+    for (VkSemaphore s : m_ctx.renderFinishedSemaphores)
+        if (s != VK_NULL_HANDLE) vkDestroySemaphore(m_ctx.device, s, nullptr);
+    m_ctx.renderFinishedSemaphores.clear();
 }
 
 bool VulkanRenderer::TakeReadback(std::vector<uint8_t>& rgb, int& width, int& height)
@@ -931,8 +951,8 @@ void VulkanRenderer::CreateDescriptorPool()
 void VulkanRenderer::CreateSyncObjects()
 {
     m_ctx.imageAvailableSemaphores.resize(VulkanContext::MAX_FRAMES_IN_FLIGHT);
-    m_ctx.renderFinishedSemaphores.resize(VulkanContext::MAX_FRAMES_IN_FLIGHT);
     m_ctx.inFlightFences.resize(VulkanContext::MAX_FRAMES_IN_FLIGHT);
+    CreateRenderFinishedSemaphores();
 
     VkSemaphoreCreateInfo semInfo{};
     semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -944,7 +964,6 @@ void VulkanRenderer::CreateSyncObjects()
     for (int i = 0; i < VulkanContext::MAX_FRAMES_IN_FLIGHT; i++)
     {
         if (vkCreateSemaphore(m_ctx.device, &semInfo, nullptr, &m_ctx.imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(m_ctx.device, &semInfo, nullptr, &m_ctx.renderFinishedSemaphores[i]) != VK_SUCCESS ||
             vkCreateFence(m_ctx.device, &fenceInfo, nullptr, &m_ctx.inFlightFences[i]) != VK_SUCCESS)
         {
             throw std::runtime_error("failed to create synchronization objects");

@@ -58,6 +58,8 @@ public:
         double      sim = -1.0;      // >= 0: start the drive simulation, park the car this far along (0..1), chase camera
         std::string video;           // with sim: record the drive from there to this MP4 instead of screenshots ...
         double      videoSeconds = 10.0;   // ... for this long (or until the car arrives), then exit
+        bool        heightCheck = true;   // --sim: check the car's height (off: the bare road profile)
+        std::string roadCsv;              // --sim: write the recovered road's stations to this file
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     // MeshTool.exe --capture-route "from" "to" [...]: start a route capture as
@@ -165,6 +167,14 @@ private:
         double wheelSpin = 0.0;      // radians
         double camYaw = 0.0;         // chase camera, smoothed
         bool   camInit = false;
+        // Height check every `simHeightCheckM` metres (see CheckRoadHeight):
+        // the lift over the profile eases towards the last check's result.
+        double lift = 0.0, liftTarget = 0.0;
+        double nextCheckAt = 0.0;    // metres along the road
+        bool   liftSnap = true;      // apply the next check at once (start, restart, park)
+        int    lifted = 0;           // checks that moved the car
+        HeightCheck::Kind liftKind = HeightCheck::kNone;
+        double liftTrees = 0.0;      // the tree height the last check subtracted
         DriveRoadParams params;
         DriveRoad  road;
         CarMeshes  car;
@@ -172,6 +182,7 @@ private:
         uint32_t   skyTexture = 0xFFFFFFFF;
         CanopyCut  cut;
         int        canopyRemoved = 0;
+        int        baked = 0;        // height checks that moved the profile before the canopy cut
         std::future<RoutePlan> planning;   // route looked up for a scene saved without one
         bool   planningRoute = false;
     } m_sim;
@@ -211,6 +222,7 @@ private:
     void UpdateSelection();                   // clicks, validity, UI requests, overlay
     void PickAt(float mouseX, float mouseY);  // ray-cast the visible meshes
     void ClearSelection();
+    void DeleteSelection();   // removes the selected mesh / object's meshes from the scene
     bool SelectionBounds(core::bounds3d& box, int* meshes = nullptr, size_t* triangles = nullptr) const;
     void DrawSelectionOverlay();
     struct OverlayView;                       // scene -> viewport pixels for ImGui overlays

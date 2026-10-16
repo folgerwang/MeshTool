@@ -13,5 +13,5 @@ void main(void)
 {
     vec3 positionWS = (uModelMatrix * vec4(aPosition, 1.0)).xyz;
     gl_Position = uViewProjMatrix * vec4(positionWS, 1.0);
-    gl_Position.z -= gl_Position.w * 0.00001;
+    gl_Position.z += gl_Position.w * 0.00001;   // a touch nearer (reversed depth)
 }

@@ -280,13 +280,20 @@ void VulkanMeshRenderer::DrawMesh(VkCommandBuffer cmd, MeshData* mesh, const flo
     pc.boxColor[2] = flatColor ? flatColor[2] : 0.75f;
     pc.boxColor[3] = hasTexture ? 1.0f : 0.0f;
 
-    // LOD depth order (basiclight.vert reads screenPosition.x as a depth
-    // scale): GE draws coarse tiles under finer ones and stencils the overlap
-    // away; here a coarser tile is pushed back along the view rays by 0.2% per
-    // level, which leaves its pixels in place, so where both remain the finer
-    // one is in front instead of z-fighting it.
+    // LOD depth order (basiclight.vert reads screenPosition.x as a push in
+    // metres): GE draws coarse tiles under finer ones and stencils the overlap
+    // away; here a tile is pushed back along the view rays by a twentieth of
+    // its edge, which leaves its pixels in place, so where a coarser tile
+    // remains under a finer one the finer is in front instead of z-fighting
+    // it. The push is a distance, not a fraction of the depth: at 10 m the
+    // old 0.2% per level was 2 cm, well under the mismatch between the two
+    // levels' surfaces, and the road ahead flickered. Under the orthographic
+    // projection the push goes into the depth directly.
     if (mesh->lod_size > 0.0f)
-        pc.screenPosition[0] = 1.0f + 0.002f * log2f((std::max)(mesh->lod_size, 1.0f));
+    {
+        const float push = (std::min)(0.05f * mesh->lod_size, 100.0f);
+        pc.screenPosition[0] = frame.orthographic ? push * frame.orthoDepthPerMetre : push;
+    }
     pc.screenPosition[3] = frame.orthographic ? 1.0f : 0.0f;
     pc.textureIndex[0] = TextureSlot(hasTexture ? mesh->tex_id : 0xFFFFFFFF);
     pc.textureIndex[1] = flatColor ? 0 : mesh->material;

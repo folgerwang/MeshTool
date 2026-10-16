@@ -526,17 +526,19 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     vkAllocateMemory(m_ctx->device, &allocInfo, nullptr, &tex.memory);
     vkBindImageMemory(m_ctx->device, tex.image, tex.memory, 0);
 
-    // Transition & copy in a command buffer of our own. (This used to borrow
-    // the renderer's frame command buffer 0, which is only safe before the
-    // first frame: called mid-frame it reset a buffer that was recording or
-    // still executing, and the driver crashed.)
-    VkCommandBufferAllocateInfo cmdAlloc{};
-    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAlloc.commandPool = m_ctx->commandPool;
-    cmdAlloc.commandBufferCount = 1;
+    // Transition & copy with a one-off command buffer. This runs in the
+    // middle of a frame (the drive simulation uploads its sky while the
+    // frame's command buffer is recording), so it must not touch the frame
+    // command buffers: resetting one of those mid-frame submitted it while
+    // it was still being written, which corrupted the driver and crashed
+    // later inside an allocation.
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = m_ctx->commandPool;
+    cmdAllocInfo.commandBufferCount = 1;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    vkAllocateCommandBuffers(m_ctx->device, &cmdAlloc, &cmd);
+    vkAllocateCommandBuffers(m_ctx->device, &cmdAllocInfo, &cmd);
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
