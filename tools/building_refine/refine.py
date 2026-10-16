@@ -66,10 +66,11 @@ def ground_height(top, obj_cls, mask, res, base_z=None):
 # ----------------------------------------------------------------------------
 # Texture baking
 # ----------------------------------------------------------------------------
-def project_face(face, src, texs, texel, band):
+def project_face(face, src, texs, texel, band, nearest_plane=False):
     """Rasterize the original triangles into a face's frame. Keeps the outermost
     original surface whose distance from the face (along its outward normal)
-    lies in band. Returns colour, depth, coverage mask."""
+    lies in band. nearest_plane instead selects the closest surface to the face,
+    useful for repaired shells. Returns colour, depth/score, coverage mask."""
     w = max(1, int(math.ceil(face.size[0] / texel)))
     h = max(1, int(math.ceil(face.size[1] / texel)))
     P = src.pos - face.origin
@@ -81,7 +82,7 @@ def project_face(face, src, texs, texel, band):
     color = np.zeros((h, w, 3), np.uint8)
     ids = np.full((h, w), -1, np.int32)
     raster.rasterize(scr, src.uv, src.tex, np.zeros(len(scr), np.int32), texs, w, h,
-                     depth, color, ids, band[0], band[1])
+                     depth, color, ids, band[0], band[1], nearest_plane)
     return color, depth, ids >= 0
 
 

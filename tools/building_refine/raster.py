@@ -117,10 +117,10 @@ def collect(group, bounds=None):
                      np.concatenate(obj), np.concatenate(mesh), np.concatenate(dcs), np.concatenate(local))
 
 
-def decode_textures(group, progress=None):
-    """All group textures as one uint8[n, 256, 256, 3] stack (resized if needed)."""
+def decode_textures(group, progress=None, size=256):
+    """Decode to a square stack; size=512 preserves larger capture-tile detail."""
     import cv2
-    out = np.zeros((max(1, len(group.textures)), 256, 256, 3), np.uint8)
+    out = np.zeros((max(1, len(group.textures)), size, size, 3), np.uint8)
     for i, t in enumerate(group.textures):
         if progress is not None: progress(i, len(group.textures))
         if not t.mips:
@@ -137,7 +137,7 @@ def decode_textures(group, progress=None):
             if skipped == 1:
                 print(f"texture format 0x{t.internal_format:X} not decoded: those tiles sample black", flush=True)
             continue
-        out[i] = img if img.shape[:2] == (256, 256) else cv2.resize(img, (256, 256), interpolation=cv2.INTER_AREA)
+        out[i] = img if img.shape[:2] == (size, size) else cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
     return out
 
 
@@ -146,16 +146,17 @@ def _sample(texs, t, u, v):
     """Bilinear, wrapping (the captured tiles repeat their UVs)."""
     if t < 0:
         return 128, 128, 128
-    fx = u * 256.0 - 0.5
-    fy = v * 256.0 - 0.5
+    height, width = texs.shape[1:3]
+    fx = u * width - 0.5
+    fy = v * height - 0.5
     x0 = int(np.floor(fx))
     y0 = int(np.floor(fy))
     ax = fx - x0
     ay = fy - y0
-    x0 %= 256
-    y0 %= 256
-    x1 = (x0 + 1) % 256
-    y1 = (y0 + 1) % 256
+    x0 %= width
+    y0 %= height
+    x1 = (x0 + 1) % width
+    y1 = (y0 + 1) % height
     r = g = b = 0.0
     for yy, wy in ((y0, 1.0 - ay), (y1, ay)):
         for xx, wx in ((x0, 1.0 - ax), (x1, ax)):
@@ -167,10 +168,11 @@ def _sample(texs, t, u, v):
 
 
 @numba.njit(cache=True)
-def rasterize(scr, uv, tex, tid, texs, W, H, depth, color, ids, zband_lo, zband_hi):
+def rasterize(scr, uv, tex, tid, texs, W, H, depth, color, ids, zband_lo, zband_hi, nearest_plane=False):
     """Rasterize triangles given in screen space scr[t, 3, 3] = (px, py, depth).
     Keeps the largest depth within [zband_lo, zband_hi] (nearest to the viewer).
-    Writes depth[H, W], color[H, W, 3] (sampled from texs) and ids[H, W] = tid."""
+    With nearest_plane=True, keeps smallest absolute distance instead and stores
+    negative absolute distance in depth. Writes color and source IDs as usual."""
     for t in range(scr.shape[0]):
         x0, y0, z0 = scr[t, 0, 0], scr[t, 0, 1], scr[t, 0, 2]
         x1, y1, z1 = scr[t, 1, 0], scr[t, 1, 1], scr[t, 1, 2]
@@ -192,9 +194,10 @@ def rasterize(scr, uv, tex, tid, texs, W, H, depth, color, ids, zband_lo, zband_
                 if w0 < -1e-6 or w1 < -1e-6 or w2 < -1e-6:
                     continue
                 z = w0 * z0 + w1 * z1 + w2 * z2
-                if z < zband_lo or z > zband_hi or z <= depth[py, px]:
+                score = -abs(z) if nearest_plane else z
+                if z < zband_lo or z > zband_hi or score <= depth[py, px]:
                     continue
-                depth[py, px] = z
+                depth[py, px] = score
                 u = w0 * uv[t, 0, 0] + w1 * uv[t, 1, 0] + w2 * uv[t, 2, 0]
                 v = w0 * uv[t, 0, 1] + w1 * uv[t, 1, 1] + w2 * uv[t, 2, 1]
                 r, g, b = _sample(texs, tex[t], u, v)

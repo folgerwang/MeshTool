@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "ruleset": "capture-building-v6",
+  "source": {
+    "preserve_capture": true,
+    "preserve_nonbuilding_geometry": true
+  },
+  "windows": {
+    "contrast_min": 12,
+    "gray_max": 180,
+    "background_sigma_m": 0.85,
+    "large_sigma_m": 2.2,
+    "min_width_m": 0.35,
+    "max_width_m": 4.5,
+    "large_max_width_m": 8.0,
+    "min_height_m": 0.6,
+    "max_height_m": 4.5,
+    "large_max_height_m": 12.0,
+    "min_aspect": 0.18,
+    "max_aspect": 3.5,
+    "min_fill": 0.4,
+    "opening_margin_m": 0.06,
+    "projection_texel_m": 0.08,
+    "arch_segments": 13,
+    "arch_crown_fraction": 0.25,
+    "frame_width_m": 0.065,
+    "frame_max_fraction": 0.12,
+    "recess_m": 0.07
+  },
+  "doors": {
+    "max_sill_offset_m": 0.8,
+    "min_height_m": 1.65,
+    "max_height_m": 3.4,
+    "min_width_m": 0.55,
+    "max_width_m": 2.8,
+    "min_observed_fraction": 0.95,
+    "recess_m": 0.12
+  },
+  "pattern": {
+    "match_threshold": 0.64,
+    "max_templates": 16,
+    "max_matches_per_template": 400,
+    "min_template_std": 8.0,
+    "row_tolerance_m": 0.3,
+    "min_row_members": 3,
+    "min_bay_m": 0.65,
+    "spacing_tolerance": 0.12,
+    "min_regular_fraction": 0.8,
+    "max_gap_bays": 4,
+    "max_height_difference_m": 0.3,
+    "max_template_tone_difference": 35.0,
+    "min_template_contrast_ratio": 0.55,
+    "min_template_seed_support": 2
+  },
+  "materials": {
+    "glass_parts": [
+      "glazing",
+      "glass",
+      "roof_glass"
+    ],
+    "wall_mode": "captured",
+    "wall_padding_m": 0.04,
+    "invalid_pixel_max": 8,
+    "inpaint_radius_px": 5,
+    "fallback_wall_rgb": [
+      205,
+      205,
+      201
+    ],
+    "glass_min": 25,
+    "glass_max": 105,
+    "frame_color_factor": 0.72,
+    "reveal_color_factor": 0.48,
+    "frame_sample_percentile": 70.0
+  },
+  "roofs": {
+    "raster_resolution_m": 0.25,
+    "mesh_resolution_m": 0.5,
+    "min_coverage": 0.35,
+    "min_samples": 12,
+    "height_below_cap_m": 12.0,
+    "height_above_cap_m": 15.0,
+    "max_eave_lowering_m": 8.0,
+    "eave_percentile": 12.0,
+    "footprint_precision_m": 0.001,
+    "fallback": "preserve_shell",
+    "frame_width_m": 0.3,
+    "frame_rise_m": 0.24,
+    "plane_tolerance_m": 0.35,
+    "min_plane_area_m2": 12.0,
+    "min_plane_fraction": 0.08,
+    "max_planes": 8,
+    "ransac_trials": 100,
+    "max_slope_degrees": 55.0,
+    "flat_degrees": 4.0,
+    "region_min_area_m2": 2.0,
+    "region_simplify_m": 0.35,
+    "region_joint_m": 0.001,
+    "min_plane_support": 0.55
+  },
+  "validation": {
+    "reject_worse_topology": true,
+    "verify_input_hashes": true
+  },
+  "profiles": {
+    "building_080": "building_profiles/building_080.json",
+    "preserve_existing": [
+      "building_367"
+    ],
+    "source_capture_sha256": "47a5a785ff576345bcff2e44724feefea6ea77f2b57f276ab8ee4cd82cf12135",
+    "facade_directory": "building_profiles",
+    "classification_file": "building_profiles/source_classification.json"
+  },
+  "window_members": {
+    "min_pixels": 12,
+    "contrast_min": 16.0,
+    "min_support": 0.62,
+    "min_width_m": 0.025,
+    "max_width_m": 0.22,
+    "edge_fraction": 0.13,
+    "sample_margin_fraction": 0.15,
+    "neighbor_offset_fraction": 0.09
+  },
+  "curtain_wall": {
+    "min_facade_width_m": 4.0,
+    "min_facade_height_m": 15.0,
+    "band_prominence": 8.0,
+    "min_floor_m": 2.3,
+    "max_floor_m": 6.5,
+    "min_supported_rows": 5,
+    "mullion_prominence": 0.8,
+    "min_bay_m": 0.5,
+    "max_bay_m": 4.8,
+    "min_supported_bays": 5,
+    "frame_margin_m": 0.08,
+    "glass_max_intensity": 115.0,
+    "min_blue_red_ratio": 0.95,
+    "min_glass_fraction": 0.65,
+    "band_search_m": 0.32,
+    "local_band_contrast": 12.0,
+    "floor_margin_m": 0.16,
+    "frame_width_m": 0.03,
+    "allow_unresolved_glass_strips": false
+  },
+  "envelopes": {
+    "roof_normal_min": 0.75,
+    "roof_depth_m": 12.0,
+    "gap_close_m": 0.4,
+    "min_footprint_support": 0.7,
+    "min_added_area_m2": 3.0,
+    "simplify_m": 0.2,
+    "max_area_ratio": 1.8,
+    "fragment_min_support": 0.9,
+    "fragment_max_area_ratio": 3.5
+  }
+}

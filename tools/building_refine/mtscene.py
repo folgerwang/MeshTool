@@ -5,8 +5,15 @@ from dataclasses import dataclass, field
 import numpy as np
 
 MAGIC = b"MTSCENE\0"
-VERSION = 5
+VERSION = 6
 MAT_CAPTURED, MAT_GLASS, MAT_INTERIOR = 0, 1, 2
+
+
+class Scene(list):
+    """List-compatible batches with an exact v6 driving-route payload."""
+    def __init__(self, batches=(), route_data=b'\x00\x00\x00\x00'):
+        super().__init__(batches)
+        self.route_data=route_data
 
 
 @dataclass
@@ -80,7 +87,7 @@ def load(path):
     version = r.pod("<I")
     if not 1 <= version <= VERSION:
         raise ValueError(f"unsupported scene version {version}")
-    batches = []
+    batches = Scene()
     for _ in range(r.pod("<I")):
         is_spline = r.pod("<B") != 0
         is_dump = r.pod("<B") != 0
@@ -124,6 +131,18 @@ def load(path):
                     objects.append(SceneObject(name, r.pod("<B")))
             groups.append(Group(textures, meshes, objects))
         batches.append(Batch(is_spline, is_dump, georef, ref, groups))
+    if version >= 6:
+        start=r.p
+        count=r.pod('<I')
+        if count>1<<22:raise ValueError('invalid route point count')
+        r.take(count*16)
+        if count:
+            for _ in range(2):
+                size=r.pod('<I')
+                if size>4096:raise ValueError('invalid route name length')
+                r.take(size)
+            r.take(5*8)
+        batches.route_data=bytes(r.d[start:r.p])
     return batches
 
 
@@ -169,5 +188,6 @@ def save(path, batches):
                 w("<I", len(nb))
                 out += nb
                 w("<B", o.cls)
+    out += getattr(batches,'route_data',b'\x00\x00\x00\x00')
     with open(path, "wb") as f:
         f.write(out)

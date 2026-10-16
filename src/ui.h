@@ -72,6 +72,12 @@ public:
     std::string simStatus;
     std::string simHud;            // viewport readout while driving
     float simProgress = 0.0f;
+    // Record the drive to an MP4 (requests for the app; its state back).
+    bool  wantStartVideo = false;
+    bool  wantStopVideo = false;
+    std::string videoPath;
+    bool  videoRecording = false;
+    std::string videoInfo;
 
     // Segmentation (Tools > Segment Scene): settings and requests for the app,
     // progress reported back by it.

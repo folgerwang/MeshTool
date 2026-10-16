@@ -526,12 +526,20 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     vkAllocateMemory(m_ctx->device, &allocInfo, nullptr, &tex.memory);
     vkBindImageMemory(m_ctx->device, tex.image, tex.memory, 0);
 
-    // Transition & copy
-    VkCommandBuffer cmd = m_ctx->commandBuffers[0];
+    // Transition & copy in a command buffer of our own. (This used to borrow
+    // the renderer's frame command buffer 0, which is only safe before the
+    // first frame: called mid-frame it reset a buffer that was recording or
+    // still executing, and the driver crashed.)
+    VkCommandBufferAllocateInfo cmdAlloc{};
+    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandPool = m_ctx->commandPool;
+    cmdAlloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_ctx->device, &cmdAlloc, &cmd);
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkResetCommandBuffer(cmd, 0);
     vkBeginCommandBuffer(cmd, &beginInfo);
 
     VkImageMemoryBarrier barrier{};
@@ -564,6 +572,7 @@ uint32_t VulkanTextureManager::UploadRGBA(const uint8_t* pixels, uint32_t width,
     submitInfo.pCommandBuffers = &cmd;
     vkQueueSubmit(m_ctx->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(m_ctx->graphicsQueue);
+    vkFreeCommandBuffers(m_ctx->device, m_ctx->commandPool, 1, &cmd);
 
     vkutil::DestroyBuffer(*m_ctx, staging);
 

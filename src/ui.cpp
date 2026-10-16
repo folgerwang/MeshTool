@@ -1942,6 +1942,38 @@ void MeshToolUI::DrawSimDialog()
         ImGui::SameLine();
         if (ImGui::Button("Rebuild road", ImVec2(110, 0))) wantStartSim = true;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Recover the road again with the settings above.");
+        ImGui::Spacing();
+        if (!videoRecording)
+        {
+            if (ImGui::Button("Record video...", ImVec2(140, 0)))
+            {
+                nfdchar_t* outPath = nullptr;
+                if (NFD_SaveDialog("mp4", nullptr, &outPath) == NFD_OKAY && outPath)
+                {
+                    std::string fileName(outPath);
+                    free(outPath);
+                    size_t dot = fileName.rfind('.');
+                    size_t slash = fileName.find_last_of("/\\");
+                    if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+                        fileName += ".mp4";
+                    videoPath = fileName;
+                    wantStartVideo = true;
+                }
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Records the viewport while the car drives to an H.264 MP4 (30 fps). The drive\n"
+                                  "advances one frame of simulated time per video frame, so the video is smooth\n"
+                                  "even if rendering slows down. Stops by itself when the car arrives.");
+        }
+        else
+        {
+            if (ImGui::Button("Stop recording", ImVec2(140, 0))) wantStopVideo = true;
+        }
+        if (!videoInfo.empty())
+        {
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s", videoInfo.c_str());
+        }
     }
     else
     {

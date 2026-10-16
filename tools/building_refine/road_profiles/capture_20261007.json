@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "source_sha256": "47a5a785ff576345bcff2e44724feefea6ea77f2b57f276ab8ee4cd82cf12135",
+  "reference_pos": [
+    -122.4183219790499,
+    37.77447022459739
+  ],
+  "registration": {
+    "min_x": -327.0030798800718,
+    "max_y": 224.7809140707849,
+    "res": 0.5,
+    "shape": [
+      918,
+      1212
+    ]
+  },
+  "evidence": "Centerlines manually registered to original capture_topdown.png. Street topology visually compared with Google Maps; these are not downloaded Google vector data or surveyed lane boundaries.",
+  "map_url": "https://www.google.com/maps/@37.7744702,-122.418322,17z",
+  "roads": [
+    {
+      "id": "diagonal_west",
+      "width_m": 24,
+      "points": [
+        [
+          0,
+          755
+        ],
+        [
+          180,
+          580
+        ],
+        [
+          320,
+          455
+        ],
+        [
+          470,
+          305
+        ],
+        [
+          570,
+          210
+        ],
+        [
+          710,
+          70
+        ]
+      ]
+    },
+    {
+      "id": "north_south",
+      "width_m": 25,
+      "points": [
+        [
+          430,
+          0
+        ],
+        [
+          450,
+          135
+        ],
+        [
+          470,
+          280
+        ],
+        [
+          490,
+          370
+        ],
+        [
+          520,
+          490
+        ],
+        [
+          550,
+          610
+        ],
+        [
+          585,
+          735
+        ],
+        [
+          600,
+          790
+        ],
+        [
+          565,
+          865
+        ],
+        [
+          550,
+          917
+        ]
+      ]
+    },
+    {
+      "id": "diagonal_east",
+      "width_m": 22,
+      "points": [
+        [
+          480,
+          880
+        ],
+        [
+          595,
+          750
+        ],
+        [
+          710,
+          630
+        ],
+        [
+          850,
+          490
+        ],
+        [
+          970,
+          370
+        ],
+        [
+          1085,
+          260
+        ],
+        [
+          1211,
+          150
+        ]
+      ]
+    },
+    {
+      "id": "cross_central",
+      "width_m": 17,
+      "points": [
+        [
+          570,
+          210
+        ],
+        [
+          705,
+          345
+        ],
+        [
+          850,
+          490
+        ],
+        [
+          995,
+          635
+        ],
+        [
+          1140,
+          780
+        ],
+        [
+          1211,
+          852
+        ]
+      ]
+    },
+    {
+      "id": "cross_south",
+      "width_m": 15,
+      "points": [
+        [
+          320,
+          455
+        ],
+        [
+          450,
+          585
+        ],
+        [
+          595,
+          750
+        ],
+        [
+          750,
+          917
+        ]
+      ]
+    },
+    {
+      "id": "cross_north",
+      "width_m": 15,
+      "points": [
+        [
+          850,
+          0
+        ],
+        [
+          950,
+          110
+        ],
+        [
+          963,
+          150
+        ],
+        [
+          1085,
+          260
+        ],
+        [
+          1211,
+          385
+        ]
+      ]
+    },
+    {
+      "id": "western_street",
+      "width_m": 14,
+      "points": [
+        [
+          143,
+          0
+        ],
+        [
+          160,
+          150
+        ],
+        [
+          177,
+          280
+        ],
+        [
+          205,
+          475
+        ],
+        [
+          220,
+          545
+        ]
+      ]
+    },
+    {
+      "id": "west_connector_north",
+      "width_m": 13,
+      "points": [
+        [
+          150,
+          65
+        ],
+        [
+          438,
+          20
+        ]
+      ]
+    },
+    {
+      "id": "west_alley",
+      "width_m": 6,
+      "points": [
+        [
+          160,
+          165
+        ],
+        [
+          451,
+          115
+        ]
+      ]
+    },
+    {
+      "id": "west_connector_middle",
+      "width_m": 14,
+      "points": [
+        [
+          177,
+          280
+        ],
+        [
+          470,
+          230
+        ]
+      ]
+    },
+    {
+      "id": "west_connector_south",
+      "width_m": 12,
+      "points": [
+        [
+          124,
+          492
+        ],
+        [
+          205,
+          475
+        ],
+        [
+          320,
+          455
+        ]
+      ]
+    },
+    {
+      "id": "southeast_street",
+      "width_m": 14,
+      "points": [
+        [
+          980,
+          917
+        ],
+        [
+          1140,
+          780
+        ],
+        [
+          1211,
+          710
+        ]
+      ]
+    },
+    {
+      "id": "southeast_alley",
+      "width_m": 6,
+      "points": [
+        [
+          825,
+          917
+        ],
+        [
+          1065,
+          705
+        ],
+        [
+          1211,
+          560
+        ]
+      ]
+    }
+  ]
+}

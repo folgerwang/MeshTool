@@ -44,7 +44,7 @@ pickable. **All originals / All refined** in the Objects panel switches the
 whole batch. These controls also switch to material view for comparison.
 
 Both versions are embedded by Save Scene in `.mtscene` version 5. Reopening
-shows the refined versions by default. Existing scene versions 1–4 still load;
+shows the refined versions by default. Existing scene versions 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“4 still load;
 refine with this build to record a comparison pair. Rejected replacement fits use a conservative PCG fallback: the captured shell and
 textures stay intact, with PBR finishes, welded surface-following facade bands, and roof equipment on
 verified flat captured patches. Short isolated facade runs are excluded; openings
@@ -151,7 +151,7 @@ reports how many patches were turned.
 
 ### Iterative multi-camera fitting
 
-The PCG dialog's **Fit to original with multiple cameras** option runs 1–6
+The PCG dialog's **Fit to original with multiple cameras** option runs 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“6
 iterations (default 3). It renders eight fixed 512-pixel orthographic views of the saved
 original and the actual generated geometry. Four alternating views drive a
 bounded coordinate search over window sill/jamb proportions, bay spacing, and
@@ -217,3 +217,200 @@ candidate replaces the current layout.
 This uses virtual camera captures of existing data. It does not acquire new
 Google Earth imagery. Multiple iterations
 rebuild and compare real window meshes; large, fragmented buildings take longer.
+
+
+## Shared building rules
+
+`building_rules.py` is the shared construction implementation for both the city
+pipeline (`capture_tiles.py`) and the focused facade/roof pipeline. Do not fork
+window, arch, extrusion, beam or roof-coping construction into building-specific
+copies. Both exports identify the shared ruleset version.
+
+Apply these rules to every building:
+- Preserve the original capture and generate a separate replacement asset.
+- Recover each building's own opening layout, including alternating row phases.
+- Cut whole openings from walls; insert frame, reveal, mullion and glazing parts.
+- Treat fascia/cornice ornaments as masonry, not dark window detections.
+- Restrict doors to the overall building base, with observed support.
+- Separate captured wall finish from procedural opening geometry.
+- Model observed roof slopes and raised coping as geometry; do not flatten them.
+- Keep inferred dimensions distinct from observed measurements.
+- Check closed structural envelopes and compare renders against the capture.
+
+Measured facade values belong in `building_profiles/`, not in shared geometry
+rules. The current building_080 profile is a calibrated example, not a style to
+copy onto unrelated buildings. Roof feature detection for other buildings remains
+incomplete; do not claim this example has automatically refined every roof.
+
+
+## Persistent generation config
+
+`building_rules.json` is the versioned shared config for future captures. Both
+`city_rules.py` and `landmark_facade.py` accept `--rules PATH`; the default is the
+config beside the scripts. Overrides may specify only changed fields. Unknown
+keys, invalid sizes and disabled source-preservation checks are rejected.
+
+The config controls detection, pattern recovery, door placement/evidence,
+window geometry, glass assignment, captured wall-material cleanup, roof sampling,
+roof-frame defaults and validation. Keep measured building layouts in
+`building_profiles/`: they are evidence for an individual building, not global
+style rules. The current city generator uses the repaired, capture-registered
+scene as input, the protected source capture for roofs, and a calibrated profile
+asset where one exists. Sub-metre roof features still require further fitting.
+
+Every export writes `effective_rules.json` and records its SHA-256 in the manifest.
+Keep that snapshot with the exported scene when changing the global config.
+Example:
+
+```powershell
+python tools/building_refine/city_rules.py REFERENCE.mtscene SOURCE.mtscene CALIBRATED_BUILDING.mtscene NEW_OUTPUT_DIR --rules tools/building_refine/building_rules.json
+```
+
+Calibrated profiles are bound to `profiles.source_capture_sha256`. Reusing this
+config with a different capture runs the generic evidence-based rules; it does
+not apply this city's building_080 profile or building_367 exception merely
+because segmentation reused those names.
+
+## Individual facade review
+
+`window_members` in the shared config controls extraction of internal window
+members. A member must be a narrow, long light strip with darker glazing on both
+sides. Its position is measured within that captured opening; it is not a fixed
+two-pane or four-pane preset. Members are opaque geometry in front of native
+glass. Small scratches and broad reflections are rejected conservatively.
+
+`building_profiles/<name>_facades.json` can override opening rectangles on a
+reviewed face. Overrides are bound to the SHA-256 of the decoded, registered
+face image and are ignored on other imagery. The current 090 and 231 overrides
+correct selected facade layouts only; they do not certify those whole buildings.
+
+After generation, run:
+
+```powershell
+python tools/building_refine/building_review.py OUTPUT_DIR SOURCE.mtscene
+```
+
+This writes an individual capture scene, PCG scene, bounds, measured profile and
+facade comparison sheet for each building, plus `review_index.json`. Source
+isolation uses the matching segmentation label; neighboring fragments can still
+hold additional evidence. Automatic measurements are explicitly pending visual
+review. No-window detections are listed for follow-up, not counted as successful
+reconstructions. Review roof features and missing capture areas separately.
+
+### Capture-building-v4 refinement
+
+Roofs are partitioned into closed fitted plane regions. Level changes use
+vertical risers instead of heightfield ramps. The config controls 0.25 m source
+sampling, 0.5 m fitting, minimum region area, boundary simplification and narrow
+construction joints. The closed shell below remains the safety envelope.
+Vertical risers use adjacent sampled colors because top-down capture does not
+provide their wall texture. This is an approximation, not recovered cladding.
+
+Window template recovery requires compatible tone/contrast and at least two
+observed openings supporting its row or column. Frame color comes from captured
+opening perimeters. Wall cleanup now keeps a narrow margin to retain more of the
+captured masonry and trim. Layout overrides may also bind to an exact bottom
+image strip, allowing a measured layout to survive a changed eave crop without
+being applied to a different capture. Roof glazing, thin ornament, missing wall
+imagery and imperfect segmentation still require individual review.
+
+## Per-building iteration loop
+
+Keep a persistent ledger instead of treating a completed city export as approval:
+
+```powershell
+python tools/building_refine/iteration_loop.py scan BASE_CITY_DIR NEW_LEDGER_DIR
+python tools/building_refine/city_rules.py REFERENCE SOURCE CALIBRATED_ASSET CANDIDATE_DIR --only building_469
+python tools/building_refine/iteration_render.py BASE_CITY_DIR CANDIDATE_DIR REVIEW_DIR --only building_469
+python tools/building_refine/iteration_loop.py record LEDGER_DIR/iterations.json building_469 CANDIDATE_DIR/city.mtscene needs_more_work "Specific observed mismatch" REVIEW_DIR/building_469/comparison.jpg
+```
+
+Repeat the candidate/render/review steps after correcting the diagnosed issue.
+`register` records a full-city candidate without approving any building. The
+ledger retains failed iterations, scene hashes, comparison-image hashes, open
+roof tasks and individual review notes. Missing-glazing area is a prioritization
+heuristic, not a similarity score or proof that a proposed window is correct.
+
+The curtain-wall method uses repeated observed floor bands and, where resolved,
+vertical members. Without reliable narrow members it records an unresolved
+strip proposal; production replacement is disabled by default so captured
+subdivisions are not erased. A measured profile can resolve a restricted region
+without replacing unrelated parts of the face. Local band checks avoid placing
+glass on occluding foreground surfaces. Glass openings follow locally measured
+floor lines; curtain frames use separate widths from masonry window frames.
+Material cleanup preserves dark metal and the narrow strips between glass bays.
+The calibrated landmark profile still takes priority over automatic detection.
+
+For the current capture, `scenes/building_iterations_20261016/iterations.json`
+tracks all 148 building objects. Never mark its pending entries complete merely
+because the batch ran. Roof and façade reviews are separate outstanding tasks.
+
+### Roof and envelope review (v6)
+
+`envelope_repair.py` fills scan-gap notches only where captured upper surfaces
+support the added area. It retains neighboring footprints and unsupported
+courtyards. Single-level envelopes may also use a measured `*_envelope.json`
+profile bound to the source capture SHA256. Building 020 uses its observed
+cornice outline; its unobserved roof interior remains an inference.
+
+Roof texture projection groups triangles by plane and height. Combining several
+roof levels into one projection loses low decks outside the projection band.
+Vertical roof risers use captured façade imagery where available. Existing
+touching-shell edges do not suppress roof fitting unless fitting worsens the
+topology audit. Plane support and source-coverage failures remain explicit.
+
+Render all buildings with two oblique views and one overhead view:
+
+```powershell
+python tools/building_refine/iteration_render.py BASE_CITY CANDIDATE REVIEW_DIR --roof --no-before --workers 3
+```
+
+Optional `--capture-only` prepares original images while generation runs;
+`--reuse-captures` reuses them only when scene hash, camera bounds and views
+match. Raw PNGs are unchanged; comparison sheets share a crop across variants.
+Review every building before recording its result. Do not treat capture-only
+sheets, generated meshes, coverage numbers, or old reviews as latest approval.
+Open construction frames and fragment-only captures require separate treatment;
+absence of roof evidence is not evidence for a finished flat roof.
+
+Reviewed classification corrections live in `source_classification.json` and
+apply only when its source SHA256 matches. Seven inspected street/vegetation
+labels in this capture are omitted from the generated building layer; their
+source meshes and object metadata are retained. This is an explicit reviewed
+override, not an automatic vegetation classifier. Empty candidate comparison
+panels are labeled as classification corrections, not rendered buildings.
+
+Capture-bound `*_structure.json` profiles support measured open construction
+assemblies (currently 008): retaining ring, deck and I-beams without a roof cap.
+Beam heights are sampled from the original capture. Excavation depth and small
+joints are not reconstructed. These profiles do not generalize to other captures.
+
+Review history stores each building's geometry/material/texture content hash.
+An unchanged building can retain its review across city exports; a changed one
+must be rendered and reviewed again. `review_gallery.py` shows the matching
+review evidence. Generation and screenshot capture run locally without a chat
+assistant; visual diagnosis and rule edits are currently agent/manual steps,
+not an autonomous optimization loop in MeshTool.
+
+`building_profiles/building_groups.json` records reviewed source-label groups
+for the exact capture hash. Members are rebuilt as one envelope before roof
+fitting and facade extraction; secondary labels retain metadata and report
+`combined_into_building`, without duplicate geometry. Comparison exports use
+all source members. The first reviewed grouping is 334 + 346. For these explicit
+groups, neighbors more than 12 m below the group's cap cannot carve a notch
+through its upper roof. This does not automatically establish ownership of
+every adjacent building or reconstruct intersections with lower podiums.
+
+Roof-supported recovery may exceed the ordinary area-growth limit when one
+connected captured roof covers at least 90% of both the old and proposed
+footprint, up to the configured fragment area ratio. It does not use a convex
+hull to bridge disconnected roofs. Courtyard and topology checks still apply.
+
+Road finishing uses `road_finish.json`: lighter asphalt RGB, cubic spline
+smoothing error, maximum edge displacement and minimum triangle-area ratio.
+`road_scene.rebuild` applies it automatically. To update an existing scene:
+`python tools/building_refine/road_finish.py INPUT.mtscene NEW_DIRECTORY`.
+Only shared road/ground boundary vertices move, on both meshes together;
+scene-edge endpoints stay fixed and local damping prevents triangle inversion.
+The existing tessellation approximates the spline; this is not a new curb mesh.
+Road paint remains in the atlas, with its pigments excluded from asphalt lifting.

@@ -33,6 +33,7 @@
 #include <GeographicLib/LocalCartesian.hpp>
 #include "coregeographic.h"
 #include "viewcamera.h"
+#include "videowriter.h"
 #include "GpaDumpAnalyzeTool.h"
 #include "livecaptureprocessor.h"
 
@@ -290,6 +291,14 @@ void MeshToolApp::MainLoop()
             m_renderer->RequestReadback();
             m_shotPending = true;
         }
+        else if (m_video.recording && m_sim.active && m_sim.playing && !m_shotPending)
+        {
+            // One video frame per rendered frame; H.264 wants even sizes.
+            m_video.rect[0] = int(vx0); m_video.rect[1] = int(vy0);
+            m_video.rect[2] = int(vx1 - vx0) & ~15; m_video.rect[3] = int(vy1 - vy0) & ~15;   // whole macroblocks
+            m_renderer->RequestReadback();
+            m_video.pending = true;
+        }
         drawFrame.classColors = m_shotStage == 1 ? true : m_shotStage == 2 ? false : m_ui->classColors;
         drawFrame.buildingColors = m_ui->buildingColors;
         drawFrame.captureColors = m_ui->debugCaptures;
@@ -336,6 +345,7 @@ void MeshToolApp::MainLoop()
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
         m_renderer->EndFrame();
+        UpdateVideoFrame();
 
         if (m_shotPending)
         {
@@ -462,7 +472,7 @@ void MeshToolApp::UpdateAutoShots()
             m_ui->simCamera = m_auto.ortho ? 2 : 0;
             m_autoSimParked = false;
         }
-        m_ui->classColors = true;
+        m_ui->classColors = m_auto.video.empty();   // a video shows the textures; check shots start with class colours
         m_ui->glass = m_auto.glass;
         for (auto* batch : g_world.mesh_data_batches)
             if (batch) for (auto* group : batch->group_meshes)
@@ -487,8 +497,33 @@ void MeshToolApp::UpdateAutoShots()
             }
             fprintf(stderr, "--sim: %s\n", m_ui->simStatus.c_str());
         }
+        if (!m_auto.video.empty() && m_sim.active)
+        {
+            // Record the drive from here instead of taking screenshots.
+            StartVideo(m_auto.video);
+            if (!m_video.recording)
+            {
+                fprintf(stderr, "--sim-video: %s\n", m_ui->videoInfo.c_str());
+                glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+                m_autoStage = 0;
+                return;
+            }
+            m_autoStage = 4;
+            return;
+        }
         StartCheckScreenshots(m_auto.prefix);
         m_autoStage = 3;
+    }
+    else if (m_autoStage == 4)
+    {
+        const bool enough = m_video.writer && double(m_video.writer->Frames()) >= m_auto.videoSeconds * m_video.fps;
+        if (enough || !m_video.recording || !m_sim.playing)
+        {
+            StopVideo();
+            printf("%s\n", m_ui->videoInfo.c_str());
+            glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+            m_autoStage = 0;
+        }
     }
     else if (m_autoStage == 3 && m_shotStage == 0 && !m_shotPending)
     {
@@ -2127,6 +2162,7 @@ void MeshToolApp::StartDriveSim()
 
 void MeshToolApp::StopDriveSim(bool restoreCanopy)
 {
+    StopVideo();
     DriveSim& sim = m_sim;
     const bool hadMeshes = sim.car.body || sim.sky.mesh || sim.cut.Active();
     if (hadMeshes && m_renderer)
@@ -2237,6 +2273,16 @@ void MeshToolApp::UpdateDriveSim(double dt)
         sim.elapsed = 0.0;
         sim.camInit = false;
     }
+    if (ui.wantStartVideo)
+    {
+        ui.wantStartVideo = false;
+        if (sim.active && !ui.videoPath.empty()) StartVideo(ui.videoPath);
+    }
+    if (ui.wantStopVideo)
+    {
+        ui.wantStopVideo = false;
+        StopVideo();
+    }
     ui.simActive = sim.active;
     ui.simPlaying = sim.playing;
     if (!sim.active)
@@ -2249,14 +2295,17 @@ void MeshToolApp::UpdateDriveSim(double dt)
     const double speed = (std::max)(0.0, double(ui.simSpeedMph)) * 0.44704;   // m/s
     if (sim.playing)
     {
-        sim.s += speed * dt;
-        sim.elapsed += dt;
-        sim.wheelSpin -= speed * dt / sim.car.wheelRadius;
+        // Recording: one frame of simulated time per video frame.
+        const double stepDt = m_video.recording ? 1.0 / m_video.fps : dt;
+        sim.s += speed * stepDt;
+        sim.elapsed += stepDt;
+        sim.wheelSpin -= speed * stepDt / sim.car.wheelRadius;
         if (sim.s >= sim.road.length)
         {
             sim.s = sim.road.length;
             sim.playing = false;
             ui.simStatus = "arrived";
+            if (m_video.recording) StopVideo();   // the drive is over: finish the file
         }
     }
     double heading = 0.0, pitch = 0.0;
@@ -2297,6 +2346,13 @@ void MeshToolApp::UpdateDriveSim(double dt)
              sim.s / 1000.0, sim.road.length / 1000.0, secs / 60, secs % 60, tan(pitch) * 100.0,
              sim.playing ? "" : sim.s >= sim.road.length ? "   arrived" : "   paused (Space)");
     ui.simHud = hud;
+    if (m_video.recording && m_video.writer)
+    {
+        char rec[64];
+        const int rs = int(m_video.writer->Frames() / (std::max)(1, m_video.fps));
+        snprintf(rec, sizeof(rec), "REC %d:%02d   ", rs / 60, rs % 60);
+        ui.simHud = rec + ui.simHud;
+    }
     ui.simProgress = sim.road.length > 0.0 ? float(sim.s / sim.road.length) : 0.0f;
 }
 
@@ -2331,6 +2387,103 @@ void MeshToolApp::DrawDriveSim(VkCommandBuffer cmd, const float* viewProj, const
     {
         CarModelMatrix(rel, heading, pitch, offset, sim.wheelSpin, model);
         draw(sim.car.wheel.get(), 0.06f, 0.06f, 0.07f, model);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Video recording of the drive
+// ---------------------------------------------------------------------------
+
+void MeshToolApp::StartVideo(const std::string& path)
+{
+    StopVideo();
+    if (!m_renderer->ReadbackSupported())
+    {
+        m_ui->videoInfo = "frame readback is not supported by this display driver";
+        m_ui->statusMessage = "Record video: " + m_ui->videoInfo;
+        m_ui->statusTimeout = 8.0f;
+        return;
+    }
+    // The file is opened on the first frame, when the viewport size is known.
+    m_video.path = path;
+    m_video.recording = true;
+    m_video.pending = false;
+    m_ui->videoRecording = true;
+    m_ui->videoInfo = "recording to " + path;
+    if (m_sim.active && !m_sim.playing && m_sim.s < m_sim.road.length)
+        m_sim.playing = true;   // start driving so there is something to record
+}
+
+void MeshToolApp::StopVideo()
+{
+    if (!m_video.recording && !m_video.writer)
+        return;
+    std::string done;
+    if (m_video.writer)
+    {
+        char buf[96];
+        const double secs = double(m_video.writer->Frames()) / (std::max)(1, m_video.fps);
+        snprintf(buf, sizeof(buf), "%lld frames, %.1f s, %dx%d", (long long)m_video.writer->Frames(), secs,
+                 m_video.writer->Width(), m_video.writer->Height());
+        done = std::string("saved ") + m_video.path + " (" + buf + ")";
+        m_video.writer->Close();
+        m_video.writer.reset();
+    }
+    m_video.recording = false;
+    m_video.pending = false;
+    if (m_ui)
+    {
+        m_ui->videoRecording = false;
+        if (!done.empty())
+        {
+            m_ui->videoInfo = done;
+            m_ui->statusMessage = "Record video: " + done;
+            m_ui->statusTimeout = 10.0f;
+        }
+    }
+}
+
+void MeshToolApp::UpdateVideoFrame()
+{
+    if (!m_video.pending)
+        return;
+    m_video.pending = false;
+    std::vector<uint8_t> rgb;
+    int fw = 0, fh = 0;
+    if (!m_renderer->TakeReadback(rgb, fw, fh))
+        return;   // nothing this frame; the next one is tried again
+    const int x0 = std::clamp(m_video.rect[0], 0, fw - 1), y0 = std::clamp(m_video.rect[1], 0, fh - 1);
+    const int w = std::clamp(m_video.rect[2], 16, fw - x0) & ~15, h = std::clamp(m_video.rect[3], 16, fh - y0) & ~15;
+    std::string error;
+    if (!m_video.writer)
+    {
+        auto writer = std::make_unique<VideoWriter>();
+        if (!writer->Open(m_video.path, w, h, m_video.fps, error))
+        {
+            m_ui->videoInfo = "could not start the video: " + error;
+            m_ui->statusMessage = "Record video: " + m_ui->videoInfo;
+            m_ui->statusTimeout = 10.0f;
+            m_video.recording = false;
+            m_ui->videoRecording = false;
+            return;
+        }
+        m_video.writer = std::move(writer);
+    }
+    else if (w != m_video.writer->Width() || h != m_video.writer->Height())
+    {
+        // The viewport changed size (window resized, panel toggled): a video
+        // has one size, so this recording ends here.
+        StopVideo();
+        m_ui->videoInfo += " - stopped: the viewport changed size";
+        return;
+    }
+    std::vector<uint8_t> crop(size_t(w) * h * 3);
+    for (int y = 0; y < h; y++)
+        memcpy(&crop[size_t(y) * w * 3], &rgb[(size_t(y0 + y) * fw + x0) * 3], size_t(w) * 3);
+    if (!m_video.writer->WriteFrame(crop.data(), error))
+    {
+        StopVideo();
+        m_ui->videoInfo += " - stopped: " + error;
     }
 }
 

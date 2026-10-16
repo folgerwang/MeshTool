@@ -326,7 +326,8 @@ int main(int argc, char* argv[])
         // MeshTool.exe scene.mtscene --shots prefix [--frame object | --box x0 y0 z0 x1 y1 z1]
         //   [--yaw deg] [--pitch deg] [--zoom k] [--no-glass] [--ortho] [--sim [fraction]]: check
         //   screenshots, then exit. --sim starts the drive simulation on the scene's route and
-        //   parks the car part way along it (chase camera).
+        //   parks the car part way along it (chase camera). --sim-video out.mp4 [--sim-seconds n]
+        //   records the drive from there (default 10 s, or until the car arrives) and exits.
         MeshToolApp::AutoShots shots;
         for (int i = 2; i < argc; i++)
         {
@@ -337,6 +338,13 @@ int main(int argc, char* argv[])
             else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) shots.zoom = atof(argv[++i]);
             else if (!strcmp(argv[i], "--no-glass")) shots.glass = false;
             else if (!strcmp(argv[i], "--ortho")) shots.ortho = true;
+            else if (!strcmp(argv[i], "--sim-video") && i + 1 < argc)
+            {
+                shots.video = argv[++i];
+                if (shots.sim < 0.0) shots.sim = 0.0;
+                if (shots.prefix.empty()) shots.prefix = "video";   // keeps the --shots flow active
+            }
+            else if (!strcmp(argv[i], "--sim-seconds") && i + 1 < argc) shots.videoSeconds = atof(argv[++i]);
             else if (!strcmp(argv[i], "--sim"))
             {
                 // Optional fraction along the route (default: half way).

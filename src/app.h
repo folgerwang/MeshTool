@@ -17,6 +17,7 @@ class VulkanPipelineManager;
 class MeshToolUI;
 class InputHandler;
 class ViewCamera;
+class VideoWriter;
 class ProcessManager;
 class LiveCaptureProcessor;
 struct MeshDrawFrame;
@@ -55,6 +56,8 @@ public:
         bool        glass = true;    // draw glass facades as glass (false: as captured)
         bool        ortho = false;   // bird's-eye orthographic view instead of yaw/pitch
         double      sim = -1.0;      // >= 0: start the drive simulation, park the car this far along (0..1), chase camera
+        std::string video;           // with sim: record the drive from there to this MP4 instead of screenshots ...
+        double      videoSeconds = 10.0;   // ... for this long (or until the car arrives), then exit
     };
     void SetAutoShots(const AutoShots& shots) { m_auto = shots; m_autoStage = 1; }
     // MeshTool.exe --capture-route "from" "to" [...]: start a route capture as
@@ -176,6 +179,22 @@ private:
     void StopDriveSim(bool restoreCanopy);
     void UpdateDriveSim(double dt);
     void DrawDriveSim(VkCommandBuffer cmd, const float* viewProj, const MeshDrawFrame& frame);
+    // Record video: while the car drives, every frame's viewport is read back
+    // and encoded (H.264 MP4). The simulation then steps at the video's frame
+    // rate instead of wall-clock time, so the video is smooth however slow
+    // the readback makes rendering.
+    struct VideoCapture
+    {
+        std::unique_ptr<VideoWriter> writer;
+        bool   recording = false;
+        bool   pending = false;      // readback requested for this frame
+        int    rect[4] = {};         // viewport in framebuffer pixels: x, y, w, h (even)
+        int    fps = 30;
+        std::string path;
+    } m_video;
+    void StartVideo(const std::string& path);
+    void StopVideo();
+    void UpdateVideoFrame();         // after EndFrame: take the readback and encode it
     ProcessManager*        m_processManager = nullptr;
 
     bool                   m_capturePending = false;     // Capture Frame requested, result not in yet

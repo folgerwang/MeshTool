@@ -19,8 +19,10 @@ MARGIN = 128
 
 
 class LamaInpainter:
-    def __init__(self, log=print):
+    def __init__(self, log=print, tile_size=TILE, margin=MARGIN):
         import torch
+        if tile_size<=2*margin:raise ValueError('Inpainting tile must exceed both margins')
+        self.tile_size,self.margin=tile_size,margin
         self.torch = torch
         if not os.path.exists(WEIGHTS):
             if os.environ.get("HF_HUB_OFFLINE") == "1" and os.environ.get("MESHTOOL_DOWNLOAD") != "1":
@@ -48,11 +50,11 @@ class LamaInpainter:
         t0 = time.time()
         H, W = mask.shape
         out = rgb.copy()
-        step = TILE - 2 * MARGIN
+        step = self.tile_size - 2 * self.margin
         for y0 in range(0, H, step):
             for x0 in range(0, W, step):
-                ya, xa = max(0, y0 - MARGIN), max(0, x0 - MARGIN)
-                yb, xb = min(H, y0 + step + MARGIN), min(W, x0 + step + MARGIN)
+                ya, xa = max(0, y0 - self.margin), max(0, x0 - self.margin)
+                yb, xb = min(H, y0 + step + self.margin), min(W, x0 + step + self.margin)
                 sub = mask[ya:yb, xa:xb]
                 if not sub.any():
                     continue

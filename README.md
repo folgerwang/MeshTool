@@ -87,8 +87,13 @@ A typical session, from an empty scene to an exported model:
    view. The mesh over the road corridor (*Clear width*, 20 m) higher than
    *Clear above road* (1.5 m) can be cut out of the view while the simulation
    runs, so the car stays visible under trees (Stop puts it back; the saved
-   scene is not changed). A scene saved without a route takes two addresses in
-   the dialog and looks the route up. `MeshTool scene.mtscene --shots prefix --sim [0..1]` screenshots
+   scene is not changed). *Record video...* saves the drive as an H.264 MP4
+   (30 fps, Windows Media Foundation, no extra software): the simulation then
+   advances one frame of simulated time per video frame, and the recording
+   ends when the car arrives or on *Stop recording*. A scene saved without a
+   route takes two addresses in the dialog and looks the route up.
+   `MeshTool scene.mtscene --sim-video drive.mp4 [--sim 0.3] [--sim-seconds 60]`
+   records a drive from the command line. `MeshTool scene.mtscene --shots prefix --sim [0..1]` screenshots
    the car parked part way along the route.
 7. **Inspect.** Scene panel > Captures (debug) colours tiles by capture and
    draws the camera path; click any mesh for its details (T toggles
@@ -264,7 +269,7 @@ efine.py`, run
 with `python` from PATH (or `MESHTOOL_PYTHON`) on a copy of the scene.
 
 1. **Outline**: the building's top-down mask, sharpened by SAM2 on the orthophoto.
-2. **Roof**: split into planes (RANSAC + region growing); planes flatter than 4°
+2. **Roof**: split into planes (RANSAC + region growing); planes flatter than 4ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°
    become level.
 3. **Walls**: for each roof part, a horizontal slice through the captured mesh
    just below that roof gives where the facade really stands (not the roof edge,
@@ -286,7 +291,7 @@ Progress and the log (`refine.log`) go to the segmentation debug folder.
 **Clean scene** (checkbox / `--clean`) goes further: cars (including buses and
 vans the segmenter made into a small building or tree) and surface clutter
 (people, poles, bins, parked-car rows left in a ground class: raised blobs under
-60 m²) are removed, and ground,
+60 mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²) are removed, and ground,
 roads, plants and water are rebuilt as one textured height field from the
 top-down raster - holes under trees, cars, clutter and buildings are filled from
 their surroundings - heights geometrically, the orthophoto with LaMa image
@@ -319,6 +324,7 @@ MeshTool --objects in.mtscene [out.mtscene] [--remove car]
 MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 100] [--look-back]
 MeshTool --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg] [--dwell s] [--look-back] [--save out.mtscene]
 MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..] [--ortho] [--sim [fraction]]
+MeshTool scene.mtscene --sim-video drive.mp4 [--sim fraction] [--sim-seconds n]
 ```
 
 `--objects` lists a segmented scene's objects (name, class, size, centre) and
@@ -361,6 +367,113 @@ Meshes keep their world-space offset as node translations (source data is
 Z-up; a root node rotates it to glTF's Y-up). Materials use
 `KHR_materials_unlit`, since the captured textures already have lighting baked in.
 
+## Separate terrain scene
+
+Export a segmented capture into a new directory before adding procedural assets:
+
+```powershell
+python tools/building_refine/terrain_scene.py capture.mtscene scenes/terrain_output --resolution 0.5 --step 2
+```
+
+This creates `terrain.mtscene` with only ground, roads, low vegetation and water
+where those classes are captured. Original world coordinates and geographic
+references are preserved. The input and existing output directories are never
+overwritten. Archived original meshes take precedence over PCG variants.
+
+Tree crowns, buildings and cars are excluded from elevation samples. Broad
+mislabelled roofs/crowns are filtered; hidden ground is interpolated from nearby
+ground, not lowered by an assumed tree height. The export includes float height,
+coverage, inferred-ground and tree-cover maps in NPZ; a 16-bit PNG heightmap with
+world-height decoding in `manifest.json`; and the distance to measured ground.
+Ground under dense forest is an estimate when no underlying surface was captured.
+
+The manifest records source IDs, world bounds, anchors and terrain elevations for
+later placement of PCG buildings and instanced trees. Those assets are not added
+to the terrain scene by this step. Filled ground textures still contain baked
+lighting/shadows from the capture and are not newly observed imagery.
+
+### Add saved PCG buildings to terrain
+
+Use a full-scene PCG library that retains the original object indices and archived capture meshes:
+
+```powershell
+python tools/building_refine/compose_terrain.py scenes/terrain_ground_20261016/manifest.json scenes/pcg_rows_20261010/full_scene_rows.mtscene scenes/terrain_pcg_new
+```
+
+This creates `terrain_pcg.mtscene` and a placement manifest in a new directory. Only refined building variants are added; buildings without PCG models are recorded as pending. The compositor verifies archived geometry, source textures and geographic references against the terrain's original capture. World coordinates, terrain and source files are preserved. It does not move buildings onto uncertain interpolated ground or include captured building fallbacks, trees or cars.
+
+### Reconstruct roads and street signals
+
+```powershell
+python tools/building_refine/road_scene.py scenes/terrain_pcg_fixed_v2_20261016/terrain_pcg.mtscene scenes/terrain_fixed_v2_20261016/manifest.json scenes/roads_new
+```
+
+Creates a separate `roads_pcg.mtscene`, preserving the existing terrain and PCG buildings. Road segmentation supplies the asphalt footprint. Existing terrain triangles are partitioned into road and remaining ground, with identical vertices along the seam and no overlapping surface. White, yellow and red paint strokes are filtered from the captured surface, straightened and baked into the road atlas. Related red paint fragments are fitted as continuous constant-width lanes across small occlusions, with alignment and road-support checks preventing merges across parallel lanes or real road breaks. Small segmentation gaps are repaired before road partitioning; existing PCG building footprints remain excluded. Skeleton pruning and surrounding road approaches identify candidate junctions for static traffic-light assemblies. Signal poles are placed outside the reconstructed carriageway and avoid segmented buildings. The manifest records input hashes, junctions and signal positions.
+
+This is a visual reconstruction: paint comes from capture evidence but may be incomplete, signal positions are inferred rather than surveyed, and signals do not simulate traffic. Road borders retain the terrain grid resolution. Existing outputs cannot be overwritten or layered with a second road reconstruction. Captured terrain textures outside reconstructed roads remain unchanged.
+
+For the protected October 7 capture, use the map-reviewed connected network instead of segmentation-only roads:
+
+```powershell
+python tools/building_refine/road_scene.py scenes/terrain_pcg_fixed_v2_20261016/terrain_pcg.mtscene scenes/terrain_fixed_v2_20261016/manifest.json scenes/roads_connected --network tools/building_refine/road_profiles/capture_20261007.json
+```
+
+This editable profile registers 13 continuous road corridors against the original capture's top-down image, with junction topology visually checked against Google Maps. It contains manually fitted centerlines, not downloaded Google vector data. The source fingerprint and raster registration must match. Junction endpoints snap to adjoining streets; export rejects a disconnected road mask after excluding PCG buildings. The manifest records the centerlines, junctions and connected-component count. Road ends at the capture boundary are intentional.
+
+The graph now seeds a captured-surface recovery pass instead of replacing all segmentation evidence with fixed-width strips. Recovery checks elevation against bare ground, pavement appearance, continuity along the street and actual projected building footprints. Growth is bounded to 14 m from the seeded mask; small raster slivers are removed and reported. These inferred edges can still be ambiguous around parking areas, shadows and occlusion. `road_mask_0.png` and manifest coverage metrics make the result inspectable.
+
+To rebuild roads in a scene containing the improved buildings, restore its original saved terrain and repartition it without changing building assets:
+
+```powershell
+python tools/building_refine/road_scene.py scenes/city_capture_appearance_v3_20261016/city_capture_appearance.mtscene scenes/terrain_fixed_v2_20261016/manifest.json scenes/city_roads_new --network tools/building_refine/road_profiles/capture_20261007.json --replace-existing
+```
+
+The export reads and fingerprints the original capture when older terrain files lack captured heights. It writes a separate scene, regenerates inferred signals at the new boundaries, and keeps road and ground triangles mutually exclusive.
+
+### Generate and place all PCG buildings
+
+```powershell
+python tools/building_refine/batch_buildings.py scenes/source_backups/20261007-190111/debug/refine_input.mtscene scenes/pcg_rows_20261010/full_scene_rows.mtscene scenes/pcg_all_new
+python tools/building_refine/compose_city.py scenes/roads_network_20261016/roads_pcg.mtscene scenes/pcg_all_new scenes/city_all_new
+```
+
+The batch checkpoints each segmented building separately, preserves existing refined variants after validating their source geometry, and fits the remaining facades. Objects without usable walls receive procedural footprint geometry, with windows where size permits. Small fragments remain small rather than being inflated into towers. The per-object manifest distinguishes capture-fitted facades, footprint fallbacks and fragments. These are first-pass procedural reconstructions; batch generation does not run multiview optimization on every building.
+
+Composition replaces the prior building layer, preserves road/terrain geometry and world coordinates, and deduplicates shared textures. Original captures and prior composed scenes remain untouched.
+
+### Repair broken batch buildings with closed shells
+
+```powershell
+python tools/building_refine/solid_city.py scenes/source_backups/20261007-190111/debug/refine_input.mtscene scenes/roads_network_20261016/roads_pcg.mtscene scenes/terrain_fixed_v2_20261016/manifest.json tools/building_refine/road_profiles/capture_20261007.json scenes/city_solid_new
+```
+
+This conservative repair replaces damaged captured triangles with closed building volumes, including roof and bottom caps. Large buildings split into roof-height regions from the capture. Footprints exclude road corridors and previously occupied building areas; narrow isolated fragments are held back instead of rendered as separate broken buildings. Every generated component is checked for boundary edges, non-manifold edges and degenerate triangles. Original source data, roads, terrain and the already accepted refined tower are preserved.
+
+The manifest distinguishes reconstructed building groups from absorbed or unresolved fragment records. This is a solid-first approximation: window patterns and roof detail are simplified. Validate matching close-up and overview screenshots before accepting geometric checks alone.
+
+### Map captured appearance onto repaired buildings
+
+```powershell
+python tools/building_refine/capture_appearance.py scenes/source_backups/20261007-190111/debug/refine_input.mtscene scenes/city_solid_stepped_20261016/city_solid.mtscene scenes/city_capture_new
+```
+
+This separate export preserves the closed shell geometry and projects captured building textures in world coordinates. Window rows, offsets, doors and surface colors follow the observed capture rather than a repeating procedural grid. Baking preserves 512-pixel capture detail, uses an 8 cm target texel size (limited by atlas dimensions), and selects the nearest aligned captured wall within 6 m. Roofs use top-down projection. Nearby building fragments can supply missing segmentation coverage; trees and terrain cannot.
+
+The manifest records input hashes and observed coverage per face. Unobserved areas receive a color fill, not invented windows or doors. These are photographic surface textures, not separately modeled window recesses or physically separated glass/brick materials. The existing accepted tower is preserved. Compare native screenshots at identical cameras against the original capture; simplified geometry and unavailable imagery still limit fidelity.
+
+### Building-specific facade tile libraries and optional ML repair
+
+```powershell
+python tools/building_refine/capture_appearance.py scenes/source_backups/20261007-190111/debug/refine_input.mtscene scenes/city_roads_recovered_v2_20261016/roads_pcg.mtscene scenes/city_capture_ml_new --lama
+python tools/building_refine/capture_tiles.py scenes/city_capture_ml_new/city_capture_appearance.mtscene scenes/city_tiles_new
+```
+
+`--lama` uses the local LaMa inpainting model (downloaded once into the MeshTool cache). Confident horizontal repeats supply same-row reference pixels first, preserving staggered floor phases. LaMa fills remaining gaps within six metres of captured evidence; faces with less than 25% observed coverage retain the conservative fill. Original observed pixels are protected before texture compression. `observed_masks.npz` records the provenance of every baked atlas pixel.
+
+The tile pass detects individual openings rather than snapping them to one generic grid. Each building gets `tiles.json`, reusable rectangular/arched opening prototypes, instance transforms, captured UV transforms, appearance previews and detection images. Walls, frames, reveals, glazing and door leaves become separate mesh batches. Windows are recessed 7 cm and door candidates 12 cm; these depths are inferred. Similar openings share geometry while retaining their own captured appearance. The current renderer receives expanded meshes, not GPU-instanced draw calls.
+
+Doors are permitted only within 0.8 m of the overall building base, never relative to an upper setback. A door candidate must retain at least 95% observed image support; ML-generated pixels cannot introduce a new door. Repaired window instances are explicitly labeled as inferred. A larger-scale detector handles repeated ornamental windows spanning multiple storeys. Every building is checked against its previous shell topology before export. Unresolved walls and the previously detailed tower remain intact. Add `--only building_123,building_456` for focused iteration, or `--semantic-review` for a separate diagnostic scene (blue glazing, orange door leaves, neutral walls). Outputs are new directories; captures and previous scenes are unchanged.
+
 ## Targets
 
 - `MeshTool` - main app
@@ -368,3 +481,34 @@ Z-up; a root node rotates it to glTF's Y-up). Materials use
 - `GLHookInject` (`meshtool_hook.dll`) - injectable hook used by live capture
 - `GLHookTest` (`opengl32_test.dll`) - forwarding-only proxy for debugging
 - `test_inject` - inject `meshtool_hook.dll` into a running process by name or PID
+
+
+Clean PCG assembly: add `--clean-materials` to `tools/building_refine/capture_tiles.py`.
+This cuts detected rectangular/arched openings out of the repaired wall shell, inserts
+procedural frames, recessed reveals and glazing/ground-level door leaves, and replaces
+photographic facade/roof textures with clean materials. Capture supplies opening positions
+and robust wall/glass color estimates. Undetected openings remain blank wall; this mode
+does not infer a complete missing layout. Original input is read-only, output must be new.
+The accepted building_367 tower is preserved. Instance geometry is expanded for rendering.
+
+Clean PCG window recovery also matches captured window templates across each facade and
+fills up to three missing bays between supported regular row neighbors. Rows keep their
+individual phase; generated candidates are always windows. The tile catalog records
+`capture_template` and `bounded_row_gap` recovery provenance for inspection.
+
+
+Single-building reference study (`building_080`):
+`python tools/building_refine/landmark_facade.py INPUT_REFERENCE_SCENE OUTPUT_SCENE --details --roof`
+uses individually measured facade rows, whole-window frames/tracery, inferred masonry
+joints and trim profiles, and a roof traced from the original capture. The roof includes
+a sloped plateau, inset windows, a ribbed glazed dome, parapet blocks and approximate
+service structures. This is a building-specific profile, not a city-wide classifier.
+The output report distinguishes measured layout from inferred details; source files are
+read-only. The original capture and successive rendered comparisons remain in
+`scenes/building080_detail_20261016/`.
+
+
+PCG generation settings are stored in `tools/building_refine/building_rules.json`.
+Use `--rules PATH` with the city or single-building generator to apply a saved
+configuration. Each export includes the effective config and its SHA-256.
+Individual measured layouts live in `tools/building_refine/building_profiles/`.

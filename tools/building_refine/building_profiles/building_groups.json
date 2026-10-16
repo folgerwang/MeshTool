@@ -1,0 +1,14 @@
+{
+  "source_sha256": "47a5a785ff576345bcff2e44724feefea6ea77f2b57f276ab8ee4cd82cf12135",
+  "groups": [
+    {
+      "building": "building_334",
+      "members": [
+        "building_334",
+        "building_346"
+      ],
+      "reason": "Complementary sides of one continuous tower roof with pool terrace; reviewed combined capture overhead.",
+      "evidence": "scenes/building_parts_20261016/capture_original.png"
+    }
+  ]
+}

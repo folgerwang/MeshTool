@@ -56,6 +56,7 @@ set(NEW_SOURCES
     src/file_downloader.cpp
     src/route.cpp
     src/sim.cpp
+    src/videowriter.cpp
     src/vulkan/vk_renderer.cpp
     src/vulkan/vk_buffer.cpp
     src/vulkan/vk_texture_manager.cpp
@@ -119,6 +120,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Advapi32.lib
     RPCRT4.lib
     winhttp.lib
+    mfplat.lib
+    mfreadwrite.lib
+    mfuuid.lib
+    ole32.lib
 )
 
 if(WIN32)

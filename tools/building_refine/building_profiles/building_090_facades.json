@@ -1,0 +1,81 @@
+{
+  "building": "building_090",
+  "evidence": "Registered captured facade; full window groups, not cornice shadows",
+  "faces": {
+    "12": {
+      "image_sha256": "82fb8500929dcf813a9457003aa21dc3e361850b792bc7b9a1d55109dde3ff59",
+      "window_rects_px": [
+        [
+          22,
+          6,
+          54,
+          39
+        ],
+        [
+          22,
+          67,
+          54,
+          108
+        ],
+        [
+          22,
+          133,
+          54,
+          174
+        ],
+        [
+          80,
+          6,
+          112,
+          39
+        ],
+        [
+          80,
+          67,
+          112,
+          108
+        ],
+        [
+          80,
+          133,
+          112,
+          174
+        ],
+        [
+          139,
+          6,
+          173,
+          39
+        ],
+        [
+          139,
+          67,
+          173,
+          108
+        ],
+        [
+          139,
+          133,
+          173,
+          174
+        ],
+        [
+          141,
+          211,
+          170,
+          232
+        ],
+        [
+          141,
+          253,
+          169,
+          282
+        ]
+      ],
+      "review_status": "layout_measured_from_capture",
+      "reference_height_px": 317,
+      "reference_width_px": 196,
+      "anchor_sha256": "babb752e26e08c090285d263d7f27facc25d008a9ad10a7238cfd25b3b62525a"
+    }
+  }
+}

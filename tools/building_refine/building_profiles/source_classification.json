@@ -1,0 +1,146 @@
+{
+  "source_sha256": "47a5a785ff576345bcff2e44724feefea6ea77f2b57f276ab8ee4cd82cf12135",
+  "review": "Three original-capture views inspected; source data retained unchanged. These explicit corrections apply only to this capture.",
+  "objects": [
+    {
+      "building": "building_047",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Street surface, cars, trees and a pole; no standalone building envelope.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_047\\capture-30_original.png",
+          "sha256": "d1206fcffdde20cf6d9688ec7ebbc725e1bf2238beb489da60bfff73e72649d1"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_047\\capture-210_original.png",
+          "sha256": "f9da4bb16a6d45c80e2e6fad672d96be08bba82a0cb2fedbfcec4e37def92f35"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_047\\capture-120_original.png",
+          "sha256": "c1c076c16e4e5ddcad2a7e4b4da18e3c5094711ca69223372b40c8b8e6e949ae"
+        }
+      ]
+    },
+    {
+      "building": "building_082",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Street surface, car and trees; no standalone building envelope.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_082\\capture-30_original.png",
+          "sha256": "5af331246c26264ef654e07b63e65f9c235c9c6e70ee74b55b09c9121fd44151"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_082\\capture-210_original.png",
+          "sha256": "b124be44d1ed1bafe15315f1a981cc547fb8e49ef9563b8b9d2b1545abcc1c20"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_082\\capture-120_original.png",
+          "sha256": "ba203d93beaba6ddba722b731b77d45e4978820d7f28c44d41582df5491ee337"
+        }
+      ]
+    },
+    {
+      "building": "building_323",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Tree canopy with stray scan triangles, not a roof or facade.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_323\\capture-30_original.png",
+          "sha256": "b56bf324432b4adf056cfc4a1d38bed04e70953b498cdda7ade28c1376b46c89"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_323\\capture-210_original.png",
+          "sha256": "d54eed3806fd34b3c0073afd95ade93f88b76804ea00802d32b94504798d5d05"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_323\\capture-120_original.png",
+          "sha256": "11522081a3f29761981b199e363bb1be6bec37f72ab4359fb0bdedbbb63e3c19"
+        }
+      ]
+    },
+    {
+      "building": "building_390",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Vegetation/hedge volume, not a building.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_390\\capture-30_original.png",
+          "sha256": "2ce1fe64a1f8a176275b368a4c553893c2b8ddf4a4110ef1d92fb46246f0de2b"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_390\\capture-210_original.png",
+          "sha256": "a1c6dd81668751d6834dc6e659598937d1f383761f097714b9354854489541cf"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_390\\capture-120_original.png",
+          "sha256": "2a41d3a14c5f3f97a254a63092b541b1b6bdb085b0e0732dd9fe3d3ac9101fc0"
+        }
+      ]
+    },
+    {
+      "building": "building_198",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Tree foliage and scan fragments, not a building.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_198\\capture-30_original.png",
+          "sha256": "a8c8d26300b91f4879bf800453fd2003567f329b35a12aa074aeb984c7c2c9fa"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_198\\capture-210_original.png",
+          "sha256": "41ee971c599eab2af494cae76a6e23760a3e3840f4e64359c06a510c63b2b82d"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_198\\capture-120_original.png",
+          "sha256": "3403bdca2adca1a2f89b048c80b992a9f298cfe58e791d0b77d19430fc3904dd"
+        }
+      ]
+    },
+    {
+      "building": "building_220",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Row of tree canopies, not a building.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_220\\capture-30_original.png",
+          "sha256": "aefaf8130032b6f2f98113b8c79a34fc3ee7d0e6d79d83c9a1bdc0c6573d2e61"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_220\\capture-210_original.png",
+          "sha256": "fc14ad446d30c4284cb1b853ee898b1678aa8d76941b96e15348baf5b68916d6"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_220\\capture-120_original.png",
+          "sha256": "4192b9c22bceeb9a0db9a154ad653edb57ee5dc0c0ad1d09d78acba6db05514c"
+        }
+      ]
+    },
+    {
+      "building": "building_517",
+      "classification": "not_standalone_building",
+      "action": "omit_generated_building",
+      "reason": "Tree canopy, not a building.",
+      "evidence": [
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_517\\capture-30_original.png",
+          "sha256": "956662f65809033ca0d6624919d2024cbfa2daf1f6fc82f63ef1b50b01630af2"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_517\\capture-210_original.png",
+          "sha256": "6ee2199894588ce78b0f7a9e5405a46dfa939dcfe730c48c2116803a3739591b"
+        },
+        {
+          "path": "G:\\work\\MeshTool\\scenes\\building_iterations_20261016\\all_roof_facade\\building_517\\capture-120_original.png",
+          "sha256": "f3cf1b47874952dff0d784b0aaf941641dff3994d1e3db04a6576c50c425fe80"
+        }
+      ]
+    }
+  ]
+}

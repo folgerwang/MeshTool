@@ -1,0 +1,40 @@
+{
+  "source_sha256": "47a5a785ff576345bcff2e44724feefea6ea77f2b57f276ab8ee4cd82cf12135",
+  "evidence": "Original upper cornice contour, inspected in scenes/building020_roof_outline.png. Connect the two west-side return endpoints; missing roof interior remains inferred.",
+  "outer_xy": [
+    [
+      -154.5058857,
+      183.4678902
+    ],
+    [
+      -156.3560367,
+      194.7069526
+    ],
+    [
+      -122.446502,
+      200.1020437
+    ],
+    [
+      -116.279228,
+      161.8830847
+    ],
+    [
+      -150.1889163,
+      156.4879707
+    ],
+    [
+      -152.0390578,
+      168.0508068
+    ],
+    [
+      -144.7914153,
+      169.1297958
+    ],
+    [
+      -147.5666533,
+      184.5468887
+    ]
+  ],
+  "holes_xy": [],
+  "status": "measured_candidate_requires_render_review"
+}
