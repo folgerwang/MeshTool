@@ -48,3 +48,12 @@ std::vector<RouteWaypoint> SampleRoute(const std::vector<std::pair<double, doubl
 
 // Whole pipeline, for a worker thread. Either end may be an address or "lat, lon".
 RoutePlan PlanRoute(const std::string& from, const std::string& to, double spacingM, bool lookBack);
+
+// North-up rectangle, sampled in alternating rows. Includes the boundary and
+// limits the distance between samples to spacingM. No network lookup needed.
+RoutePlan PlanZone(double lon0, double lat0, double lon1, double lat1, double spacingM);
+
+// Bound the requested spacing by the smaller top-down camera footprint, with
+// overlap on both axes. FOVs are degrees; missing values use conservative defaults.
+double ZoneCaptureSpacing(double requestedM, double heightM, double overlap,
+                          double hFov = 0.0, double vFov = 0.0);

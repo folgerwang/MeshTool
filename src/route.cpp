@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 #include <GeographicLib/Geodesic.hpp>
 
 #pragma comment(lib, "winhttp.lib")
@@ -347,4 +348,72 @@ RoutePlan PlanRoute(const std::string& from, const std::string& to, double spaci
     plan.ok = !plan.waypoints.empty();
     if (!plan.ok) plan.error = "the route produced no waypoints";
     return plan;
+}
+
+RoutePlan PlanZone(double lon0, double lat0, double lon1, double lat1, double spacingM)
+{
+    RoutePlan plan;
+    plan.fromName = "Zone";
+    plan.toName = "grid";
+    if (!std::isfinite(lon0) || !std::isfinite(lon1) || !std::isfinite(lat0) ||
+        !std::isfinite(lat1) || !std::isfinite(spacingM) || spacingM < 10.0 ||
+        fabs(lon0) > 180 || fabs(lon1) > 180 || fabs(lat0) >= 85 || fabs(lat1) >= 85)
+    {
+        plan.error = "Use valid coordinates below 85 degrees latitude and spacing of at least 10 m.";
+        return plan;
+    }
+    const double west = (std::min)(lon0, lon1), east = (std::max)(lon0, lon1);
+    const double south = (std::min)(lat0, lat1), north = (std::max)(lat0, lat1);
+    if (west == east || south == north || east - west > 180)
+    {
+        plan.error = "Draw a rectangle with nonzero width and height that does not cross the date line.";
+        return plan;
+    }
+    const auto& geod = GeographicLib::Geodesic::WGS84();
+    double widthS, widthN, height;
+    geod.Inverse(south, west, south, east, widthS);
+    geod.Inverse(north, west, north, east, widthN);
+    // The equator has the widest longitude span when the zone crosses it.
+    double width = (std::max)(widthS, widthN);
+    if (south < 0 && north > 0) geod.Inverse(0, west, 0, east, width);
+    geod.Inverse(south, west, north, west, height);
+    const double colsD = (std::max)(1.0, ceil(width / spacingM));
+    const double rowsD = (std::max)(1.0, ceil(height / spacingM));
+    if ((colsD + 1) * (rowsD + 1) > 10000)
+    {
+        plan.error = "Zone exceeds 10,000 samples. Draw a smaller rectangle or increase spacing.";
+        return plan;
+    }
+    const int cols = int(colsD), rows = int(rowsD);
+    for (int row = 0; row <= rows; ++row)
+        for (int col = 0; col <= cols; ++col)
+        {
+            RouteWaypoint w;
+            w.lat = north - (north - south) * row / rows;
+            const int x = row % 2 ? cols - col : col;
+            w.lon = west + (east - west) * x / cols;
+            w.heading = 0; // Consistent north-up, straight-down captures.
+            if (!plan.waypoints.empty())
+            {
+                double distance;
+                const auto& prev = plan.waypoints.back();
+                geod.Inverse(prev.lat, prev.lon, w.lat, w.lon, distance);
+                plan.lengthM += distance;
+            }
+            w.distance = plan.lengthM;
+            plan.waypoints.push_back(w);
+        }
+    plan.ok = true;
+    return plan;
+}
+
+double ZoneCaptureSpacing(double requestedM, double heightM, double overlap, double hFov, double vFov)
+{
+    if (!std::isfinite(requestedM) || requestedM < 10 || !std::isfinite(heightM) || heightM <= 0 ||
+        !std::isfinite(overlap) || overlap < 0 || overlap >= 1)
+        return 0;
+    if (!std::isfinite(hFov) || hFov <= 0 || hFov >= 170) hFov = 60;
+    if (!std::isfinite(vFov) || vFov <= 0 || vFov >= 170) vFov = 40;
+    const double angle = (std::min)({hFov, vFov, 90.0}) * 3.14159265358979323846 / 180.0;
+    return (std::min)(requestedM, 2 * heightM * tan(angle / 2) * (1 - overlap));
 }

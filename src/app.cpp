@@ -229,7 +229,7 @@ void MeshToolApp::MainLoop()
         vpRect.x = m_ui->viewportX; vpRect.y = m_ui->viewportY;
         vpRect.w = m_ui->viewportW; vpRect.h = m_ui->viewportH;
         m_camera->Update(m_window, m_input->GetState().scrollDelta, vpRect,
-                         ImGui::GetIO().WantCaptureMouse, dt);
+                         ImGui::GetIO().WantCaptureMouse || m_ui->zoneSuppressInput || m_ui->zoneDrawMode, dt);
         UpdateGeoReadout();
         UpdateGeFollow();
         UpdateSelection();
@@ -752,6 +752,16 @@ bool MeshToolApp::CaptureSettled()
     // GE is at the camera once its camera is the one sent (since it stopped
     // there); if it rests elsewhere (e.g. kept above terrain), once it has
     // rested kNoReport; with no reports at all, kNoReport after delivery.
+    // A zone must not accept the route mode's fallback for an unrelated old
+    // view: doing so can recapture the same patch at several grid points.
+    if (routing && m_route.zone &&
+        (!view.valid || view.time < delivered || now - view.time > 4.0 ||
+         metresApart(m_followSentLat, m_followSentLon, view.camAlt,
+                     view.camLat, view.camLon, view.camAlt) >= 3.0 || fabs(view.tilt) > 2.0))
+    {
+        m_ui->captureGate = "waiting for a fresh Google Earth view at this zone sample";
+        return false;
+    }
     double atCamera = -1.0;   // glfwGetTime() GE was known to be at the camera
     if (view.valid &&
         metresApart(m_followSentLat, m_followSentLon, routing ? view.camAlt : m_followSentAlt,
@@ -1491,6 +1501,7 @@ void MeshToolApp::PickAt(float mouseX, float mouseY)
 
 void MeshToolApp::UpdateSelection()
 {
+    if (m_ui->zoneSuppressInput || m_ui->zoneDrawMode) return;
     if (m_ui->wantClearSelection)
     {
         m_ui->wantClearSelection = false;
@@ -1759,6 +1770,34 @@ void MeshToolApp::ProcessPendingActions()
 {
     if (!m_ui) return;
 
+    const auto* zoneGeo = GeoreferencedBatch();
+    m_ui->zoneViewportAvailable = zoneGeo != nullptr && !m_sim.active;
+    if (m_ui->zoneDrawMode)
+    {
+        m_ui->topDownOrtho = m_camera->orthographic = true;
+        m_camera->LookStraightDown();
+    }
+    if (m_ui->wantZoneFromViewport)
+    {
+        m_ui->wantZoneFromViewport = false;
+        if (zoneGeo && m_camera->orthographic)
+        {
+            GeographicLib::LocalCartesian local(zoneGeo->reference_pos.y, zoneGeo->reference_pos.x, 0.0);
+            const double vw = (std::max)(1.0f, m_ui->viewportW), vh = (std::max)(1.0f, m_ui->viewportH);
+            auto corner = [&](ImVec2 p, double& lon, double& lat) {
+                double nx = 2 * (p.x - m_ui->viewportX) / vw - 1;
+                double ny = 1 - 2 * (p.y - m_ui->viewportY) / vh;
+                double half = m_camera->OrthoHalfHeight();
+                core::vec3d world = m_camera->target + m_camera->Right() * (nx * half * vw / vh) +
+                                    m_camera->Up() * (ny * half);
+                double altitude;
+                local.Reverse(world.x, world.y, world.z, lat, lon, altitude);
+            };
+            corner(m_ui->zoneDragStart, m_ui->zoneLon0, m_ui->zoneLat0);
+            corner(m_ui->zoneDragEnd, m_ui->zoneLon1, m_ui->zoneLat1);
+        }
+    }
+
     const ImGuiIO& io = ImGui::GetIO();
     if (!io.WantTextInput)
     {
@@ -1860,7 +1899,12 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->captureProcessor->SetGeoView(m_geoServer->Latest());
         // While following, a capture (F12 in GE) taken before GE settled on
         // the viewport camera is replayed but not kept.
-        m_ui->captureProcessor->keep_finest_only = m_ui->captureFinestOnly;
+        // A zone needs continuous ground coverage. GE often loads finer tiles
+        // only on tall buildings; dropping all coarser tiles leaves isolated
+        // buildings and holes in streets. The merge pass removes coarse
+        // triangles only where finer geometry actually covers them.
+        m_ui->captureProcessor->keep_finest_only = m_ui->captureFinestOnly &&
+            !(m_route.zone && m_route.state != RouteCapture::kIdle);
         m_ui->captureProcessor->processFrame(captureSettled);
         if (!captureSettled)
         {
@@ -1868,6 +1912,7 @@ void MeshToolApp::ProcessPendingActions()
             m_ui->statusTimeout = 5.0f;
         }
         const LiveCaptureProcessor::FrameResult& result = m_ui->captureProcessor->LastResult();
+        m_route.captureAccepted = captureSettled && !result.dropped;
         if (result.dropped)
         {
             m_ui->statusMessage = "Capture dropped: it overflowed the capture buffer (old hook - run deploy_hook.bat).";
@@ -1982,7 +2027,7 @@ void MeshToolApp::UpdateRouteCapture()
         if (text != r.lastStatus)
         {
             r.lastStatus = text;
-            m_ui->statusMessage = "Route capture: " + text;
+            m_ui->statusMessage = std::string(r.zone ? "Zone capture: " : "Route capture: ") + text;
             m_ui->statusTimeout = 4.0f;
             log(text);
         }
@@ -1990,6 +2035,7 @@ void MeshToolApp::UpdateRouteCapture()
     auto finish = [&](const std::string& text, bool ok) {
         r.state = RouteCapture::kIdle;
         m_ui->routeRunning = false;
+        m_ui->wantCaptureFrame = false;
         if (ok) m_ui->routeProgress = 1.0f;
         status(text);
         m_ui->statusTimeout = 12.0f;
@@ -2036,11 +2082,17 @@ void MeshToolApp::UpdateRouteCapture()
         if (r.state != RouteCapture::kIdle)
             finish("stopped after " + summary(), true);
     }
-    if (m_ui->wantStartRouteCapture)
+    if (m_ui->wantStopCapture && r.state != RouteCapture::kIdle)
+        finish("stopped after " + summary(), false);
+    if (m_ui->wantStartRouteCapture || m_ui->wantStartZoneCapture)
     {
+        const bool zone = m_ui->wantStartZoneCapture;
         m_ui->wantStartRouteCapture = false;
+        m_ui->wantStartZoneCapture = false;
         if (r.state != RouteCapture::kIdle)
             status("already running");
+        else if (m_capturePending)
+            status("wait for the current frame capture to finish before starting");
         else if (!m_geoServer || !m_geoServer->Port())
             finish("the GPS view server is not running", false);
         else
@@ -2048,7 +2100,20 @@ void MeshToolApp::UpdateRouteCapture()
             const std::string from = m_ui->routeFrom, to = m_ui->routeTo;
             const double spacing = m_ui->routeSpacing;
             const bool lookBack = m_ui->routeLookBack;
-            r.planning = std::async(std::launch::async, [=] { return PlanRoute(from, to, spacing, lookBack); });
+            r.zone = zone;
+            m_ui->zoneCapture = zone;
+            r.height = zone ? m_ui->zoneHeight : m_ui->routeHeight;
+            r.tilt = zone ? 0.0 : m_ui->routeTilt;
+            r.dwell = zone ? m_ui->zoneDwell : m_ui->routeDwell;
+            const double lon0 = m_ui->zoneLon0, lat0 = m_ui->zoneLat0;
+            const double lon1 = m_ui->zoneLon1, lat1 = m_ui->zoneLat1;
+            const GeoView zoneView = m_geoServer->Latest();
+            const double zoneSpacing = ZoneCaptureSpacing(m_ui->zoneSpacing, r.height,
+                m_ui->zoneOverlap, zoneView.hFov, zoneView.vFov);
+            r.planning = std::async(std::launch::async, [=] {
+                return zone ? PlanZone(lon0, lat0, lon1, lat1, zoneSpacing)
+                            : PlanRoute(from, to, spacing, lookBack);
+            });
             r.state = RouteCapture::kPlanning;
             r.stateTime = now;
             r.next = 0;
@@ -2056,7 +2121,8 @@ void MeshToolApp::UpdateRouteCapture()
             r.connectSent = false;
             m_ui->routeRunning = true;
             m_ui->routeProgress = 0.0f;
-            status("looking up \"" + from + "\" -> \"" + to + "\" and the route...");
+            status(zone ? "planning overlapping zone samples (spacing at most " + std::to_string(zoneSpacing) + " m)..."
+                        : "looking up \"" + from + "\" -> \"" + to + "\" and the route...");
         }
     }
 
@@ -2075,7 +2141,7 @@ void MeshToolApp::UpdateRouteCapture()
             finish(r.plan.error, false);
             return;
         }
-        m_sceneRoute = r.plan;   // saved with the scene; the drive simulation runs on it
+        if (!r.zone) m_sceneRoute = r.plan;   // zone samples are not a driving route
         char buf[512];
         snprintf(buf, sizeof(buf), "%s -> %s: %.1f km, %zu cameras",
                  r.plan.fromName.c_str(), r.plan.toName.c_str(), r.plan.lengthM / 1000.0, r.plan.waypoints.size());
@@ -2129,7 +2195,7 @@ void MeshToolApp::UpdateRouteCapture()
             return;
         }
         const RouteWaypoint& w = r.plan.waypoints[r.next];
-        m_geoServer->SetFollowCamera(w.lon, w.lat, m_ui->routeHeight, w.heading, m_ui->routeTilt, true);
+        m_geoServer->SetFollowCamera(w.lon, w.lat, r.height, w.heading, r.tilt, true);
         // The settle gate compares Google Earth's reported camera with this one
         // (horizontally while routing: the altitude is above ground here).
         m_followSentLat = w.lat;
@@ -2156,27 +2222,37 @@ void MeshToolApp::UpdateRouteCapture()
         if (CaptureSettled())
         {
             if (r.settledTime < 0.0) r.settledTime = now;
-            if (now - r.settledTime >= m_ui->routeDwell)
+            if (now - r.settledTime >= r.dwell)
             {
                 m_ui->wantCaptureFrame = true;
+                r.captureAccepted = false;
                 r.state = RouteCapture::kCapturing;
                 r.stateTime = now;
                 snprintf(buf, sizeof(buf), "camera %zu of %zu: capturing", r.next + 1, r.plan.waypoints.size());
             }
             else
                 snprintf(buf, sizeof(buf), "camera %zu of %zu: loading tiles (%.0f s)", r.next + 1,
-                         r.plan.waypoints.size(), m_ui->routeDwell - (now - r.settledTime));
+                         r.plan.waypoints.size(), r.dwell - (now - r.settledTime));
         }
         else if (now - r.stateTime > 60.0)
         {
+            if (r.zone)
+            {
+                finish("camera " + std::to_string(r.next + 1) + " did not settle: " + m_ui->captureGate +
+                       "; zone incomplete after " + summary(), false);
+                return;
+            }
             snprintf(buf, sizeof(buf), "camera %zu of %zu skipped: %s", r.next + 1, r.plan.waypoints.size(),
                      m_ui->captureGate.c_str());
             r.next++;
             r.state = RouteCapture::kFlying;
         }
         else
+        {
+            r.settledTime = -1.0; // Require an uninterrupted load wait.
             snprintf(buf, sizeof(buf), "camera %zu of %zu: %s", r.next + 1, r.plan.waypoints.size(),
                      m_ui->captureGate.c_str());
+        }
         status(buf);
         return;
     }
@@ -2186,6 +2262,12 @@ void MeshToolApp::UpdateRouteCapture()
         const bool requested = m_captureRequestTime >= r.stateTime;
         if (requested && !m_capturePending)
         {
+            if (!r.captureAccepted)
+            {
+                finish("capture failed or timed out at camera " + std::to_string(r.next + 1) +
+                       "; stopped after " + summary(), false);
+                return;
+            }
             r.captured++;
             r.next++;
             r.state = RouteCapture::kFlying;

@@ -188,6 +188,35 @@ After pulling hook changes, redeploy the proxy (`deploy_hook.bat` as
 administrator, option 2): MeshTool and `opengl32.dll` share the capture buffer
 layout (16 GB, 64-bit offsets) and must match - an older hook shows "not connected".
 
+## Zone capture
+
+Click the rectangle-and-dots toolbar icon beside Route Capture, or choose
+Capture > Zone Capture. With a georeferenced scene open, click **Draw rectangle
+in viewport**: the view switches to north-up orthographic. Drag the capture
+rectangle with the left mouse button (Esc cancels), then review the sample grid.
+For an empty scene, use **Center on Google Earth** or enter the latitude and
+longitude of two opposite corners.
+
+Set maximum sample spacing, camera height above ground, view overlap (60% by
+default), and the load wait, then click **Start zone capture**. The grid spacing
+is limited using the smaller of Google Earth's horizontal and vertical fields
+of view, the camera height, and the requested overlap. If the field of view is
+unavailable, conservative defaults are used. Choose a height above the tallest
+building; the default is 300 m. Low cameras can clip towers and obscure ground.
+Google Earth visits the grid in alternating rows, waits for each view to settle,
+and captures straight down. The existing stitching pipeline merges overlapping
+captures into the scene. Zone capture retains coarser ground tiles wherever
+finer geometry is missing, overriding **Finest tiles only** for the run. Otherwise
+Google Earth's finer building tiles can leave holes where the coarser streets
+were discarded. A sample that cannot settle stops the run as incomplete rather
+than silently leaving a gap. Save the result with File > Save Scene. The rectangle
+controls camera samples; captured tiles can extend outside its boundary.
+
+Progress and Stop are in the Live Capture panel and Zone Capture dialog. Zone
+and route capture share one queue, so only one runs at a time. Zone samples do
+not replace a saved driving route. Plans are limited to 10,000 samples; polar
+zones (85 degrees and above) and date-line crossings are not supported.
+
 ## Live capture
 
 MeshTool starts with an empty scene; open a saved scene (Ctrl+O) or capture.

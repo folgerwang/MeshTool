@@ -148,6 +148,9 @@ private:
         double stateTime = 0.0;      // glfwGetTime() the state was entered
         double settledTime = -1.0;   // when the gate first opened for this waypoint
         bool   connectSent = false;  // links re-sent to a Google Earth that was not polling
+        bool   zone = false;
+        double height = 100, tilt = 0, dwell = 4;
+        bool captureAccepted = false;
         std::string lastStatus;
     } m_route;
     void UpdateRouteCapture();

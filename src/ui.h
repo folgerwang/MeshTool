@@ -49,6 +49,17 @@ public:
     bool  routeRunning = false;
     float routeProgress = 0.0f;
     std::string routeStatus;
+    // Zone capture shares the automatic capture queue, but is not a drive route.
+    bool wantStartZoneCapture = false;
+    bool zoneCapture = false;
+    double zoneLon0 = -122.4204, zoneLat0 = 37.7739;
+    double zoneLon1 = -122.4184, zoneLat1 = 37.7759;
+    float zoneSpacing = 100, zoneHeight = 300, zoneDwell = 4;
+    float zoneOverlap = 0.6f;
+    bool zoneDrawMode = false, zoneDragActive = false, wantZoneFromViewport = false;
+    bool zoneViewportAvailable = false;
+    bool zoneSuppressInput = false;
+    ImVec2 zoneDragStart, zoneDragEnd;
     void ActionLiveCapture();      // launch Google Earth Pro with the hook and the GPS links
 
     // Drive simulation (Tools > Drive Simulation, toolbar Sim): a car drives
@@ -178,6 +189,8 @@ private:
     // Route Capture dialog
     bool showRouteCaptureDialog = false;
     void DrawRouteCaptureDialog();
+    bool showZoneCaptureDialog = false;
+    void DrawZoneCaptureDialog();
 
     // Drive Simulation window
     bool showSimDialog = false;

@@ -285,6 +285,18 @@ inline void GenSimIcon(uint8_t* buf)
     FillRect(buf, P(1), P(20), P(3), P(20), 200, 205, 215);
 }
 
+inline void GenZoneIcon(uint8_t* buf)
+{
+    memset(buf, 0, ICON_BYTES);
+    DrawLine(buf, P(4), P(5), P(28), P(5), 100, 220, 180, 2);
+    DrawLine(buf, P(28), P(5), P(28), P(27), 100, 220, 180, 2);
+    DrawLine(buf, P(28), P(27), P(4), P(27), 100, 220, 180, 2);
+    DrawLine(buf, P(4), P(27), P(4), P(5), 100, 220, 180, 2);
+    for (int y = 10; y <= 22; y += 6)
+        for (int x = 10; x <= 22; x += 6)
+            FillCircle(buf, P(x), P(y), P(2), 100, 200, 255);
+}
+
 #undef P
 #undef S
 
@@ -304,6 +316,7 @@ enum IconID
     ICON_SEGMENT,
     ICON_ROUTE,
     ICON_SIM,
+    ICON_ZONE,
     ICON_COUNT
 };
 
@@ -325,7 +338,8 @@ inline IconGenFunc GetIconGenerator(IconID id)
         GenNavigateIcon,
         GenSegmentIcon,
         GenRouteIcon,
-        GenSimIcon
+        GenSimIcon,
+        GenZoneIcon
     };
     return funcs[id];
 }

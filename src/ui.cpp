@@ -24,6 +24,9 @@
 #include "GpaDumpAnalyzeTool.h"
 #include "livecaptureprocessor.h"
 #include "objectclass.h"
+#include "route.h"
+#include "geoview.h"
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Custom dark theme inspired by Blender/RenderDoc/Unreal
@@ -175,6 +178,7 @@ void MeshToolUI::DrawUI()
     if (showRegionSelectDialog) DrawRegionSelectDialog();
     if (showNavCaptureDialog)   DrawNavCaptureDialog();
     if (showRouteCaptureDialog) DrawRouteCaptureDialog();
+    if (showZoneCaptureDialog) DrawZoneCaptureDialog();
     if (showSimDialog)          DrawSimDialog();
     if (showSegmentDialog)      DrawSegmentDialog();
     if (showRefineDialog)       DrawRefineDialog();
@@ -257,6 +261,7 @@ void MeshToolUI::DrawMenuBar()
         {
             if (ImGui::MenuItem("Navigate & Capture...", "Ctrl+N"))  showNavCaptureDialog = true;
             if (ImGui::MenuItem("Route Capture..."))                 showRouteCaptureDialog = true;
+            if (ImGui::MenuItem("Zone Capture..."))                  showZoneCaptureDialog = true;
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Two addresses: Google Earth flies the route between them and captures along it.");
             ImGui::Separator();
@@ -411,6 +416,7 @@ void MeshToolUI::DrawToolbar()
     // Capture group
     if (IconBtn(icons::ICON_NAVIGATE,"Navigate & Capture",  white)) showNavCaptureDialog = true;
     if (IconBtn(icons::ICON_ROUTE,   "Route Capture",       white)) showRouteCaptureDialog = true;
+    if (IconBtn(icons::ICON_ZONE,    "Zone Capture",        white)) showZoneCaptureDialog = true;
     if (IconBtn(icons::ICON_SIM,     "Drive Simulation",    white)) showSimDialog = true;
     if (IconBtn(icons::ICON_LAUNCH,  "Launch Google Earth", white)) ActionLiveCapture();
     if (IconBtn(icons::ICON_CAPTURE, "Capture Frame (F5)",  white)) wantCaptureFrame = true;
@@ -626,12 +632,15 @@ void MeshToolUI::DrawScenePanel()
                                   "Google Earth you started yourself. Use when the link shows None/Stale.");
         }
         ImGui::Spacing();
+        ImGui::BeginDisabled(routeRunning && zoneCapture);
         ImGui::Checkbox("Finest tiles only", &captureFinestOnly);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("A capture keeps only the tiles at its finest level of detail. Google\n"
                               "Earth also draws coarser parent tiles under them and towards the\n"
                               "horizon; those are skipped. Off: coarse tiles are kept where no finer\n"
                               "tile covers them.");
+        ImGui::EndDisabled();
+        if (routeRunning && zoneCapture) ImGui::TextWrapped("Zone capture keeps uncovered ground tiles.");
         ImGui::Checkbox("Google Earth follows viewport (G)", &geFollowViewport);
         if (geFollowViewport)
         {
@@ -648,13 +657,13 @@ void MeshToolUI::DrawScenePanel()
         {
             ImGui::Spacing();
             ImGui::TextColored(routeRunning ? ImVec4(0.3f, 0.9f, 0.3f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
-                               "Route capture:");
+                               zoneCapture ? "Zone capture:" : "Route capture:");
             ImGui::SameLine();
             ImGui::TextWrapped("%s", routeStatus.c_str());
             if (routeRunning)
             {
                 ImGui::ProgressBar(routeProgress, ImVec2(-1, 0));
-                if (ImGui::SmallButton("Stop route capture")) wantStopRouteCapture = true;
+                if (ImGui::SmallButton("Stop automatic capture")) wantStopRouteCapture = true;
             }
         }
         if (simActive)
@@ -709,6 +718,36 @@ void MeshToolUI::DrawViewport()
     viewportH = h;
 
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
+
+    zoneSuppressInput = zoneDrawMode;
+    if (zoneDrawMode)
+    {
+        dl->AddText(ImVec2(x + 12, y + 32), IM_COL32(100, 240, 190, 255),
+                    "Drag a rectangle to capture. Esc cancels.");
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const bool inside = mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h;
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+            zoneDrawMode = zoneDragActive = false;
+        else if (inside && !ImGui::GetIO().WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            zoneDragStart = zoneDragEnd = mouse;
+            zoneDragActive = true;
+        }
+        if (zoneDragActive)
+        {
+            zoneDragEnd = ImVec2((std::clamp)(mouse.x, x, x + w), (std::clamp)(mouse.y, y, y + h));
+            ImVec2 a((std::min)(zoneDragStart.x, zoneDragEnd.x), (std::min)(zoneDragStart.y, zoneDragEnd.y));
+            ImVec2 b((std::max)(zoneDragStart.x, zoneDragEnd.x), (std::max)(zoneDragStart.y, zoneDragEnd.y));
+            dl->AddRectFilled(a, b, IM_COL32(80, 200, 170, 40));
+            dl->AddRect(a, b, IM_COL32(100, 240, 190, 255), 0, 0, 2);
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                wantZoneFromViewport = b.x - a.x >= 4 && b.y - a.y >= 4;
+                zoneDragActive = zoneDrawMode = false;
+                showZoneCaptureDialog = true;
+            }
+        }
+    }
 
     // No filled background here: ImGui is rendered after the 3D scene, so any
     // opaque fill would cover the meshes. The renderer's clear color is the
@@ -1798,6 +1837,102 @@ void MeshToolUI::ActionNavCapture()
 // ---------------------------------------------------------------------------
 // Route Capture dialog
 // ---------------------------------------------------------------------------
+
+void MeshToolUI::DrawZoneCaptureDialog()
+{
+    ImGui::OpenPopup("Zone Capture");
+    ImGui::SetNextWindowSize(ImVec2(590, 0), ImGuiCond_Appearing);
+    const ImVec2 workSize = ImGui::GetMainViewport()->WorkSize;
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 100),
+        ImVec2((std::max)(300.0f, workSize.x - 20), (std::max)(100.0f, workSize.y - 20)));
+    if (!ImGui::BeginPopupModal("Zone Capture", &showZoneCaptureDialog, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextWrapped("Draw a rectangle and capture a grid of points inside it.");
+    ImGui::TextDisabled("Google Earth captures straight down; overlapping captures merge into the scene.");
+    ImGui::BeginDisabled(routeRunning);
+    ImGui::BeginDisabled(!zoneViewportAvailable);
+    if (ImGui::Button("Draw rectangle in viewport"))
+    {
+        topDownOrtho = true;
+        zoneDrawMode = true;
+        zoneDragActive = false;
+        showZoneCaptureDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    if (!zoneViewportAvailable) ImGui::TextDisabled("Open a georeferenced scene to draw over the viewport.");
+    if (geoViewServer && ImGui::Button("Center on Google Earth"))
+    {
+        const auto view = geoViewServer->Latest();
+        if (view.valid)
+        {
+            double lon = view.hasLookAt ? view.laLon : view.lookLon;
+            double lat = view.hasLookAt ? view.laLat : view.lookLat;
+            zoneLon0 = lon - 0.002; zoneLon1 = lon + 0.002;
+            zoneLat0 = lat - 0.002; zoneLat1 = lat + 0.002;
+        }
+        else SetStatus("Move Google Earth and wait for its GPS view link first.");
+    }
+    ImGui::InputDouble("Corner A latitude", &zoneLat0, 0, 0, "%.7f");
+    ImGui::InputDouble("Corner A longitude", &zoneLon0, 0, 0, "%.7f");
+    ImGui::InputDouble("Corner B latitude", &zoneLat1, 0, 0, "%.7f");
+    ImGui::InputDouble("Corner B longitude", &zoneLon1, 0, 0, "%.7f");
+    ImGui::SliderFloat("Maximum sample spacing (m)", &zoneSpacing, 10, 500, "%.0f");
+    ImGui::SliderFloat("Height above ground (m)", &zoneHeight, 60, 600, "%.0f");
+    ImGui::SliderFloat("View overlap", &zoneOverlap, 0.3f, 0.85f, "%.2f");
+    ImGui::SliderFloat("Load wait (s)", &zoneDwell, 1, 20, "%.0f");
+    const GeoView view = geoViewServer ? geoViewServer->Latest() : GeoView();
+    const double spacing = ZoneCaptureSpacing(zoneSpacing, zoneHeight, zoneOverlap, view.hFov, view.vFov);
+    ImGui::TextWrapped("Spacing limited to %.1f m for %.0f%% view overlap. Ground tiles are retained wherever finer tiles are missing.",
+                       spacing, zoneOverlap * 100);
+    ImGui::TextWrapped("Choose a height above the tallest building. Low cameras can clip towers and hide ground behind them.");
+    RoutePlan preview = PlanZone(zoneLon0, zoneLat0, zoneLon1, zoneLat1, spacing);
+    if (preview.ok)
+    {
+        ImGui::Text("%zu sample points | North up | Alternating rows", preview.waypoints.size());
+        ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImVec2 size(ImGui::GetContentRegionAvail().x, 160);
+        ImGui::InvisibleButton("##zonePreview", size);
+        auto* dl = ImGui::GetWindowDrawList();
+        ImVec2 a(origin.x + 12, origin.y + 12), b(origin.x + size.x - 12, origin.y + size.y - 12);
+        dl->AddRectFilled(a, b, IM_COL32(40, 65, 65, 255));
+        dl->AddRect(a, b, IM_COL32(100, 220, 180, 255));
+        const double west = (std::min)(zoneLon0, zoneLon1), east = (std::max)(zoneLon0, zoneLon1);
+        const double south = (std::min)(zoneLat0, zoneLat1), north = (std::max)(zoneLat0, zoneLat1);
+        ImVec2 prev;
+        bool first = true;
+        for (const auto& point : preview.waypoints)
+        {
+            ImVec2 p(a.x + float((point.lon - west) / (east - west)) * (b.x - a.x),
+                     a.y + float((north - point.lat) / (north - south)) * (b.y - a.y));
+            if (!first) dl->AddLine(prev, p, IM_COL32(70, 130, 140, 180));
+            dl->AddCircleFilled(p, 2, IM_COL32(100, 210, 255, 255));
+            prev = p; first = false;
+        }
+        ImGui::TextDisabled("Sample layout (schematic). Bounds may also be entered above.");
+    }
+    else ImGui::TextWrapped("%s", preview.error.c_str());
+    ImGui::BeginDisabled(!preview.ok);
+    if (ImGui::Button("Start zone capture"))
+    {
+        wantStartZoneCapture = true;
+        showZoneCaptureDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    if (routeRunning)
+    {
+        ImGui::TextWrapped("%s", routeStatus.c_str());
+        ImGui::ProgressBar(routeProgress, ImVec2(-1, 0));
+        if (ImGui::Button("Stop capture")) wantStopRouteCapture = true;
+    }
+    if (ImGui::Button("Close"))
+    {
+        showZoneCaptureDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
 
 void MeshToolUI::DrawRouteCaptureDialog()
 {
