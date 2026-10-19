@@ -8,11 +8,23 @@ from pathlib import Path
 import mtscene
 
 
-def merge(base,patch,output):
+def window_layout_regressions(previous,candidate):
+    from rules_config import RULES
+    cfg=RULES['iteration_acceptance'];old={r['building']:r for r in previous};result={}
+    for r in candidate:
+        if r.get('status') in ('combined_into_building','excluded_nonbuilding_capture','not_selected'):continue
+        before=old.get(r['building'],{}).get('counts',{}).get('window',0)
+        after=r.get('counts',{}).get('window',0)
+        if before>=cfg['min_previous_windows'] and before-after>=cfg['min_lost_windows'] and after<before*(1-cfg['max_window_loss_fraction']):
+            result[r['building']]=dict(reason='window_layout_count_regression_requires_review',previous_windows=before,candidate_windows=after)
+    return result
+
+
+def merge(base,patch,output,only=None):
     base,patch,output=map(Path,(base,patch,output))
     bm=json.loads((base/'manifest.json').read_text());pm=json.loads((patch/'manifest.json').read_text())
     assert bm['inputs']==pm['inputs'],'Repair must use the same reference and capture'
-    selected={b['building']:b for b in pm['buildings'] if b.get('status')!='not_selected'}
+    selected={b['building']:b for b in pm['buildings'] if b.get('status')!='not_selected' and (only is None or b['building'] in only)}
     city=mtscene.load(base/'city.mtscene');repair=mtscene.load(patch/'city.mtscene')
     assert len(city)==len(repair) and city.route_data==repair.route_data
     for before,after in zip(city,repair):
@@ -34,7 +46,7 @@ def merge(base,patch,output):
         name=previous['building'];parent=patch if name in selected else base
         record=copy.deepcopy(selected.get(name,previous))
         if (parent/name).exists():shutil.copytree(parent/name,output/name)
-        record['generation_config_sha256']=(pm if name in selected else bm)['config']['config_sha256']
+        record.setdefault('generation_config_sha256',(pm if name in selected else bm)['config']['config_sha256'])
         if 'catalog' in record:record['catalog']=str(output/name/'tiles.json')
         reports.append(record)
     shutil.copy2(patch/'effective_rules.json',output/'effective_rules.json')
@@ -47,4 +59,12 @@ def merge(base,patch,output):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('base');p.add_argument('patch');p.add_argument('output');a=p.parse_args();merge(a.base,a.patch,a.output)
+    p=argparse.ArgumentParser();p.add_argument('base');p.add_argument('patch');p.add_argument('output');p.add_argument('--preserve-window-layout',action='store_true');a=p.parse_args()
+    retained={}
+    if a.preserve_window_layout:
+        bm=json.loads((Path(a.base)/'manifest.json').read_text());pm=json.loads((Path(a.patch)/'manifest.json').read_text())
+        retained=window_layout_regressions(bm['buildings'],pm['buildings'])
+    only={r['building'] for r in pm['buildings']}-set(retained) if a.preserve_window_layout else None
+    merge(a.base,a.patch,a.output,only)
+    if retained:
+        path=Path(a.output)/'manifest.json';m=json.loads(path.read_text());m['retained_previous_buildings']=retained;path.write_text(json.dumps(m,indent=2))

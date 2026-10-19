@@ -9,6 +9,16 @@
       ],
       "reason": "Complementary sides of one continuous tower roof with pool terrace; reviewed combined capture overhead.",
       "evidence": "scenes/building_parts_20261016/capture_original.png"
+    },
+    {
+      "building": "building_005",
+      "members": [
+        "building_005",
+        "building_006"
+      ],
+      "reason": "006 is a 1.238 m thick rooftop terrace patch inside the source bounds of 005 (15.6-52.7 m high), not a separate tower. Reviewed overhead capture and per-object bounds. Keep parent volume; a rooftop patch does not justify extruding new walls to ground.",
+      "evidence": "scenes/building_iterations_20261018/building_006/comparison.jpg",
+      "assembly_mode": "captured_roof_attachment"
     }
   ]
 }

@@ -43,7 +43,7 @@ def regularize_heights(xy,z,valid,res,return_regions=False):
             plane=np.array([0.,0.,float(np.median(z[best]))])
         planes.append(plane);members.append(best);remaining[best]=False
     if not planes:
-        result=(np.full(len(z),np.median(z[valid])),dict(planes=0,status='median_supported_height'))
+        result=(np.full(len(z),np.median(z[valid])),dict(planes=0,supported_fraction=0.,status='no_supported_plane'))
         if return_regions:return (*result,np.zeros(len(z),int),np.array([[0.,0.,np.median(z[valid])]]),xy.mean(0))
         return result
     labels=np.full(len(z),-1,int)
@@ -191,7 +191,74 @@ def fit_roofs(own,ortho,texture):
     return own,roof_parts,reports
 
 
-def run(reference,source,landmark,output,only=None):
+def recover_roof_deck(existing_roofs,captured,top,oid,texture):
+    """Fill a missing deck only inside a well-supported captured roof outline."""
+    from shapely.geometry import Polygon
+    n=np.cross(captured[:,1]-captured[:,0],captured[:,2]-captured[:,0])
+    area=np.linalg.norm(n,axis=1)/2
+    nz=np.abs(n[:,2])/np.maximum(area*2,1e-12)
+    z=captured[:,:,2].mean(1)
+    valid=(nz>RULES['roofs']['deck_normal_min'])&(z>top-RULES['roofs']['height_below_cap_m'])&(area>1e-5)
+    if valid.sum()<RULES['roofs']['min_samples']:return [],dict(status='insufficient_deck_capture')
+    p=captured[valid];weights=area[valid];heights=z[valid]
+    bins=np.round(heights/RULES['roofs']['deck_height_bin_m']).astype(int);labels,inv=np.unique(bins,return_inverse=True)
+    sums=np.bincount(inv,weights=weights);mode=labels[sums.argmax()]*RULES['roofs']['deck_height_bin_m']
+    near=abs(heights-mode)<RULES['roofs']['deck_height_tolerance_m']
+    height=float(np.average(heights[near],weights=weights[near]))
+    outline=unary_union([Polygon(t[:,:2]) for t in p])
+    gap=RULES['envelopes']['gap_close_m']
+    outline=outline.buffer(gap,join_style=2).buffer(-gap,join_style=2)
+    outline=shapely.set_precision(outline,.02)
+    parts=[part.simplify(RULES['roofs']['deck_simplify_m'],preserve_topology=True) for part in polygons(outline) if part.area>=RULES['roofs']['min_plane_area_m2']]
+    outline=unary_union(parts)
+    if outline.is_empty:return [],dict(status='insufficient_deck_outline')
+    covered=envelope_repair.footprint(existing_roofs) if existing_roofs else Polygon()
+    missing=outline.difference(covered).area/outline.area
+    if missing<RULES['roofs']['deck_missing_fraction_min']:return [],dict(status='existing_deck_present',missing_fraction=missing)
+    meshes=[m for part in parts for m in shell(part,height-RULES['roofs']['deck_thickness_m'],height,oid,texture)]
+    audit=audit_shell(meshes)
+    if any(audit.values()):return [],dict(status='deck_topology_rejected',audit=audit)
+    return meshes,dict(status='captured_deck',height=height,area_m2=outline.area,missing_fraction=missing,audit=audit)
+
+
+def refine_preserved_roofs(own,group,source,obj,source_cache):
+    """Refresh supported roof finishes without replacing calibrated facades."""
+    from capture_appearance import faces
+    roof=[];other=[]
+    bottom=min((m.vertices+m.translation)[:,2].min() for m in own)
+    top=max((m.vertices+m.translation)[:,2].max() for m in own)
+    for mesh in own:
+        selected=[]
+        for face,indices in faces(mesh):
+            area=np.linalg.norm(np.cross(face.tris[:,1]-face.tris[:,0],face.tris[:,2]-face.tris[:,0]),axis=1).sum()/2
+            if face.normal[2]>.5 and face.origin[2]>max(bottom+2,top-RULES['roofs']['height_below_cap_m']) and area>=RULES['roofs']['min_plane_area_m2'] and area/max(np.prod(face.size),1e-9)>RULES['roofs']['deck_min_face_fill']:
+                selected.extend(tuple(t) for t in indices.reshape(-1,3))
+        selected=set(selected)
+        if not selected:other.append(mesh);continue
+        r=copy.copy(mesh);r.draw_calls=[];kept=copy.copy(mesh);kept.draw_calls=[]
+        for primitive,index in mesh.draw_calls:
+            if primitive!=4:kept.draw_calls.append((primitive,index));continue
+            tri=index.reshape(-1,3);mask=np.array([tuple(t) in selected for t in tri])
+            if mask.any():r.draw_calls.append((primitive,tri[mask].ravel()))
+            if (~mask).any():kept.draw_calls.append((primitive,tri[~mask].ravel()))
+        if r.draw_calls:roof.append(r)
+        if kept.draw_calls:other.append(kept)
+    # Calibrated facade generators may leave no main deck beneath roof equipment.
+    src,_=source_cache
+    sid=next(i for i,o in enumerate(source.objects) if o.name==obj.name)
+    captured=src.pos[src.obj==sid]
+    deck,deck_report=recover_roof_deck(roof,captured,top,own[0].object_id,own[0].tex_index)
+    if deck:roof+=deck
+    if not roof:return own,dict(status='no_large_roof_faces')
+    temporary=mtscene.Group(group.textures,roof,group.objects)
+    evidence=capture_appearance.bake(temporary,source,only={obj.name},source_cache=source_cache)
+    samples=[f for r in evidence for f in r['faces']]
+    coverage=sum(f['area']*f['coverage'] for f in samples)/max(sum(f['area'] for f in samples),1e-9)
+    if coverage<RULES['roofs']['min_coverage']:return own,dict(status='insufficient_roof_material_capture',coverage=coverage)
+    return other+temporary.meshes,dict(status='captured_roof_finish',coverage=coverage,geometry='captured_deck_recovered' if deck else 'unchanged',deck=deck_report,faces=len(samples))
+
+
+def run(reference,source,landmark,output,only=None,fallback=None):
     output=Path(output);output.mkdir(parents=True,exist_ok=False);config_record=snapshot(output)
     import shutil
     profile_dir=Path(__file__).parent/RULES['profiles']['facade_directory']
@@ -210,7 +277,7 @@ def run(reference,source,landmark,output,only=None):
         if classification['source_sha256']==hashes[str(paths[1])]:
             excluded={r['building']:r for r in classification['objects'] if r['action']=='omit_generated_building'}
     scene=mtscene.load(reference);original=mtscene.load(source);example=mtscene.load(landmark)
-    associations={};aliases={}
+    associations={};aliases={};assembly_modes={}
     group_profile=profile_dir/'building_groups.json'
     if group_profile.exists():
         membership=json.loads(group_profile.read_text())
@@ -219,8 +286,11 @@ def run(reference,source,landmark,output,only=None):
                 leader=assembly['building'];members=assembly['members']
                 if only and not set(members)&only:continue
                 associations[leader]=members
+                assembly_modes[leader]=assembly.get('assembly_mode','combined_envelope')
                 aliases.update({name:leader for name in members if name!=leader})
                 if only:only.update(members)
+    fallback_scene=mtscene.load(Path(fallback)/'city.mtscene') if fallback else None
+    fallback_reports={r['building']:r for r in json.loads((Path(fallback)/'manifest.json').read_text())['buildings']} if fallback else {}
     reports=[]
     for bi,batch in enumerate(scene):
         for gi,group in enumerate(batch.groups):
@@ -237,6 +307,10 @@ def run(reference,source,landmark,output,only=None):
             for leader,members in associations.items():
                 ids={i for i,o in enumerate(group.objects) if o.name in members}
                 oid=next(i for i,o in enumerate(group.objects) if o.name==leader)
+                if assembly_modes.get(leader)=='captured_roof_attachment':
+                    # A thin terrace patch is not evidence for an independent full-height volume.
+                    group.meshes=[m for m in group.meshes if m.object_id not in ids or m.object_id==oid]
+                    continue
                 pieces=[m for m in group.meshes if m.object_id in ids]
                 if not pieces:continue
                 world=np.concatenate([m.vertices.astype(float)+m.translation for m in pieces])
@@ -256,6 +330,27 @@ def run(reference,source,landmark,output,only=None):
                 if obj.cls!=3 or not own:output_meshes+=own;continue
                 if only and obj.name not in only:
                     output_meshes+=own;reports.append(dict(building=obj.name,status='not_selected'));continue
+                if assembly_modes.get(obj.name)=='captured_roof_attachment':
+                    if fallback_scene is None:raise ValueError('Roof attachment requires a validated parent fallback scene')
+                    fg=fallback_scene[bi].groups[gi];fid=next(i for i,o in enumerate(fg.objects) if o.name==obj.name)
+                    meshes=[]
+                    for parent,ids_to_copy in [(fg,{fid}),(sg,{i for i,o in enumerate(sg.objects) if o.name in associations[obj.name] and o.name!=obj.name})]:
+                        remap={}
+                        for original_mesh in parent.meshes:
+                            if original_mesh.object_id not in ids_to_copy:continue
+                            m=copy.deepcopy(original_mesh);m.object_id=oid
+                            if 0<=m.tex_index<len(parent.textures):
+                                if m.tex_index not in remap:remap[m.tex_index]=len(group.textures);group.textures.append(parent.textures[m.tex_index])
+                                m.tex_index=remap[m.tex_index]
+                            meshes.append(m)
+                    output_meshes+=meshes
+                    report=copy.deepcopy(fallback_reports[obj.name]);report['source_members']=associations[obj.name]
+                    report['assembly']=dict(mode='captured_roof_attachment',parent_geometry='preserved',roof_patch='captured_geometry_retained')
+                    directory=output/obj.name
+                    if (Path(fallback)/obj.name).exists():shutil.copytree(Path(fallback)/obj.name,directory)
+                    if 'catalog' in report:report['catalog']=str(directory/'tiles.json')
+                    reports.append(report);print(obj.name,'attached captured roof patch without extruding walls',flush=True)
+                    continue
                 if obj.name in excluded:
                     reports.append(dict(building=obj.name,status='excluded_nonbuilding_capture',classification_correction=excluded[obj.name],counts={},roof=[]));continue
                 structure_path=profile_dir/(obj.name+'_structure.json')
@@ -272,15 +367,17 @@ def run(reference,source,landmark,output,only=None):
                         m=copy.deepcopy(m);m.object_id=oid;m.tex_index+=offset;output_meshes.append(m)
                     reports.append(dict(building=obj.name,status='calibrated_profile',ruleset=RULESET_VERSION));continue
                 if calibrated_source and obj.name in RULES['profiles']['preserve_existing']:
-                    output_meshes+=own;reports.append(dict(building=obj.name,status='existing_refined_preserved',glass_meshes=sum(m.material==1 for m in own)));continue
+                    own,roof_finish=refine_preserved_roofs(own,group,sg,obj,(src,decoded))
+                    output_meshes+=own;reports.append(dict(building=obj.name,status='existing_refined_preserved',roof_finish=roof_finish,glass_meshes=sum(m.material==1 for m in own)));continue
                 directory=output/obj.name;directory.mkdir()
                 neighbor_footprints=unary_union([p for i,p in envelopes.items() if i!=oid and
                     (obj.name not in associations or envelope_tops.get(i,float('inf'))>=envelope_tops[oid]-12.)])
+                observed_masks={}
                 source_members=associations.get(obj.name,[obj.name])
                 own,envelope_report=envelope_repair.repair(own,src.pos[np.isin(src.obj,[source_ids.get(n,-1) for n in source_members])],neighbor_footprints,city_bounds,obj.name,hashes[str(paths[1])])
                 if obj.name in associations or envelope_report['status'] in ('captured_roof_supported_envelope','measured_capture_envelope'):
                     temporary=mtscene.Group(group.textures,own,group.objects)
-                    capture_appearance.bake(temporary,sg,only={obj.name},source_cache=(src,decoded))
+                    capture_appearance.bake(temporary,sg,only={obj.name},source_cache=(src,decoded),provenance=observed_masks)
                     own=temporary.meshes
                     envelopes[oid]=envelope_repair.footprint(own)
                 fitted,roofs,roof_report=fit_roofs(own,ortho,texture)
@@ -291,11 +388,39 @@ def run(reference,source,landmark,output,only=None):
                     temporary=mtscene.Group(group.textures,roofs,group.objects)
                     capture_appearance.bake(temporary,sg,only={obj.name},source_cache=(src,decoded))
                     roofs=temporary.meshes
-                meshes,report=refine_building(fitted,obj,group.textures,directory,clean=True,capture_wall=True)
+                meshes,report=refine_building(fitted,obj,group.textures,directory,observed_masks=observed_masks,clean=True,capture_wall=True)
                 before,after=audit_shell(fitted),audit_shell(meshes)
-                if any(after[k]>before[k] for k in before):raise ValueError(f'{obj.name}: broken shell {after}')
+                if any(after[k]>before[k] for k in before):
+                    if fallback_scene is None:raise ValueError(f'{obj.name}: broken shell {after}')
+                    fg=fallback_scene[bi].groups[gi]
+                    fid=next(i for i,o in enumerate(fg.objects) if o.name==obj.name)
+                    retained=[copy.deepcopy(m) for m in fg.meshes if m.object_id==fid]
+                    texture_map={}
+                    for m in retained:
+                        m.object_id=oid
+                        if 0<=m.tex_index<len(fg.textures):
+                            if m.tex_index not in texture_map:
+                                texture_map[m.tex_index]=len(group.textures);group.textures.append(fg.textures[m.tex_index])
+                            m.tex_index=texture_map[m.tex_index]
+                    output_meshes+=retained
+                    rejected=dict(reason='candidate_topology_regression',before=before,after=after)
+                    report=copy.deepcopy(fallback_reports[obj.name]);report['rejected_iteration']=rejected
+                    report['fallback_scene']=str(Path(fallback)/'city.mtscene')
+                    # Keep rejected measurements separate from the retained geometry's catalog.
+                    directory.rename(output/(obj.name+'_rejected'))
+                    if (Path(fallback)/obj.name).exists():shutil.copytree(Path(fallback)/obj.name,directory)
+                    if 'catalog' in report:report['catalog']=str(directory/'tiles.json')
+                    reports.append(report);print(obj.name,'retained previous valid building:',rejected,flush=True)
+                    continue
                 report.update(roof=roof_report,envelope=envelope_report,audit=after,glass_meshes=sum(m.material==1 for m in meshes))
                 if obj.name in associations:report['source_members']=source_members
+                if RULES['captured_glazing']['enabled']:
+                    from captured_glazing import transfer
+                    selected=np.isin(src.obj,[source_ids.get(n,-1) for n in source_members])&(src.tex>=0)
+                    evidence_source=raster.SceneTris(*[getattr(src,k)[selected] for k in ('pos','uv','tex','obj','mesh')])
+                    catalog=json.loads((directory/'tiles.json').read_text())
+                    meshes,report['captured_glazing']=transfer(meshes,group.textures,catalog,evidence_source,decoded,directory)
+                    (directory/'tiles.json').write_text(json.dumps(catalog,indent=2))
                 output_meshes+=meshes+roofs;reports.append(report)
                 print(obj.name,report['counts'],'roofs',len(roofs),flush=True)
             group.meshes=output_meshes
@@ -307,5 +432,5 @@ def run(reference,source,landmark,output,only=None):
 
 if __name__=='__main__':
     import argparse
-    p=argparse.ArgumentParser();p.add_argument('reference');p.add_argument('source');p.add_argument('landmark');p.add_argument('output');p.add_argument('--rules');p.add_argument('--only');a=p.parse_args();configure(a.rules)
-    run(a.reference,a.source,a.landmark,a.output,set(a.only.split(',')) if a.only else None)
+    p=argparse.ArgumentParser();p.add_argument('reference');p.add_argument('source');p.add_argument('landmark');p.add_argument('output');p.add_argument('--rules');p.add_argument('--only');p.add_argument('--fallback');a=p.parse_args();configure(a.rules)
+    run(a.reference,a.source,a.landmark,a.output,set(a.only.split(',')) if a.only else None,a.fallback)

@@ -44,7 +44,7 @@ pickable. **All originals / All refined** in the Objects panel switches the
 whole batch. These controls also switch to material view for comparison.
 
 Both versions are embedded by Save Scene in `.mtscene` version 5. Reopening
-shows the refined versions by default. Existing scene versions 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“4 still load;
+shows the refined versions by default. Existing scene versions 1ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“4 still load;
 refine with this build to record a comparison pair. Rejected replacement fits use a conservative PCG fallback: the captured shell and
 textures stay intact, with PBR finishes, welded surface-following facade bands, and roof equipment on
 verified flat captured patches. Short isolated facade runs are excluded; openings
@@ -151,7 +151,7 @@ reports how many patches were turned.
 
 ### Iterative multi-camera fitting
 
-The PCG dialog's **Fit to original with multiple cameras** option runs 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“6
+The PCG dialog's **Fit to original with multiple cameras** option runs 1ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“6
 iterations (default 3). It renders eight fixed 512-pixel orthographic views of the saved
 original and the actual generated geometry. Four alternating views drive a
 bounded coordinate search over window sill/jamb proportions, bay spacing, and
@@ -343,7 +343,7 @@ The calibrated landmark profile still takes priority over automatic detection.
 
 For the current capture, `scenes/building_iterations_20261016/iterations.json`
 tracks all 148 building objects. Never mark its pending entries complete merely
-because the batch ran. Roof and façade reviews are separate outstanding tasks.
+because the batch ran. Roof and faÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ade reviews are separate outstanding tasks.
 
 ### Roof and envelope review (v6)
 
@@ -355,7 +355,7 @@ cornice outline; its unobserved roof interior remains an inference.
 
 Roof texture projection groups triangles by plane and height. Combining several
 roof levels into one projection loses low decks outside the projection band.
-Vertical roof risers use captured façade imagery where available. Existing
+Vertical roof risers use captured faÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ade imagery where available. Existing
 touching-shell edges do not suppress roof fitting unless fitting worsens the
 topology audit. Plane support and source-coverage failures remain explicit.
 
@@ -414,3 +414,88 @@ Only shared road/ground boundary vertices move, on both meshes together;
 scene-edge endpoints stay fixed and local damping prevents triangle inversion.
 The existing tessellation approximates the spline; this is not a new curb mesh.
 Road paint remains in the atlas, with its pigments excluded from asphalt lifting.
+
+### Ground-floor display windows
+
+`storefront.py` detects wide ground-floor display bays independently of repeated upper-floor windows. The `storefront` section in `building_rules.json` controls size, sill, contrast and texture constraints. Detection requires internal mullions in both directions to avoid treating plain garage panels or shadows as glass. Dark and light frame patterns are supported.
+
+Capture-bound facade profiles may specify `storefront_rects_px` and `storefront_members` for measured grids. Profiles are guarded by the capture image hash. These openings use recessed glass and dark frames sampled from their capture; wall piers remain wall material. Building 334 face 010 is the first visually checked example. Adjacent bays and door interiors are not inferred by this override.
+
+### Capture iteration v7
+
+Window members are measured in both contrast polarities when
+`window_members.detect_dark_members` is enabled. With
+`materials.sample_measured_frame_color`, the measured bars supply their frame
+color instead of the adjacent wall. Flat glass, short scratches and broad shadow
+bands do not qualify as internal members. Arched member intersections are snapped
+to a 1 mm construction tolerance before extrusion to prevent degenerate triangles.
+Original wall material projections and per-face window locations remain capture-derived.
+
+Roof fitting reports zero support when no plane can be measured; a median height
+is not accepted as evidence of a flat roof. `city_rules.py --fallback <previous-city-directory>`
+retains the previous building when a generated candidate fails the topology checks.
+Its rejected catalog is saved separately and the manifest records the rejection.
+These checks do not certify visual similarity. Review each building from two
+oblique directions and overhead before accepting the candidate.
+
+Preserved calibrated facades now receive a separate roof pass. It detects a missing
+main deck from the captured horizontal roof footprint and dominant measured height,
+preserves courtyard holes, and projects captured roof materials. The `roofs.deck_*`
+settings control this recovery. Low-coverage material projections are rejected.
+
+Assembly profiles can mark thin rooftop patches as `captured_roof_attachment`.
+This retains the validated parent building and attaches the captured roof surface;
+it does not extrude the patch to ground. Such attachment geometry is explicitly
+reported as retained capture, rather than a newly fitted PCG roof.
+
+Use `merge_city_pass.py --preserve-window-layout` when accepting an iteration.
+`iteration_acceptance` in the shared config controls the window-loss review guard.
+A large count drop retains the previous building pending layout review; it does
+not certify that either layout matches the capture.
+
+### Capture-supported glass finish
+
+The `captured_glazing` rules transfer original pane imagery onto existing PCG glass after window construction. Source objects are restricted to the building and its declared parts. Native glass material, frame geometry, opening locations, wall textures and roof geometry remain intact. Connected panes require at least 98% observed pixels for every triangle; unsupported panes retain their prior finish. This retains baked capture reflections, not physically recovered albedo. It does not complete missing facades.
+
+`captured_glazing.py BASE_DIRECTORY SOURCE_SCENE NEW_OUTPUT --only building_334,building_001` applies the same pass to an existing validated city without rebuilding its envelopes. Its per-face evidence masks and manifest distinguish observed coverage from inferred fill. `city_rules.py` applies this pass to newly generated buildings and forwards repaired-envelope observation masks into opening confidence checks.
+
+### Bounded facade iteration
+
+`facade_rectification` aligns supported window lintels/sills within each row and height class. Bay widths, horizontal phases, doors and measured storefronts remain fixed. A piecewise affine texture warp follows the geometry, with fixed facade borders and rejection of local folds/stretch. Unknown wall coverage is not completed by this step.
+
+`iterate_facade.py BASE NEW_OUTPUT --building NAME --face ID` reuses the established opening catalog and replaces only that facade assembly. It checks unchanged opening count, explicit frame geometry and shell topology before saving. A rejected correction writes a rejection record without a city scene. Each generated window has a separate outer frame, optional internal mullions, native glass and a closed recessed interior backing. Backing dimensions are shared rules and inferred, not measured room depths.
+
+`iterate_facade.py ... --flush-windows` applies the shared `windows.flush_recess_m` rule to the selected facade while preserving its opening catalog. The wall and outer frame front remain coplanar; native glass and internal bars sit within the shallow recess. This is an explicit surface correction, not depth estimated from a single capture image. Per-instance `surface_mode` records the selected construction.
+
+Clean PCG windows are now the default (`captured_glazing.enabled=false`). Frames and internal bars retain capture-derived dimensions/colors, while glass uses a clean native material rather than photographic pane imagery. The original capture remains the layout reference. A face tagged `window_finish=procedural` is protected from the captured-glazing transfer pass.
+
+`window_shape` validates inferred arches against a straight captured lintel and at least three similar rectangular row peers. It changes only the shape, retains bounds and excludes manually measured/storefront openings. True arches, isolated arches and weak lintel evidence are left unchanged. Shape changes are recorded per facade; repeated review stops when no additional changes meet the evidence thresholds.
+
+
+### Local AI facade iteration (2026-10-19)
+
+`python tools/building_refine/ai_city_iteration.py BASE SOURCE OUTPUT` uses cached LaMa on CUDA and same-row template recovery. Rules are in `building_rules.json` under `ai_facade`: 55% minimum observed coverage, 1 m maximum gap radius, 12 cm opening padding. Source captures are read-only and SHA256 checked. Only masked wall material gaps change; geometry, roofs, frames, glass and routes remain unchanged. DXT compression can affect nearby texels.
+
+Per-building `ai_review.json` records inferred window proposals; these are NOT accepted PCG geometry. Large unsupported areas and missing facade catalogs are skipped. Before/after images and inference masks make the model changes reviewable. Captured PNGs are retained for subsequent passes.
+
+Run result: 148 object records inspected; 136 catalogued buildings processed; 120 buildings / 792 faces repaired; 332 proposed windows. Three rendered objects lacked catalogs and nine records had no separate geometry. Geometry/routes verified unchanged; 171 tests passed. Native comparisons reviewed for 334, 066 and 154. Changes are small gap repairs, not a complete reconstruction. Building 334 still has a large blank facade in both baseline and candidate; this requires facade geometry/detection work beyond texture inpainting.
+
+Review: `scenes/city_ai_iteration_20261019/review.html`; road-finished scene: `scenes/city_ai_iteration_final_20261019/city.mtscene`.
+
+
+### Capture-validated window installation
+
+`validate_window_candidates.py BASE SOURCE OUTPUT` independently projects the original building family, detects observed openings, and accepts proposals only with at least 0.5 intersection-over-union and 90% original-pixel coverage. Rules are in `window_candidate_validation`. Doors are excluded. Unsupported candidates are recorded, not installed.
+
+`iterate_facade.run(... additions=..., scene=..., manifest=...)` supports city-wide in-memory processing. Addition mode cuts new wall holes and keeps existing frame/glass assemblies byte-for-byte; only new window components are installed. Existing window rectification is disabled during additive patches. Topology regression rejects the patch transactionally. Original captures and unrelated scene objects are preserved.
+
+2026-10-19: all 332 proposals validated; six installed on 334 (2), 154, 005, 327, 487. 325 had no matching observed opening; one overlapped an existing opening. Full-facade regeneration was rejected after visual review; selective installation fixed that regression. The broad blank end wall on 334 has only 16.8% matching capture coverage and remains unresolved, not falsely approved. Review `scenes/city_validated_windows_selective_v2_20261019/review.html`; road-finished scene `scenes/city_validated_windows_selective_roads_20261019/city.mtscene`.
+
+
+### Surrounding-capture completion
+
+`complete_surrounding_facade.py BASE SOURCE OUTPUT --building NAME --target ID --donor ID --bay START END` uses a captured same-building motif when direct target capture is missing. Floor registration must match; donor coverage must exceed 80%. The motif repeats at its original metre scale, with horizontal phase selected against observed edge pixels. Observed target pixels are restored exactly before encoding. Original facade PNGs remain unchanged; synthesized images use distinct inferred names.
+
+Only mostly unobserved openings are installed, with native frames and glass; existing windows remain unchanged. New instances are marked inferred with donor face provenance. No doors are inferred. Rules live in `surrounding_facade_completion`; per-run donor, motif interval and phase are recorded in `inference.json`. This is an inferred continuation, not direct validation of the missing design.
+
+334 trial: face 1 completed from face 20, motif 3.84–6.40 m, 67 new windows, no topology regression. Reviewed three native views. Original base strip remains plain. Review `scenes/city_surrounding_completion_20261019/review.html`; road-finished scene `scenes/city_surrounding_completion_roads_20261019/city.mtscene`.

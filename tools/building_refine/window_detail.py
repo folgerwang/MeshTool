@@ -12,7 +12,14 @@ from building_rules import outline, extrusion
 from rules_config import RULES
 
 
-def measure(crop, width, height):
+def measure(crop, width, height, both_polarities=False):
+    if both_polarities:
+        result=measure(crop,width,height)
+        for member in measure(255-crop,width,height):
+            extent=width if member["axis"]=="x" else height
+            if not any(m["axis"]==member["axis"] and abs(m["position"]-member["position"])*extent<.12 for m in result):
+                result.append(member)
+        return result
     rules=RULES['window_members']
     if min(crop.shape[:2]) < rules['min_pixels']:
         return []
@@ -59,11 +66,29 @@ def geometry(width, height, shape, members, depth):
         bars.append(region.intersection(interior))
     if not bars:
         return np.empty((0, 3))
-    merged = unary_union(bars)
+    # Snap sub-millimetre clipping slivers before extrusion. Curved crowns
+    # can otherwise create duplicate vertices and zero-area side triangles.
+    from shapely import set_precision
+    merged = set_precision(unary_union(bars), RULES['window_members']['construction_precision_m'])
     pieces = []
     for poly in getattr(merged, 'geoms', [merged]):
         if poly.is_empty or poly.geom_type != 'Polygon':
             continue
         unit = scale(poly, xfact=1/width, yfact=1/height, origin=(0, 0))
-        pieces.append(extrusion(unit, -depth+.008, -.015))
+        pieces.append(extrusion(unit, -depth*.85, -min(.015,depth*.25)))
     return np.concatenate(pieces) if pieces else np.empty((0, 3))
+
+
+def member_color(crop, width, height, members):
+    """Sample the measured bars themselves, rather than adjacent masonry."""
+    samples=[]
+    h,w=crop.shape[:2]
+    for m in members:
+        if m['axis']=='x':
+            center=m['position']*w;half=max(.5,m['width_m']/width*w/2)
+            strip=crop[round(h*.15):round(h*.85),max(0,int(center-half)):min(w,int(center+half)+1)]
+        else:
+            center=(1-m['position'])*h;half=max(.5,m['width_m']/height*h/2)
+            strip=crop[max(0,int(center-half)):min(h,int(center+half)+1),round(w*.15):round(w*.85)]
+        if strip.size:samples.append(strip.reshape(-1,3))
+    return np.median(np.concatenate(samples),axis=0) if samples else None

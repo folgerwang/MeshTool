@@ -14,6 +14,7 @@ RULESET_VERSION = RULES['ruleset']
 
 def material_for_part(role):
     """Assign renderer materials by semantic part, never by sampled color."""
+    if role=='interior':return mtscene.MAT_INTERIOR
     return mtscene.MAT_GLASS if role in RULES['materials']['glass_parts'] else mtscene.MAT_CAPTURED
 
 
@@ -55,7 +56,7 @@ def outline(width,height,shape='rectangular'):
     return Polygon(np.vstack([[0,0],[width,0],crown]))
 
 
-def opening_template(width,height,kind,shape='rectangular',frame_width=None):
+def opening_template(width,height,kind,shape='rectangular',frame_width=None,surface_mode=None):
     """Unit XY tile with physical depth; frame, reveal and glazing/door leaf."""
     border=min(RULES['windows']['frame_width_m'] if frame_width is None else frame_width,width*RULES['windows']['frame_max_fraction'],height*RULES['windows']['frame_max_fraction'])
     from shapely.affinity import scale
@@ -63,6 +64,7 @@ def opening_template(width,height,kind,shape='rectangular',frame_width=None):
     outer=scale(physical,xfact=1/width,yfact=1/height,origin=(0,0))
     inner=scale(physical.buffer(-border,join_style=2),xfact=1/width,yfact=1/height,origin=(0,0))
     depth=RULES['doors']['recess_m'] if kind=='door_candidate' else RULES['windows']['recess_m']
+    if kind=='window' and surface_mode=='flush':depth=RULES['windows']['flush_recess_m']
     ring=np.asarray(inner.exterior.coords)[:-1]
     a,b=ring[1]-ring[0],ring[2]-ring[0]
     if a[0]*b[1]-a[1]*b[0]<0:ring=ring[::-1]
@@ -70,8 +72,12 @@ def opening_template(width,height,kind,shape='rectangular',frame_width=None):
     for a,b in zip(ring,np.roll(ring,-1,axis=0)):
         p=np.array([[*a,0],[*b,0],[*b,-depth],[*a,-depth]])
         sides.append(p[[0,1,2,0,2,3]])
-    return dict(frame=planar(outer.difference(inner),0),reveal=np.concatenate(sides),
+    result=dict(frame=planar(outer.difference(inner),0),reveal=np.concatenate(sides),
                 **{('door_leaf' if kind=='door_candidate' else 'glazing'):planar(inner,-depth)})
+    if kind!='door_candidate':
+        front=-depth-RULES['windows']['interior_backing_gap_m']
+        result['interior']=extrusion(inner,front-RULES['windows']['interior_backing_thickness_m'],front)
+    return result
 
 
 def extrusion(poly,back,front):

@@ -80,7 +80,7 @@ def build(scene_path,output,details=False,roof=False,capture_wall=False):
             center=own[0].translation.copy();parts=defaultdict(list);base_parts=[]
             active_wall=None;wall_size=None
             textures={}
-            for role,color in dict(wall=(205,205,201),trim=(218,218,211),frame=(62,67,65),glass=(43,48,51),roof=(145,141,131),reveal=(145,142,132),cornice_shadow=(96,99,96),roof_stone=(173,171,159),roof_glass=(43,58,67),roof_metal=(126,135,135)).items():
+            for role,color in dict(interior=(28,32,36),wall=(205,205,201),trim=(218,218,211),frame=(62,67,65),glass=(43,48,51),roof=(145,141,131),reveal=(145,142,132),cornice_shadow=(96,99,96),roof_stone=(173,171,159),roof_glass=(43,58,67),roof_metal=(126,135,135)).items():
                 image=masonry() if role=='wall' and details else np.full((4,4,3),color,np.uint8)
                 h,w=image.shape[:2];textures[role]=len(group.textures)
                 group.textures.append(mtscene.Texture(raster.GL_COMPRESSED_RGB_S3TC_DXT1,raster.GL_COMPRESSED_RGB_S3TC_DXT1,0,[(w,h,raster.encode_dxt1(image))]))
@@ -126,7 +126,7 @@ def build(scene_path,output,details=False,roof=False,capture_wall=False):
                             p=points.copy();p[:,0]=x+p[:,0]*ww;p[:,1]=y+p[:,1]*hh
                             # Stronger visible recess without photographed shadows.
                             p[:,2]*=3
-                            emit(p,face,dict(frame='frame',reveal='reveal',glazing='glass')[role],True)
+                            emit(p,face,dict(frame='frame',reveal='reveal',glazing='glass',interior='interior')[role],True)
                         # Interior mullions divide complete assemblies, rather than
                         # making a separate wall hole for each photographed pane.
                         inset=hole.buffer(-.10,join_style=2)

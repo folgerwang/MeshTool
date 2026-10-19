@@ -3,6 +3,7 @@ import argparse
 import json
 import hashlib
 import subprocess
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image,ImageDraw,ImageChops
@@ -16,7 +17,7 @@ def render(baseline,candidate,output,names,workers=1,roof=False,no_before=False,
     scene=mtscene.load(candidate/'city.mtscene')
     manifest=json.loads((candidate/'manifest.json').read_text())
     reports={r['building']:r for r in manifest['buildings']}
-    executable=Path(__file__).resolve().parents[2]/'build/Release/MeshTool.exe'
+    executable=Path(os.environ.get('MESHTOOL_RENDER_EXE',str(Path(__file__).resolve().parents[2]/'build/Release/MeshTool.exe')))
     startup=subprocess.STARTUPINFO();startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
     views=[(30,-20),(210,-20)]+([(120,-65)] if roof else [])
     def render_one(name):
@@ -41,11 +42,11 @@ def render(baseline,candidate,output,names,workers=1,roof=False,no_before=False,
                 prefix=folder/f'{variant}-{yaw}'
                 image=Path(str(prefix)+'_original.png')
                 if (variant=='candidate' and candidate_box is None) or (variant=='before' and not path.exists()):
-                    reason=reports[name].get('classification_correction',{}).get('reason','No generated geometry')
+                    reason=('Combined into '+reports[name]['combined_into']) if reports[name].get('combined_into') else reports[name].get('classification_correction',{}).get('reason','No generated geometry')
                     with Image.open(folder/f'capture-{yaw}_original.png') as source_image:
                         blank=Image.new('RGB',source_image.size,source_image.convert('RGB').getpixel((0,0)))
                     label=ImageDraw.Draw(blank);x,y=int(blank.width*.25),int(blank.height*.5)
-                    label.text((x,y),'No PCG building: classification corrected' if variant=='candidate' else 'Before: no generated building',fill='white')
+                    label.text((x,y),('No separate PCG building: grouped parts' if reports[name].get('combined_into') else 'No PCG building: classification corrected') if variant=='candidate' else 'Before: no generated building',fill='white')
                     label.text((x,y+30),reason,fill='white');blank.save(image)
                     evidence.append(str(image));continue
                 if variant=='capture' and cache_valid and image.exists():

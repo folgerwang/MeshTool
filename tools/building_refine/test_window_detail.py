@@ -28,3 +28,34 @@ class WindowDetailTest(unittest.TestCase):
         image = np.full((100,80,3),45,np.uint8)
         image[30:45,38:42] = 200
         self.assertEqual(measure(image,2.,2.5),[])
+
+    def test_dark_frames_and_bright_frames_are_recovered(self):
+        image=np.full((100,80,3),140,np.uint8)
+        image[:,38:42]=30
+        image[58:62,:]=30
+        members=measure(image,2.,2.5,both_polarities=True)
+        self.assertEqual({m['axis'] for m in members},{'x','y'})
+        self.assertEqual(len(members),2)
+        self.assertEqual(measure(np.full_like(image,100),2.,2.5,both_polarities=True),[])
+
+    def test_frame_color_comes_from_measured_bar_not_light_wall(self):
+        from window_detail import member_color
+        image=np.full((100,80,3),170,np.uint8)
+        image[:,38:42]=[35,40,45]
+        members=measure(image,2.,2.5,both_polarities=True)
+        np.testing.assert_array_equal(member_color(image,2.,2.5,members),[35,40,45])
+
+    def test_dark_scratch_and_broad_shadow_are_not_frames(self):
+        image=np.full((100,80,3),150,np.uint8)
+        image[30:45,38:42]=25
+        self.assertEqual(measure(image,2.,2.5,both_polarities=True),[])
+        image[:]=150;image[:,20:60]=25
+        self.assertEqual(measure(image,2.,2.5,both_polarities=True),[])
+
+    def test_arch_crossbar_clipping_has_no_degenerate_sides(self):
+        from types import SimpleNamespace
+        members=[dict(axis='x',position=.1346153846153846,width_m=.08),dict(axis='y',position=.859375,width_m=.08)]
+        points=geometry(2.08,2.56,'arched',members,.07)
+        points[:,:2]*=[2.08,2.56]
+        mesh=SimpleNamespace(vertices=points,translation=np.zeros(3),draw_calls=[(4,np.arange(len(points)))])
+        self.assertEqual(audit_shell([mesh]),dict(boundary_edges=0,nonmanifold_edges=0,degenerate_triangles=0))

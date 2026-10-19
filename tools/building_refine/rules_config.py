@@ -30,6 +30,8 @@ def configure(path=None):
         return value
     result=merge(DEFAULTS,overrides)
     if result['schema_version']!=1:raise ValueError('Unsupported rules schema')
+    for key in ('normal_alignment','min_observed_fraction'):
+        if result['captured_glazing'][key]>1:raise ValueError('Invalid captured glazing fraction: '+key)
     for section in ('doors','windows'):
         for dimension in ('width','height'):
             if result[section]['min_'+dimension+'_m']>result[section]['max_'+dimension+'_m']:raise ValueError('Invalid size range')

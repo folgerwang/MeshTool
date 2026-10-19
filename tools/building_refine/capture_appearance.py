@@ -51,7 +51,7 @@ def bake(group,source,texel=.08,inpainter=None,provenance=None,only=None,source_
     reports=[];result=[]
     for oid,obj in enumerate(group.objects):
         own=[m for m in group.meshes if m.object_id==oid]
-        if obj.cls!=3 or obj.name=='building_367' or (only is not None and obj.name not in only) or not own:result+=own;continue
+        if obj.cls!=3 or (obj.name=='building_367' and only is None) or (only is not None and obj.name not in only) or not own:result+=own;continue
         world=np.concatenate([m.vertices.astype(float)+m.translation for m in own]);lo,hi=world.min(0)-8,world.max(0)+8
         selected=valid_source&np.all(tri_max>=lo,axis=1)&np.all(tri_min<=hi,axis=1)
         subset=raster.SceneTris(src.pos[selected],src.uv[selected],src.tex[selected],src.obj[selected],src.mesh[selected])

@@ -48,5 +48,32 @@ class CityRulesTest(unittest.TestCase):
         self.assertEqual(base,18)
         self.assertEqual(report['status'],'insufficient_roof_capture')
 
+    def test_unsupported_roof_plane_is_not_accepted_as_flat_roof(self):
+        # A tiny patch has samples, but insufficient area for a supported plane.
+        raster=SimpleNamespace(height=np.full((30,30),18.),min_x=0,max_y=15,res=.5)
+        mesh,base,report=roof_surface(Polygon([(1,1),(3,1),(3,3),(1,3)]),18,0,raster,0,0,np.zeros(3))
+        self.assertIsNone(mesh)
+        self.assertEqual(report['status'],'insufficient_plane_support')
+        self.assertEqual(base,18)
 
-if __name__=='__main__':unittest.main()
+    def test_missing_deck_uses_captured_height_and_preserves_courtyard(self):
+        from city_rules import recover_roof_deck
+        from envelope_repair import footprint
+        triangles=[]
+        for x in range(10):
+            for y in range(10):
+                if 3<=x<7 and 3<=y<7:continue
+                q=np.array([[x,y,10],[x+1,y,10],[x+1,y+1,10],[x,y+1,10]])
+                triangles.extend(q[[0,1,2,0,2,3]].reshape(-1,3,3))
+        capture=np.array(triangles,float)
+        deck,report=recover_roof_deck([],capture,13,0,0)
+        self.assertEqual(report['status'],'captured_deck')
+        self.assertAlmostEqual(report['height'],10)
+        self.assertFalse(footprint(deck).contains(Polygon([(4,4),(6,4),(6,6),(4,6)])))
+        self.assertFalse(any(audit_shell(deck).values()))
+        again,result=recover_roof_deck(deck,capture,13,0,0)
+        self.assertEqual(again,[])
+        self.assertEqual(result['status'],'existing_deck_present')
+
+
+if __name__=='__main__' :unittest.main()

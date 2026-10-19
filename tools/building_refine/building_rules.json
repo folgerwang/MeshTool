@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "ruleset": "capture-building-v6",
+  "ruleset": "capture-building-v7",
   "source": {
     "preserve_capture": true,
     "preserve_nonbuilding_geometry": true
@@ -25,7 +25,10 @@
     "arch_crown_fraction": 0.25,
     "frame_width_m": 0.065,
     "frame_max_fraction": 0.12,
-    "recess_m": 0.07
+    "recess_m": 0.07,
+    "interior_backing_gap_m": 0.04,
+    "interior_backing_thickness_m": 0.025,
+    "flush_recess_m": 0.012
   },
   "doors": {
     "max_sill_offset_m": 0.8,
@@ -71,7 +74,8 @@
     "glass_max": 105,
     "frame_color_factor": 0.72,
     "reveal_color_factor": 0.48,
-    "frame_sample_percentile": 70.0
+    "frame_sample_percentile": 70.0,
+    "sample_measured_frame_color": true
   },
   "roofs": {
     "raster_resolution_m": 0.25,
@@ -96,7 +100,14 @@
     "region_min_area_m2": 2.0,
     "region_simplify_m": 0.35,
     "region_joint_m": 0.001,
-    "min_plane_support": 0.55
+    "min_plane_support": 0.55,
+    "deck_normal_min": 0.95,
+    "deck_height_bin_m": 0.25,
+    "deck_height_tolerance_m": 0.5,
+    "deck_missing_fraction_min": 0.5,
+    "deck_thickness_m": 0.12,
+    "deck_simplify_m": 0.15,
+    "deck_min_face_fill": 0.15
   },
   "validation": {
     "reject_worse_topology": true,
@@ -119,7 +130,9 @@
     "max_width_m": 0.22,
     "edge_fraction": 0.13,
     "sample_margin_fraction": 0.15,
-    "neighbor_offset_fraction": 0.09
+    "neighbor_offset_fraction": 0.09,
+    "detect_dark_members": true,
+    "construction_precision_m": 0.001
   },
   "curtain_wall": {
     "min_facade_width_m": 4.0,
@@ -152,5 +165,68 @@
     "max_area_ratio": 1.8,
     "fragment_min_support": 0.9,
     "fragment_max_area_ratio": 3.5
+  },
+  "storefront": {
+    "search_height_m": 6.0,
+    "min_width_m": 1.6,
+    "max_width_m": 9.0,
+    "min_height_m": 1.6,
+    "max_height_m": 4.5,
+    "max_sill_m": 1.8,
+    "max_gray": 150.0,
+    "wall_contrast": 18.0,
+    "min_blue_red_ratio": 0.9,
+    "bridge_frame_m": 0.28,
+    "min_fill": 0.6,
+    "min_texture_std": 8.0
+  },
+  "iteration_acceptance": {
+    "max_window_loss_fraction": 0.15,
+    "min_previous_windows": 5,
+    "min_lost_windows": 3
+  },
+  "captured_glazing": {
+    "texel_m": 0.08,
+    "normal_alignment": 0.85,
+    "depth_band_m": 2.5,
+    "pane_plane_tolerance_m": 0.15,
+    "min_observed_fraction": 0.98,
+    "enabled": false
+  },
+  "facade_rectification": {
+    "enabled": true,
+    "row_tolerance_m": 0.4,
+    "height_tolerance_m": 0.5,
+    "max_edge_shift_m": 0.16,
+    "min_row_members": 3,
+    "min_warp_area_ratio": 0.35,
+    "max_warp_area_ratio": 3.0
+  },
+  "window_shape": {
+    "row_tolerance_m": 0.45,
+    "height_tolerance_m": 0.5,
+    "min_rectangular_peers": 3,
+    "lintel_search_m": 0.24,
+    "edge_sample_m": 0.16,
+    "contrast_min": 8.0,
+    "min_lintel_support": 0.85
+  },
+  "ai_facade": {
+    "texel_m": 0.08,
+    "max_gap_m": 1.0,
+    "opening_padding_m": 0.12,
+    "min_observed_fraction": 0.55,
+    "min_gap_pixels": 24
+  },
+  "window_candidate_validation": {
+    "min_iou": 0.5,
+    "min_observed_fraction": 0.9,
+    "allow_unobserved_installation": false
+  },
+  "surrounding_facade_completion": {
+    "min_donor_coverage": 0.8,
+    "max_target_observed_window_fraction": 0.2,
+    "inferred_window_confidence": 0.45,
+    "min_edge_margin_m": 0.06
   }
 }

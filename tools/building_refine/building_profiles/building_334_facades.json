@@ -1,0 +1,108 @@
+{
+  "building": "building_334",
+  "faces": {
+    "10": {
+      "image_sha256": "e60c72dcf098b023dea2b5bc716202a94d2db91304ad4b1ccdcbfaf5707ddffc",
+      "replace_region_px": [
+        0,
+        342,
+        268,
+        414
+      ],
+      "window_rects_px": [],
+      "storefront_rects_px": [
+        [
+          27,
+          355,
+          112,
+          399
+        ],
+        [
+          132,
+          355,
+          219,
+          399
+        ]
+      ],
+      "evidence": "Original captured face_010: two wide gridded display windows separated by masonry; remove isolated panel on pier.",
+      "storefront_members": [
+        [
+          {
+            "axis": "x",
+            "position": 0.09411764705882353,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.21176470588235294,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.43529411764705883,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.6941176470588235,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "y",
+            "position": 0.6818181818181818,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "y",
+            "position": 0.3181818181818182,
+            "width_m": 0.1,
+            "support": 1.0
+          }
+        ],
+        [
+          {
+            "axis": "x",
+            "position": 0.12643678160919541,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.3448275862068966,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.5632183908045977,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "x",
+            "position": 0.7931034482758621,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "y",
+            "position": 0.6818181818181818,
+            "width_m": 0.1,
+            "support": 1.0
+          },
+          {
+            "axis": "y",
+            "position": 0.3181818181818182,
+            "width_m": 0.1,
+            "support": 1.0
+          }
+        ]
+      ]
+    }
+  }
+}
