@@ -609,6 +609,12 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                 source=original or [m for m in group.meshes if m.object_id==oid and m.material in (0,1,2,3)]
                 base=len(group.textures)
                 try:
+                    import building_evidence
+                    evidence=building_evidence.check(source)
+                    if not evidence['accepted']:
+                        print(f"  {name}: building check failed; unchanged: {evidence['reason']}",flush=True)
+                        reporter.finish(False,'Building structure not confirmed; kept captured')
+                        continue
                     import base_recovery
                     recovery=base_recovery.infer(source,group)
                     parameters={'base_recovery':recovery} if recovery else {}

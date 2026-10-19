@@ -526,6 +526,16 @@ def main():
             buildings = [i for i, o in enumerate(group.objects) if o.cls == CLS_BUILDING
                          and (only is None or o.name in only)
                          and (target is None or i == target[2])]
+            if args.pcg:
+                import building_evidence
+                supported=[]
+                for oid in buildings:
+                    source=[m for m in group.meshes if m.object_id==oid and m.model_variant==1]
+                    source=source or [m for m in group.meshes if m.object_id==oid and m.model_variant!=2]
+                    evidence=building_evidence.check(source)
+                    if evidence['accepted']:supported.append(oid)
+                    else:print(f"  {group.objects[oid].name}: building check failed; unchanged: {evidence['reason']}",flush=True)
+                buildings=supported
             if not buildings and not args.clean:
                 continue
             # Keep archival originals outside every fitting/culling pass. They

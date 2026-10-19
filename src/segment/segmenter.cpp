@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "segmenter.h"
+#include "building_evidence.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1391,7 +1392,7 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
     {
         if (r.raised)
         {
-            ObjectClass cls = r.cls == kObjUnknown ? kObjBuilding : r.cls;
+            ObjectClass cls = r.cls;
             char name[64];
             snprintf(name, sizeof(name), "%s_%03d", GetObjectClassInfo(cls).name, ++counters[cls]);
             SceneObject o;
@@ -1666,6 +1667,41 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
     }
     SegLog("  triangles: %zu seen from above, %zu via mesh from above, %zu by raster fallback\n",
            seeded, flowed, fell_back);
+
+    // Validate the assigned 3D surfaces, including labels from the model,
+    // neighbour inheritance and the colour fallback. Unknown stays unknown.
+    SetStatus("Checking building structure...", 0.985f);
+    std::map<int32_t,std::vector<building_evidence::Triangle>> candidates;
+    for(const auto& a:result->assignments) {
+        if(m_cancel) return finish(false,"Cancelled.");
+        const auto* mesh=a.mesh; const auto& dc=mesh->draw_call_list[0];
+        for(size_t t=0;t<a.triangleObject.size();++t) {
+            int32_t oid=a.triangleObject[t];
+            if(oid<0 || result->objects[size_t(oid)].cls!=kObjBuilding) continue;
+            building_evidence::Triangle tri; bool valid=true;
+            for(int k=0;k<3;++k) {
+                uint32_t v=dc.get_index(int(t*3+k));
+                if(v>=uint32_t(mesh->num_vertex)) { valid=false;break; }
+                auto p=world(mesh,v); tri[k]={p.x,p.y,p.z};
+            }
+            if(valid) candidates[oid].push_back(tri);
+        }
+    }
+    int rejectedBuildings=0;
+    for(auto& item:candidates) {
+        if(m_cancel) return finish(false,"Cancelled.");
+        auto evidence=building_evidence::Check(item.second);
+        if(evidence.accepted) continue;
+        auto& object=result->objects[size_t(item.first)];
+        SegLog("  %s: building structure unconfirmed (%d planes, %.1f%% wall support); kept unclassified\n",
+               object.name.c_str(),evidence.planes,evidence.wallFraction*100);
+        object.cls=kObjUnknown; object.name="unclassified_"+std::to_string(item.first);
+        ++rejectedBuildings;
+    }
+    SegLog("  building checks: %zu candidates, %d kept unclassified\n",candidates.size(),rejectedBuildings);
+    std::fill(std::begin(counts),std::end(counts),0);
+    for(const auto& a:result->assignments) for(int32_t oid:a.triangleObject)
+        if(oid>=0) ++counts[result->objects[size_t(oid)].cls];
 
     // Per-triangle debug dump: raster x, y (px), z (m), |normal.z|, object, how.
     if (st.dumpRaw)

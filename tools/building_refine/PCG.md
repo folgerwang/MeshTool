@@ -15,6 +15,14 @@ in the refinement log and leaves the facade opaque rather than guessing.
 
 Single-building operations use exact batch/group/object indices, not names, and
 disable scene-wide cleaning/culling. Neighboring objects retain their geometry.
+Segmentation validates proposed building labels against coherent 3D wall planes.
+Uncertain raised regions stay unclassified rather than automatically becoming
+buildings. Both PCG modes repeat the check on original captured geometry before
+generating details, including when opening scenes segmented by an older build.
+Sparse triangles, sloped ground and weak incidental wall patches are insufficient.
+A failed check preserves the existing object and reports "Building structure not
+confirmed". This is conservative: incomplete or unusual real buildings may remain
+captured until there is enough structural evidence.
 Fits that fail the replacement checks use captured-surface PBR and detail refinement. Reapplying
 PCG replaces previous details; a rejected fit retains the previous result.
 Details are consolidated into at most three meshes per building by finish. This
