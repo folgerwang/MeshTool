@@ -963,19 +963,25 @@ void MeshToolApp::UpdateRefine()
         m_refiner->Cancel();
     }
 
-    if (m_ui->wantStartRefine)
+    if (m_ui->wantStartRefine || m_ui->wantReplaceTrees)
     {
+        const bool trees = m_ui->wantReplaceTrees;
         m_ui->wantStartRefine = false;
+        m_ui->wantReplaceTrees = false;
         if (m_refiner->Running() || (m_segmenter && m_segmenter->Running()))
             return;
         RefineSettings settings;
+        settings.replaceTrees = trees;
+        settings.treeShape = m_ui->treeShape;
+        settings.treeGround = m_ui->treeGround;
+        m_ui->replacingTrees = trees;
         settings.pcg = m_ui->refinePCG;
-        if (m_ui->refineScope == 0)
+        if ((trees ? m_ui->treeScope : m_ui->refineScope) == 0)
         {
             if (!m_selGroup || m_selObject < 0 || size_t(m_selObject) >= m_selGroup->objects.size() ||
-                m_selGroup->objects[size_t(m_selObject)].cls != kObjBuilding)
+                m_selGroup->objects[size_t(m_selObject)].cls != (trees ? kObjTree : kObjBuilding))
             {
-                m_ui->statusMessage = "Select a segmented building before applying PCG.";
+                m_ui->statusMessage = trees ? "Select a segmented tree before replacing it." : "Select a segmented building before applying PCG.";
                 m_ui->statusTimeout = 10.0f;
                 return;
             }
@@ -991,6 +997,7 @@ void MeshToolApp::UpdateRefine()
         settings.tiledFacade = m_ui->refinePCG && m_ui->refineTiledFacade;
         settings.autoFit = settings.tiledFacade && m_ui->refineAutoFit;
         settings.fitIterations = m_ui->refineFitIterations;
+        settings.fitMaxError = m_ui->refineFitMaxError * .01f;
         settings.wallFinish = m_ui->refineWallFinish == 1 ? "metal" : "painted-concrete";
         settings.glass = m_ui->refineGlass;
         settings.reflectiveGlass = m_ui->refineReflectiveGlass;
@@ -1000,11 +1007,11 @@ void MeshToolApp::UpdateRefine()
         settings.workDir = m_ui->segSettings.debugDir;
         std::error_code ec;
         std::filesystem::create_directories(settings.workDir, ec);
-        const std::string input = (std::filesystem::path(settings.workDir) / "refine_input.mtscene").string();
+        const std::string input = (std::filesystem::path(settings.workDir) / (trees ? "trees_input.mtscene" : "refine_input.mtscene")).string();
         std::string err;
-        if (!SaveScene(input, g_world.mesh_data_batches, err))
+        if (!SaveScene(input, g_world.mesh_data_batches, err, &m_sceneRoute))
         {
-            m_ui->statusMessage = "Refine Buildings: cannot save the scene for refine.py: " + err;
+            m_ui->statusMessage = std::string(trees ? "Replace Trees: " : "Refine Buildings: ") + "cannot save the input scene: " + err;
             m_ui->statusTimeout = 10.0f;
             return;
         }
@@ -1016,15 +1023,17 @@ void MeshToolApp::UpdateRefine()
     {
         m_ui->refineProgress = m_refiner->Progress();
         m_ui->refineStatus = m_refiner->Status();
+        m_ui->refineInfo = m_refiner->Info();
         return;
     }
 
     std::unique_ptr<RefineResult> result = m_refiner->TakeResult();
     if (!result)
         return;
+    m_ui->refineInfo = m_refiner->Info();
     if (!result->ok)
     {
-        m_ui->statusMessage = "Refine Buildings: " + result->error;
+        m_ui->statusMessage = std::string(m_ui->replacingTrees ? "Replace Trees: " : "Refine Buildings: ") + result->error;
         m_ui->statusTimeout = 15.0f;
         return;
     }
@@ -1085,7 +1094,7 @@ namespace
                     if (!mesh) continue;
                     if (mesh->object_id >= 0 && size_t(mesh->object_id) < group->objects.size())
                         ++info.assignedMeshes;
-                    info.refined = info.refined || mesh->material != kMatCaptured;
+                    info.refined = info.refined || mesh->material != kMatCaptured || mesh->model_variant == 2;
                 }
             }
         }

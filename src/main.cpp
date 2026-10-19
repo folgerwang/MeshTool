@@ -1,5 +1,6 @@
 #include "app.h"
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -84,16 +85,18 @@ static int RunRefineCommand(int argc, char* argv[])
 {
     if (argc < 4)
     {
-        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--pcg] [--target batch:group:object] [--no-sam] [--no-glass] [--clean] [--cull]\n");
+        fprintf(stderr, "usage: MeshTool --refine in.mtscene out.mtscene [--pcg] [--tiled-facade --auto-fit --fit-iterations N --fit-max-error X] [--target batch:group:object] [--no-sam] [--no-glass] [--clean] [--cull]\n");
         return 2;
     }
     RefineSettings settings;
     for (int i = 4; i < argc; i++)
         if (!strcmp(argv[i], "--no-glass")) settings.glass = false;
         else if (!strcmp(argv[i], "--pcg")) settings.pcg = true;
+        else if (!strcmp(argv[i], "--trees")) settings.replaceTrees = true;
         else if (!strcmp(argv[i], "--tiled-facade")) settings.tiledFacade = true;
         else if (!strcmp(argv[i], "--auto-fit")) settings.autoFit = true;
         else if (!strcmp(argv[i], "--fit-iterations") && i + 1 < argc) settings.fitIterations = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--fit-max-error") && i + 1 < argc) settings.fitMaxError = float(atof(argv[++i]));
         else if (!strcmp(argv[i], "--wall-finish") && i + 1 < argc) settings.wallFinish = argv[++i];
         else if (!strcmp(argv[i], "--reflective-glass")) settings.reflectiveGlass = true;
         else if (!strcmp(argv[i], "--no-sam")) settings.noSam = true;
@@ -110,6 +113,11 @@ static int RunRefineCommand(int argc, char* argv[])
     if (settings.autoFit && (!settings.tiledFacade || settings.fitIterations < 1 || settings.fitIterations > 6))
     {
         fprintf(stderr, "--auto-fit requires --tiled-facade and 1-6 --fit-iterations.\n");
+        return 2;
+    }
+    if (!std::isfinite(settings.fitMaxError) || settings.fitMaxError <= 0 || settings.fitMaxError > 1)
+    {
+        fprintf(stderr, "--fit-max-error must be in (0, 1].\n");
         return 2;
     }
     settings.workDir = std::filesystem::path(argv[3]).parent_path().string();

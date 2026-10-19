@@ -419,7 +419,8 @@ def main():
     ap.add_argument("output")
     ap.add_argument("--wall-finish", choices=("painted-concrete","metal"), default="painted-concrete", help="opaque panel PBR finish; color is estimated from the original capture")
     ap.add_argument("--tiled-facade", action="store_true", help="replace walls with textured facade tiles and modeled recessed windows")
-    ap.add_argument("--auto-fit", action="store_true", help="iteratively fit tiled facades using eight camera views of the saved original")
+    ap.add_argument("--auto-fit", action="store_true", help="fit and accept buildings against four side, four diagonal, and top views of the saved original")
+    ap.add_argument("--fit-max-error", type=float, default=.20, help="maximum weighted error for each of the nine views, 0 < value <= 1 (default .20)")
     ap.add_argument("--fit-iterations", type=int, default=3, choices=range(1,7), help="bounded camera-fit coordinate-descent rounds (default 3)")
     ap.add_argument("--reflective-glass", action="store_true", help="explicitly assign reflective glass to refined wall triangles")
     ap.add_argument("--pcg", action="store_true", help="add procedural architectural details and PBR finishes")
@@ -447,6 +448,10 @@ def main():
         ap.error("input and output must differ; preserve the original capture")
     if args.auto_fit and not args.tiled_facade:
         ap.error("--auto-fit requires --tiled-facade")
+    if not math.isfinite(args.fit_max_error) or not 0 < args.fit_max_error <= 1:
+        ap.error("--fit-max-error must be in (0, 1]")
+    if args.auto_fit and not args.debug_dir:
+        args.debug_dir = str(Path(args.output).with_suffix('')) + '_camera_fit'
     if args.tiled_facade and (args.clean or args.cull):
         ap.error("tiled facade replacement cannot be combined with scene cleanup")
     target = None
@@ -477,8 +482,11 @@ def main():
             ap.error("selected target is missing or is not a segmented building")
     if args.tiled_facade:
         import facade
+        from refine_progress import Reporter
+        reporter = Reporter(progress,args.progress)
         done,total=facade.apply(batches,target,set(args.only.split(",")) if args.only else None,progress,args.wall_finish,
-            args.fit_iterations if args.auto_fit else 0,args.debug_dir)
+            args.fit_iterations if args.auto_fit else 0,args.debug_dir,args.fit_max_error,reporter)
+        reporter.update(phase='Saving paired scene')
         progress(98,100,"Saving tiled facades...")
         mtscene.save(args.output, batches, route)
         progress(100,100,"Tiled facade replacement complete")

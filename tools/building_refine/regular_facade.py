@@ -13,6 +13,56 @@ import mtscene
 from shapely.affinity import affine_transform
 
 
+def roof_supported_envelope(planes, points, ground):
+    """Complete four observed exterior walls only with a supported roof above.
+
+    Unlike a hull of facade fragments, the roof must cover the proposed plan.
+    Four broad, perpendicular wall observations and little interior wall area
+    are required, so wings, courtyards and setbacks keep patch reconstruction.
+    """
+    from shapely.geometry import box
+    if len(planes)<4:return None
+    cross=np.cross(points[:,1]-points[:,0],points[:,2]-points[:,0])
+    area=np.linalg.norm(cross,axis=1)/2;centers=points.mean(1)
+    low=float(points[:,:,2].min());high=float(points[:,:,2].max());height=high-low
+    if height<8:return None
+    roof_ids=(abs(cross[:,2])>1.4*area)&(centers[:,2]>low+.65*height)
+    roof=unary_union([Polygon(t[:,:2]) for t in points[roof_ids]])
+    if roof.is_empty:return None
+    rectangle=roof.minimum_rotated_rectangle
+    if rectangle.geom_type!='Polygon' or rectangle.area<25:return None
+    corners=np.asarray(rectangle.exterior.coords)[:-1]
+    center=np.asarray(rectangle.centroid.coords[0]);selected=[]
+    for a,b in zip(corners,np.roll(corners,-1,axis=0)):
+        delta=b-a;length=np.linalg.norm(delta);n=np.r_[delta[1],-delta[0],0.]/length
+        if n[:2]@((a+b)/2-center)<0:n=-n
+        matches=[p for p in planes if p['n']@n>.995
+                 and abs(p['offset']-a@n[:2])<max(2.,min(6.,.15*length))
+                 and p['region'].bounds[2]-p['region'].bounds[0]>.7*length
+                 and p['raw_area']>.08*length*height]
+        if not matches:return None
+        selected.append(max(matches,key=lambda p:p['raw_area']))
+    # Intersect the measured planes, avoiding roof cornice overhang as a wall.
+    n=np.array([p['n'][:2] for p in selected]);d=np.array([p['offset'] for p in selected])
+    corners=np.array([np.linalg.solve(n[[i,(i+1)%4]],d[[i,(i+1)%4]]) for i in range(4)])
+    outline=Polygon(corners)
+    if not outline.is_valid or roof.intersection(outline).area<.82*outline.area:return None
+    vertical=abs(cross[:,2])<.7*area
+    interior=shapely.distance(shapely.points(centers[:,:2]),outline.boundary)>3.
+    if area[vertical&interior].sum()>.15*area[vertical].sum():return None
+    # The lowest supported eave closes the walls; taller roof structures stay
+    # captured rather than being stretched into the exterior facade.
+    eave=min(p['region'].bounds[3] for p in selected)
+    if all(p['region'].area>.95*(p['region'].bounds[2]-p['region'].bounds[0])*(eave-ground)
+           for p in selected):return None
+    result=[]
+    for p in selected:
+        u=p['u'];edge=corners[abs(corners@p['n'][:2]-p['offset'])<1e-5];span=edge@u[:2]
+        region=box(float(span.min()),ground,float(span.max()),eave)
+        result.append(dict(p,region=region))
+    return result
+
+
 def close_supported_envelope(planes, points, ground):
     """Close context-completed convex towers using their observed upper outline.
 
@@ -155,7 +205,12 @@ def rebuild(source, tolerance=.8, recovery=None):
                 plane['region']=unary_union([plane['region']]+[Polygon(p) for p in patch['polygons']])
                 added_area+=plane['region'].area-before
     replacement_regions=planes
-    envelope=close_supported_envelope(planes,points,recovery['ground_z']) if recovery and recovery.get('planes') else None
+    ground=(recovery or {}).get('ground_z',float(points[:,:,2].min()))
+    envelope=roof_supported_envelope(planes,points,ground)
+    envelope_method='roof_supported' if envelope else None
+    if not envelope and recovery and recovery.get('planes'):
+        envelope=close_supported_envelope(planes,points,recovery['ground_z'])
+        if envelope:envelope_method='upper_walls'
     if envelope:planes=envelope
     if envelope:overlap_area=0.
     else:planes,overlap_area=resolve_overlaps(planes,tolerance)
@@ -173,7 +228,9 @@ def rebuild(source, tolerance=.8, recovery=None):
     if envelope:
         # The closed shell owns the facade; only the captured roof remains.
         eave=min(p['region'].bounds[3] for p in envelope)
-        removed |= centers[:,2]<eave-1.
+        roof_detail=(abs(normals[:,2])>=.35)&(centers[:,2]>ground+.65*(eave-ground))
+        removed |= (centers[:,2]<eave-1.)&~roof_detail
+        removed[roof_detail]=False
     groups=[];proxies=[]
     for plane in planes:
         n,u,v,offset=plane['n'],plane['u'],plane['v'],plane['offset']
@@ -196,6 +253,25 @@ def rebuild(source, tolerance=.8, recovery=None):
         tr=p.reshape(-1,3).mean(0)
         proxies.append(mtscene.Mesh(0xffffffff,source[0].object_id,tr,(p.reshape(-1,3)-tr).astype(np.float32),None,None,
                                    [(4,np.arange(p.size//3,dtype=np.uint32))]))
+    if envelope_method=='roof_supported':
+        # A structural deck underneath the captured roof closes scan holes
+        # without flattening or retexturing the dome and rooftop equipment.
+        corners=[]
+        for i,p in enumerate(envelope):
+            q=envelope[(i+1)%len(envelope)]
+            corners.append(np.linalg.solve(np.array([p['n'][:2],q['n'][:2]]),[p['offset'],q['offset']]))
+        roof_mask=(abs(normals[:,2])>.7)&(centers[:,2]>ground+.65*(eave-ground))
+        order=np.flatnonzero(roof_mask);order=order[np.argsort(centers[order,2])]
+        cumulative=np.cumsum(weights[order])
+        deck_z=min(eave-.3,float(centers[order[np.searchsorted(cumulative,cumulative[-1]*.1)],2])-.15)
+        deck=[]
+        for t in facade._polygons(shapely.constrained_delaunay_triangles(Polygon(corners))):
+            xyz=np.column_stack([np.asarray(t.exterior.coords)[:3],np.full(3,deck_z)])
+            if np.cross(xyz[1]-xyz[0],xyz[2]-xyz[0])[2]<0:xyz=xyz[::-1]
+            deck.extend(xyz)
+        xyz=np.array(deck);tr=xyz.mean(0)
+        proxies.append(mtscene.Mesh(0xffffffff,source[0].object_id,tr,(xyz-tr).astype(np.float32),None,None,
+                                   [(4,np.arange(len(xyz),dtype=np.uint32))]))
     drops={}
     for i in np.flatnonzero(removed):
         mi,di,ti=entries[i][:3];drops.setdefault((mi,di),set()).add(ti)
@@ -207,14 +283,7 @@ def rebuild(source, tolerance=.8, recovery=None):
             if excluded:
                 tri=idx.reshape(-1,3);mask=np.ones(len(tri),bool);mask[list(excluded)]=False
                 idx=tri[mask].ravel()
-            if envelope and len(idx):
-                if prim==4 and len(idx)%3==0:
-                    tri=idx.reshape(-1,3)
-                    z=m.vertices[tri,2].mean(1)+m.translation[2]
-                    idx=tri[z>=eave-1.].ravel()
-                elif np.min(m.vertices[idx,2]+m.translation[2])<eave-1.:
-                    continue
             if len(idx):calls.append((prim,idx.copy()))
         if calls:
             part=copy.copy(m);part.draw_calls=calls;part.pcg_keep=True;kept.append(part)
-    return kept+proxies,groups,dict(planes=len(groups),replaced_capture_triangles=int(removed.sum()),recovered_base_area=added_area,removed_overlap_area=overlap_area,closed_envelope=bool(envelope))
+    return kept+proxies,groups,dict(planes=len(groups),replaced_capture_triangles=int(removed.sum()),recovered_base_area=added_area,removed_overlap_area=overlap_area,closed_envelope=bool(envelope),envelope_method=envelope_method)

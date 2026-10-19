@@ -6,6 +6,7 @@
 #include "progress.h"
 #include "icons.h"
 #include "segmenter.h"
+#include "refine_progress.h"
 
 struct WorldData;
 struct BatchMeshData;
@@ -107,12 +108,18 @@ public:
     bool  classVisible[kObjClassCount] = { true, true, true, true, true, true, true, true };
     // Refine Buildings (Tools menu): requests for the app, and its progress.
     bool  wantStartRefine = false;
+    bool  wantReplaceTrees = false;
+    bool  replacingTrees = false;
+    int   treeScope = 1; // 0 selected tree, 1 all trees
+    int   treeShape = 0; // fitted, round, conifer
+    bool  treeGround = true;
     bool  wantCancelRefine = false;
     bool  refineRunning = false;
     bool  refinePCG = false;
     bool  refineTiledFacade = true;
     bool  refineAutoFit = true;
     int   refineFitIterations = 3;
+    float refineFitMaxError = 20.0f; // percentage of weighted image/shape error per view
     int   refineWallFinish = 0; // painted concrete or brushed metal
     int   refineScope = 0; // 0 selected, 1 all segmented buildings
     bool  refineGlass = true;
@@ -121,6 +128,7 @@ public:
     bool  refineCull = true;     // Refine Buildings: remove hidden surfaces (z-fighting)
     float refineProgress = 0.0f;
     std::string refineStatus;
+    RefineProgressInfo refineInfo;
     // Glass facades of refined buildings.
     bool  glass = true;
     float glassOpacity = 0.85f;
@@ -219,6 +227,10 @@ private:
     void DrawRefineDialog();
 
     bool SceneHasBuildings() const;
+    bool SceneHasTrees() const;
+    bool showTreeDialog = false;
+    void DrawTreeDialog();
+    void DrawRefineProgress();
 
 
     // Segment Scene dialog

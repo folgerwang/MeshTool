@@ -52,6 +52,14 @@ are retained. Details are bounded and consolidated by finish. Existing pairs sta
 Mesh export uses the currently displayed versions. Successfully resegmenting
 a scene replaces the old object identities and their comparison history.
 
+Facade reconstruction can complete missing wall bands when four broad exterior
+wall observations and the captured roof support the same rectangular plan.
+Interior wall evidence and insufficient roof coverage disable this completion
+for courtyards and separate wings. Captured roof geometry and valid textures,
+including domes and skylights, are preserved; a structural deck underneath closes
+remaining scan holes. Newly inferred walls remain approximate and are still
+subject to the nine-view acceptance limits when camera fitting is enabled.
+
 For an explicitly glass-clad building, enable **Reflective glass facade** in the refinement dialog (CLI: --reflective-glass). This overrides automatic detection on refined wall triangles while retaining opaque roofs, trim, and the original comparison model. Reflection defaults to 0.95; adjust it under Glass facades. The shader uses an analytic lighting environment, not reflections of neighboring scene objects.
 
 ## Tiled window facade replacement
@@ -149,43 +157,54 @@ either of which otherwise places the dark backing in front of the wall. A
 patch whose rays give no majority keeps the centre-outward rule. The log
 reports how many patches were turned.
 
-### Iterative multi-camera fitting
+### Nine-view fitting and acceptance
 
-The PCG dialog's **Fit to original with multiple cameras** option runs 1ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“6
-iterations (default 3). It renders eight fixed 512-pixel orthographic views of the saved
-original and the actual generated geometry. Four alternating views drive a
-bounded coordinate search over window sill/jamb proportions, bay spacing, and
-horizontal/vertical grid offsets, with progressively smaller steps. Detected
-per-face bright-band phases can anchor the window grid to the capture. Panel and glass colors
-are seeded from original texture samples in those four views, including separate
-palettes for differently lit facade directions. A shared horizontal grid is
-also tried across neighboring wall patches. Recovered facade planes and detected
-floor spacing stay fixed during the search.
+Enable **Fit and compare with 9 cameras** in the PCG dialog.
+For each segmented building, the fitter renders nine fixed 512-pixel orthographic
+reference images from the archived captured mesh. Front/back/left/right align to
+that building's dominant facade. Four diagonal views look at its corners from a
+20-degree elevation, and top looks straight down. The generated building
+uses exactly the same cameras, center, scale, and background. These are local
+renders of the saved capture, not new Google Earth captures; missing source
+surfaces are not invented as reference evidence.
 
-The other four views are used only for the final acceptance check. The objective
-combines multiscale unlit RGB error, local contrast/structure agreement (weight
-0.75), silhouette IoU, and depth error. The structural term penalizes shifted
-window rows even when average color is unchanged. A candidate
-must improve the training views, not worsen the mean validation score, and pass
-per-view shape/depth/regression limits. On regularized facades the relative
-limits allow up to 0.01 silhouette IoU loss and 0.65 m mean depth increase;
-surface-following fallback keeps the tighter 0.002 / 0.05 m limits. Otherwise the normal tiled baseline is
-kept. Insufficient textured wall coverage skips the fit. This is bounded local
-optimization, not proof of the real architectural layout or a global optimum;
-unlit texture comparison does not evaluate dynamic PBR lighting/reflections.
-The viewport glass shader uses Fresnel-weighted reflections, so fitted pane
-colors remain visible head-on instead of being overwhelmed by an artificial
-minimum sky reflection.
+The fitter compares unlit texture appearance, local window/edge structure,
+silhouette, and depth in every view. Its normalized error is
+`0.40 * RGB error + 0.20 * structural error + 0.25 * (1 - silhouette IoU)
++ 0.15 * depth MAE / source span`. **Max error per view (%)** defaults to 20%.
+Each of the nine views must also have silhouette IoU of at least 90%, depth MAE
+of at most 2% of the source framing span, and at least 64 valid textured pixels.
+A good average or an improvement over a poor initial model cannot pass a failed
+side or roof. The percentage is this weighted image/shape error, not a percentage
+of physical reconstruction accuracy.
 
-Each run writes `camera_fit/<batch>_<group>_<object>/fit.json` and `cameras.png`
-in the app's refinement work directory. The sheet shows capture, baseline, and
-best candidate; `accepted` in the report says whether that candidate was used.
-Original meshes and textures remain embedded, and reapplying starts from them.
-CLI input and output paths must differ, including links to the same file.
+A bounded coordinate search adjusts facade colors, window proportions, spacing,
+and grid offsets with progressively smaller steps. The roof is compared but its
+geometry is not optimized by this facade search. Fitting stops as soon as all
+nine views pass, or after the configured maximum (1-6 rounds, default 3). If the
+limits are not reached, or any view lacks textured evidence, the existing
+building and its textures remain unchanged. An already acceptable initial model
+can pass without unnecessary search. The result is agreement with the captured
+mesh, not proof of uncaptured architectural details or a global optimum.
+
+The progress dialog separates overall processing from the current object's
+search budget and model quality. Overall progress counts finished buildings
+across every batch/group and reserves the final 5% for saving. It reports the
+current object and phase, applied/unchanged counts, fitting round, candidate
+budget used (which can finish early), elapsed time and age of the last worker
+update. The best model's mean/worst view error, error limit and number of views
+passing all checks are displayed separately; progress percentage is not match
+accuracy. Tree replacement uses the same batch counts and timing display.
+
+Every GUI run writes `camera_fit/<batch>_<group>_<object>/fit.json`, a nine-row
+`cameras.png` comparison sheet, and named per-view PNGs in the refinement work
+directory. Columns show capture, initial PCG, and best candidate. The JSON records
+the camera bases, error limits, per-view scores, failed checks, search history,
+and acceptance decision. Original meshes stay embedded for viewport comparison.
 
 ```powershell
-python tools/building_refine/refine.py original.mtscene fitted.mtscene --tiled-facade --auto-fit --fit-iterations 3 --target 0:0:175 --debug-dir fit_reports
-# The native --refine command also accepts --auto-fit and --fit-iterations.
+python tools/building_refine/refine.py original.mtscene fitted.mtscene --tiled-facade --auto-fit --fit-iterations 3 --fit-max-error 0.20 --target 0:0:175 --debug-dir fit_reports
+# MeshTool.exe --refine also accepts --auto-fit, --fit-iterations, and --fit-max-error.
 ```
 
 When the surrounding scene is available, base recovery reads nearby road,

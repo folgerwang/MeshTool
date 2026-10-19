@@ -5,6 +5,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <chrono>
+#include "refine_progress.h"
 
 // Tools > Refine Buildings: replaces segmented buildings with clean models
 // (straight walls on the captured facades, planar roofs, glass facades).
@@ -12,11 +14,15 @@
 // child process on a saved copy of the scene; the result is a new scene file.
 struct RefineSettings
 {
+    bool        replaceTrees = false;
+    int         treeShape = 0; // fitted, round, conifer
+    bool        treeGround = true;
     bool        noSam = false; // optional CLI outline-only mode
     bool        pcg = false;
     bool        tiledFacade = false;
     bool        autoFit = false;
     int         fitIterations = 3;
+    float       fitMaxError = .20f;
     std::string wallFinish = "painted-concrete";
     std::string target; // exact batch:group:object index; empty means batch operation
     bool        reflectiveGlass = false; // explicit facade material override
@@ -45,6 +51,7 @@ public:
     bool Running() const { return m_running; }
     float Progress() const { return m_progress; }
     std::string Status() const;
+    RefineProgressInfo Info() const;
     // The finished result (once Running() is false), else nullptr.
     std::unique_ptr<RefineResult> TakeResult();
 
@@ -58,6 +65,8 @@ private:
     std::atomic<float>              m_progress{ 0.0f };
     mutable std::mutex              m_mutex;
     std::string                     m_status;
+    RefineProgressInfo              m_info;
+    std::chrono::steady_clock::time_point m_started, m_updated;
     std::unique_ptr<RefineResult>   m_result;
 
     void Run(std::string inputPath, RefineSettings settings);

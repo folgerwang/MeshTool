@@ -61,8 +61,13 @@ bool BuildingRefiner::Start(const std::string& inputPath, const RefineSettings& 
     m_cancel = false;
     m_progress = 0.0f;
     m_result.reset();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_info = RefineProgressInfo();
+        m_started = m_updated = std::chrono::steady_clock::now();
+    }
     m_running = true;
-    SetStatus("Starting refine.py...");
+    SetStatus(settings.replaceTrees ? "Starting procedural tree replacement..." : "Starting refine.py...");
     m_thread = std::thread(&BuildingRefiner::Run, this, inputPath, settings);
     return true;
 }
@@ -77,6 +82,17 @@ void BuildingRefiner::SetStatus(const std::string& s)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_status = s;
+    m_updated = std::chrono::steady_clock::now();
+}
+
+RefineProgressInfo BuildingRefiner::Info() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto info=m_info;
+    auto now=std::chrono::steady_clock::now();
+    info.elapsed=std::chrono::duration<double>(now-m_started).count();
+    info.sinceUpdate=std::chrono::duration<double>(now-m_updated).count();
+    return info;
 }
 
 std::unique_ptr<RefineResult> BuildingRefiner::TakeResult()
@@ -100,9 +116,11 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
         m_running = false;
     };
 
-    const std::string script = FindScript();
+    std::string script = FindScript();
     if (script.empty())
         return finish(false, "tools\\building_refine\\refine.py not found next to MeshTool.");
+    if (settings.replaceTrees)
+        script = (fs::path(script).parent_path() / "trees.py").string();
 
     // MESHTOOL_PYTHON picks the interpreter (default: python on PATH).
     const char* py = getenv("MESHTOOL_PYTHON");
@@ -111,10 +129,20 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     std::error_code ec;
     const fs::path work = fs::absolute(settings.workDir, ec);
     inputPath = fs::absolute(inputPath, ec).string();
-    result->outputPath = (work / "refined.mtscene").string();
-    const std::string logPath = (work / "refine.log").string();
-    std::string cmd = Quote(python) + " -u " + Quote(script) + " " + Quote(inputPath) + " " +
+    result->outputPath = (work / (settings.replaceTrees ? "procedural_trees.mtscene" : "refined.mtscene")).string();
+    const std::string logPath = (work / (settings.replaceTrees ? "trees.log" : "refine.log")).string();
+    std::string cmd = Quote(python) + " -X utf8 -u " + Quote(script) + " " + Quote(inputPath) + " " +
                       Quote(result->outputPath) + " --progress";
+    if (settings.replaceTrees)
+    {
+        const char* shapes[] = { "fitted", "round", "conifer" };
+        const int shape = settings.treeShape >= 0 && settings.treeShape < 3 ? settings.treeShape : 0;
+        cmd += " --shape " + std::string(shapes[shape]);
+        if (!settings.treeGround) cmd += " --no-ground";
+        if (!settings.target.empty()) cmd += " --target " + Quote(settings.target);
+    }
+    else
+    {
     if (settings.noSam)
         cmd += " --no-sam";
     if (settings.pcg)
@@ -124,6 +152,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     if (settings.tiledFacade) cmd += " --tiled-facade --wall-finish " + Quote(settings.wallFinish);
     if (settings.tiledFacade && settings.autoFit)
         cmd += " --auto-fit --fit-iterations " + std::to_string(settings.fitIterations) +
+               " --fit-max-error " + std::to_string(settings.fitMaxError) +
                " --debug-dir " + Quote((work / "camera_fit").string());
     if (settings.reflectiveGlass) cmd += " --reflective-glass";
     if (!settings.glass)
@@ -132,6 +161,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
         cmd += " --clean";
     if (settings.cull)
         cmd += " --cull";
+    }
 
     SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, TRUE };
     HANDLE readPipe = nullptr, writePipe = nullptr;
@@ -192,6 +222,15 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
             std::string line = pending.substr(0, nl);
             pending.erase(0, nl + 1);
             if (!line.empty() && line.back() == '\r') line.pop_back();
+            RefineProgressInfo info;
+            if (ParseRefineProgress(line,info))
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_info=info;
+                m_status=info.object.empty() ? info.phase : info.object+" | "+info.phase;
+                m_updated=std::chrono::steady_clock::now();
+                continue;
+            }
             // "@progress <done> <total> <message>"
             if (line.rfind("@progress ", 0) == 0)
             {
@@ -226,7 +265,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     if (code != 0 || summary.empty())
     {
         std::string why = tail.empty() ? "no output" : tail.back();
-        return finish(false, "refine.py failed (" + why + "); log: " + logPath);
+        return finish(false, std::string(settings.replaceTrees ? "Tree replacement" : "refine.py") + " failed (" + why + "); log: " + logPath);
     }
     result->summary = summary;
     m_progress = 1.0f;

@@ -188,6 +188,36 @@ After pulling hook changes, redeploy the proxy (`deploy_hook.bat` as
 administrator, option 2): MeshTool and `opengl32.dll` share the capture buffer
 layout (16 GB, 64-bit offsets) and must match - an older hook shows "not connected".
 
+## Procedural tree replacement
+
+Segment the scene first (Tools > Segment Scene), then choose **Tools > Replace
+Trees (Procedural)**. Replace all segmented trees, or select a tree and use
+**Replace selected tree** in its panel or right-click menu. The default fits a
+simple crown profile to the captured tree; Round and Conifer are optional shapes.
+Each replacement matches the captured crown's position, width, depth and top.
+With **Use nearby ground for trunk base**, nearby terrain triangles or ground
+samples establish the trunk base; without usable ground evidence, the captured
+tree's lower bound is used. Ground inferred this way is an estimate.
+
+Original geometry and textures stay embedded in the scene. Select a replaced
+tree and switch **Original / Refined**, or use **All originals / All refined**
+in the Objects panel. Save the scene to keep both versions. Replacing again
+starts from the archived capture and replaces the previous procedural tree.
+Buildings, roads, other objects and geographic references are retained.
+
+This is a rough shape match with a trunk and low-poly crown, not a species or
+leaf reconstruction. One tree is generated per segmented tree object; merged
+crowns need to be separated during segmentation. Uses Python and NumPy, with
+no AI models or downloads. A placement report is saved beside the output scene.
+
+```powershell
+python tools/building_refine/trees.py input.mtscene output.mtscene --shape fitted
+# Selected tree only:
+python tools/building_refine/trees.py input.mtscene output.mtscene --target 0:0:12
+# Native worker entry point:
+build\Release\MeshTool.exe --refine input.mtscene output.mtscene --trees
+```
+
 ## Zone capture
 
 Click the rectangle-and-dots toolbar icon beside Route Capture, or choose

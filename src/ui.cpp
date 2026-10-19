@@ -182,6 +182,7 @@ void MeshToolUI::DrawUI()
     if (showSimDialog)          DrawSimDialog();
     if (showSegmentDialog)      DrawSegmentDialog();
     if (showRefineDialog)       DrawRefineDialog();
+    if (showTreeDialog)         DrawTreeDialog();
     if (showMessageBox)         DrawMessageBox();
 
     // Auto-capture timer
@@ -307,6 +308,11 @@ void MeshToolUI::DrawMenuBar()
                 refinePCG = true;
                 refineScope = selection.active && selection.className == "building" ? 0 : 1;
                 showRefineDialog = true;
+            }
+            if (ImGui::MenuItem("Replace Trees (Procedural)...", nullptr, false, SceneHasTrees() && !refineRunning && !segRunning))
+            {
+                treeScope = selection.active && selection.className == "tree" ? 0 : 1;
+                showTreeDialog = true;
             }
             if (ImGui::MenuItem("Save Check Screenshots", nullptr, false, !g_world.mesh_data_batches.empty()))
                 wantCheckScreenshots = true;
@@ -899,6 +905,11 @@ void MeshToolUI::DrawSelectionContextMenu()
     ImGui::Separator();
     const bool building = selection.className == "building";
     const bool processing = segRunning || refineRunning;
+    if (ImGui::MenuItem("Replace selected tree...", nullptr, false, selection.className == "tree" && !processing))
+    {
+        treeScope = 0;
+        showTreeDialog = true;
+    }
     if (ImGui::MenuItem("Improve selected building (PCG)...", nullptr, false, building && !processing))
     {
         refinePCG = true;
@@ -970,7 +981,7 @@ void MeshToolUI::DrawSelectionSection()
             if (ImGui::RadioButton("Refined", selection.hasModelComparison && selection.modelVersion == 1)) wantModelVersion = 1;
             ImGui::EndDisabled();
             if (!selection.hasModelComparison)
-                ImGui::TextWrapped("No refined model saved. A successful refinement is required to compare. Skipped buildings keep their original model.");
+                ImGui::TextWrapped("No replacement saved. A successful refinement is required to compare. Skipped objects keep their original model.");
         }
         ImGui::TextUnformatted("View:");
         ImGui::SameLine();
@@ -986,6 +997,16 @@ void MeshToolUI::DrawSelectionSection()
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear"))
             wantClearSelection = true;
+        if (selection.className == "tree")
+        {
+            ImGui::BeginDisabled(refineRunning || segRunning);
+            if (ImGui::Button("Replace selected tree..."))
+            {
+                treeScope = 0;
+                showTreeDialog = true;
+            }
+            ImGui::EndDisabled();
+        }
         if (selection.className == "building")
         {
             if (ImGui::Button("Improve selected building (PCG)..."))
@@ -1116,7 +1137,7 @@ void MeshToolUI::DrawObjectsSection()
         ImGui::Indent(8);
         if (comparable)
         {
-            ImGui::Text("Compare %zu refined buildings:", comparable);
+            ImGui::Text("Compare %zu replaced objects:", comparable);
             if (ImGui::Button("All originals")) wantAllModelVersion = 0;
             ImGui::SameLine();
             if (ImGui::Button("All refined")) wantAllModelVersion = 1;
@@ -1164,6 +1185,96 @@ void MeshToolUI::DrawObjectsSection()
 // Dialogs
 // ---------------------------------------------------------------------------
 
+bool MeshToolUI::SceneHasTrees() const
+{
+    for (const BatchMeshData* batch : g_world.mesh_data_batches)
+        if (batch) for (const GroupMeshData* group : batch->group_meshes)
+            if (group) for (const SceneObject& o : group->objects)
+                if (o.cls == kObjTree) return true;
+    return false;
+}
+
+void MeshToolUI::DrawTreeDialog()
+{
+    ImGui::OpenPopup("Replace Trees");
+    ImGui::SetNextWindowSize(ImVec2(560,0),ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300,100),ImVec2(ImGui::GetMainViewport()->WorkSize.x-20,
+        ImGui::GetMainViewport()->WorkSize.y-20));
+    if (!ImGui::BeginPopupModal("Replace Trees",&showTreeDialog,ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextWrapped("Fit simple procedural trunks and crowns to captured trees.");
+    ImGui::TextWrapped("Matches position, height, and crown width/depth. Original meshes remain available in the object's Original / Refined comparison controls.");
+    if (refineRunning && replacingTrees)
+    {
+        DrawRefineProgress();
+        if (ImGui::Button("Cancel")) wantCancelRefine = true;
+    }
+    else
+    {
+        if (replacingTrees && refineInfo.total>0)
+            ImGui::Text("Last run: %d applied, %d unchanged (%d trees)",refineInfo.applied,refineInfo.kept,refineInfo.total);
+        ImGui::BeginDisabled(refineRunning || segRunning);
+        const bool selectedTree = selection.active && selection.className == "tree";
+        ImGui::BeginDisabled(!selectedTree);
+        ImGui::RadioButton("Selected tree",&treeScope,0);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::RadioButton("All segmented trees",&treeScope,1);
+        if (treeScope == 0 && selectedTree) ImGui::Text("Target: %s",selection.name.c_str());
+        ImGui::Combo("Crown shape",&treeShape,"Fit captured crown\0Round\0Conifer\0");
+        ImGui::Checkbox("Use nearby ground for trunk base",&treeGround);
+        ImGui::TextWrapped("When ground samples are missing, uses the captured tree's lowest point. One procedural tree is generated per segmented tree object; merged crowns remain one object.");
+        ImGui::BeginDisabled(!SceneHasTrees() || (treeScope == 0 && !selectedTree));
+        if (ImGui::Button("Replace trees")) wantReplaceTrees = true;
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+    }
+    if (ImGui::Button("Close"))
+    {
+        showTreeDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void MeshToolUI::DrawRefineProgress()
+{
+    const auto& p=refineInfo;
+    ImGui::TextUnformatted(p.total>0 ? "Overall processing" : "Current stage");
+    char overlay[128];
+    snprintf(overlay,sizeof(overlay),"%.1f%% complete",refineProgress*100);
+    ImGui::ProgressBar(refineProgress,ImVec2(520,0),overlay);
+    if (p.total>0)
+    {
+        ImGui::Text("%d / %d %s finished",p.completed,p.total,replacingTrees ? "trees" : "buildings");
+        ImGui::Text("Applied: %d     Unchanged: %d",p.applied,p.kept);
+    }
+    if (!p.object.empty()) ImGui::TextWrapped("Object: %s",p.object.c_str());
+    ImGui::TextWrapped("Stage: %s",p.phase.empty() ? refineStatus.c_str() : p.phase.c_str());
+    if (p.budget>0)
+    {
+        ImGui::Spacing();
+        if (p.iteration>0) ImGui::Text("Fitting round %d / %d | Candidate %d",p.iteration,p.iterations,p.candidate);
+        else ImGui::TextUnformatted("Initial model comparison");
+        snprintf(overlay,sizeof(overlay),"%d / %d candidates (maximum)",p.candidate,p.budget);
+        ImGui::ProgressBar(float(p.candidate)/float(p.budget),ImVec2(520,0),overlay);
+        ImGui::TextDisabled("Search budget used; fitting can finish early when all views pass.");
+    }
+    if (p.worst>=0)
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Best model so far: match error (lower is better)");
+        ImGui::Text("Mean: %.1f%% | Worst: %.1f%% (%s)",p.mean*100,p.worst*100,p.worstView.c_str());
+        ImGui::Text("Error limit per view: %.1f%%",p.threshold*100);
+        ImGui::TextColored(p.passed==p.views ? ImVec4(.4f,.9f,.5f,1) : ImVec4(1,.75f,.3f,1),
+            "All checks passed: %d / %d views",p.passed,p.views);
+        ImGui::TextDisabled("Match error is separate from processing progress.");
+    }
+    const int elapsed=int(p.elapsed);
+    ImGui::Spacing();
+    ImGui::TextDisabled("Elapsed %dh %02dm %02ds | Worker update %.0f s ago",
+        elapsed/3600,(elapsed/60)%60,elapsed%60,p.sinceUpdate);
+}
+
 bool MeshToolUI::SceneHasBuildings() const
 {
     for (const BatchMeshData* batch : g_world.mesh_data_batches)
@@ -1177,6 +1288,8 @@ bool MeshToolUI::SceneHasBuildings() const
 void MeshToolUI::DrawRefineDialog()
 {
     ImGui::OpenPopup("Refine Buildings");
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300,100),ImVec2(ImGui::GetMainViewport()->WorkSize.x-20,
+        ImGui::GetMainViewport()->WorkSize.y-20));
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Refine Buildings", &showRefineDialog, ImGuiWindowFlags_AlwaysAutoResize))
@@ -1192,8 +1305,7 @@ void MeshToolUI::DrawRefineDialog()
 
         if (refineRunning)
         {
-            ImGui::ProgressBar(refineProgress, ImVec2(460, 0));
-            ImGui::TextUnformatted(refineStatus.c_str());
+            DrawRefineProgress();
             ImGui::Spacing();
             if (ImGui::Button("Cancel", ImVec2(120, 0)))
                 wantCancelRefine = true;
@@ -1206,6 +1318,8 @@ void MeshToolUI::DrawRefineDialog()
         }
         else
         {
+            if (!replacingTrees && refineInfo.total>0)
+                ImGui::Text("Last run: %d applied, %d unchanged (%d buildings)",refineInfo.applied,refineInfo.kept,refineInfo.total);
             const bool selectedBuilding = selection.active && selection.className == "building";
             if (!selectedBuilding) ImGui::BeginDisabled();
             ImGui::RadioButton("Selected building", &refineScope, 0);
@@ -1224,11 +1338,12 @@ void MeshToolUI::DrawRefineDialog()
             if (refinePCG && refineTiledFacade)
             {
                 ImGui::Combo("Wall finish", &refineWallFinish, "Painted concrete\0Brushed metal\0");
-                ImGui::Checkbox("Fit to original with multiple cameras", &refineAutoFit);
+                ImGui::Checkbox("Fit and compare with 9 cameras", &refineAutoFit);
                 if (refineAutoFit)
                 {
                     ImGui::SliderInt("Fit iterations", &refineFitIterations, 1, 6);
-                    ImGui::TextWrapped("Repeats render and compare using eight views of the saved capture. Keeps the baseline if separate validation views get worse. Multiple iterations take longer.");
+                    ImGui::SliderFloat("Max error per view (%)", &refineFitMaxError, 1.0f, 50.0f, "%.1f");
+                    ImGui::TextWrapped("Renders four straight-on sides, four elevated diagonal views, and top for each captured and generated building. Stops when all nine views meet the error limit, silhouette IoU >= 90%%, and depth error <= 2%% of source span. Keeps the existing building if the iteration budget expires or a view lacks textured evidence. Saves comparison images and per-view errors.");
                 }
                 ImGui::TextWrapped("Panel color is estimated from the original capture. Choose the finish: capture texture alone cannot reliably identify the underlying material.");
             }

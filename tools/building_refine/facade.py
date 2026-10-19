@@ -250,8 +250,8 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     center=np.mean([m.translation+np.mean(m.vertices,axis=0) for m in source if len(m.vertices)],axis=0)
     wall_tri=[]; retained=[]; roof_tri=[]; parts=[]
     for m in source:
-        # Surfaces the plane recovery left as captured (roofs, unsupported
-        # walls) are never windowed; their roof caps are still re-surfaced.
+        # Recovered planes own the walls. Keep the captured roof, including
+        # domes, skylights and their textures, out of the material replacement.
         keep=getattr(m,'pcg_keep',False)
         for prim,idx in m.draw_calls:
             if prim!=4 or len(idx)%3:
@@ -271,6 +271,9 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
     by_mesh=defaultdict(list)
     for m,prim,triangles,p,wall,valid in parts:
         if p is None:by_mesh[id(m)].append((prim,triangles.copy()));continue
+        if (getattr(m,'pcg_keep',False) and m.uvs is not None
+                and source_textures is not None and 0<=m.tex_index<len(source_textures)):
+            by_mesh[id(m)].append((prim,triangles.ravel().copy()));continue
         n=np.cross(p[:,1]-p[:,0],p[:,2]-p[:,0]);length=np.linalg.norm(n,axis=1)
         horizontal=np.abs(n[:,2])>=.20*np.maximum(length,1e-12)
         roof=valid&~wall&horizontal&(p[:,:,2].mean(1)>=zmin+2.0)
@@ -580,7 +583,13 @@ def build(source, oid, texture_base, source_textures=None, wall_finish="painted-
 
 
 def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="painted-concrete",
-          fit_iterations=0,debug_dir=None):
+          fit_iterations=0,debug_dir=None,fit_max_error=.20,reporter=None):
+    from refine_progress import Reporter
+    reporter = reporter or Reporter(progress)
+    planned = sum(1 for bi,b in enumerate(batches) if not b.is_spline and (target is None or bi==target[0])
+                  for gi,g in enumerate(b.groups) if target is None or gi==target[1]
+                  for i,o in enumerate(g.objects) if o.cls==3 and (target is None or i==target[2])
+                  and (only is None or o.name in only))
     done=total=0
     for bi,batch in enumerate(batches):
         if batch.is_spline or (target is not None and bi!=target[0]):continue
@@ -595,7 +604,7 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                               and t.internal_format==raster.GL_COMPRESSED_RGB_S3TC_DXT1]
             for oi,oid in enumerate(objects):
                 total+=1;name=group.objects[oid].name
-                progress(oi,max(1,len(objects)),f"Building tiled facade: {name}")
+                reporter.begin(name,planned)
                 original=[m for m in group.meshes if m.object_id==oid and m.model_variant==1]
                 source=original or [m for m in group.meshes if m.object_id==oid and m.material in (0,1,2,3)]
                 base=len(group.textures)
@@ -611,11 +620,19 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                         from pathlib import Path
                         report_dir=Path(debug_dir)/f'{bi}_{gi}_{oid}' if debug_dir else None
                         new,textures,stats=multiview.fit(source,oid,base,group.textures,wall_finish,
-                            (new,textures,stats),fit_iterations,report_dir,progress,initial_parameters=parameters)
+                            (new,textures,stats),fit_iterations,report_dir,lambda *args:None,initial_parameters=parameters,
+                            max_error=fit_max_error,details=reporter.update)
+                        if not stats['multiview']['accepted']:
+                            print(f"  {name}: nine-view comparison rejected; existing building unchanged: "
+                                  + '; '.join(stats['multiview']['failed_checks']),flush=True)
+                            reporter.finish(False,'Error or evidence limits not met; unchanged')
+                            continue
                 except (ValueError,shapely.errors.GEOSException) as e:
-                    print(f"  {name}: facade unchanged ({e})",flush=True);continue
+                    print(f"  {name}: facade unchanged ({e})",flush=True)
+                    reporter.finish(False,str(e));continue
                 if not stats['windows']:
-                    print(f"  {name}: no usable wall modules; unchanged",flush=True);continue
+                    print(f"  {name}: no usable wall modules; unchanged",flush=True)
+                    reporter.finish(False,'No usable wall modules');continue
                 if not original:
                     original=[copy.copy(m) for m in source]
                     for m in original:m.model_variant=1
@@ -629,6 +646,7 @@ def apply(batches,target=None,only=None,progress=lambda *args:None,wall_finish="
                         if base<=mesh.tex_index<base+len(textures):mesh.tex_index=existing+mesh.tex_index-base
                 group.meshes=[m for m in group.meshes if m.object_id!=oid]+original+new
                 done+=1
+                reporter.finish(True)
                 if stats.get('regularization'):
                     regular=stats['regularization']
                     print(f"  {name}: recovered {regular['planes']} continuous facade planes from {regular['replaced_capture_triangles']} capture triangles",flush=True)
