@@ -2,6 +2,8 @@
 # for your GPU from https://pytorch.org first, then: pip install -r requirements.txt
 numpy
 numba
+scipy
+scikit-image
 opencv-python
 shapely>=2.1
 transformers

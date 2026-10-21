@@ -1,0 +1,41 @@
+{
+  "objects": [
+    {
+      "name": "building_348",
+      "expected_geometry_sha256": "8b26e44ca21d332f1ef000a0ab7a85678892fc07dfe52d053a0788a007e8e278",
+      "source_capture_geometry_sha256": "ba6ffe3676cf3d4826ecf30cef9d01612af9eb0299a0946a78b3a6c2da1697e8",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    },
+    {
+      "name": "building_362",
+      "expected_geometry_sha256": "5a66db61e4915eb5cca921e7b8e5b9ca0b1ff83329c0cecc4b7d5fffc122e8c9",
+      "source_capture_geometry_sha256": "7227acc2d8379733e61ba8e9b79f51610ad18a854b524396b48e2099d1bfdfe7",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    },
+    {
+      "name": "building_318",
+      "expected_geometry_sha256": "0ae8d1c94284937628f16538e747a7ea2813a2ec07af16f573c47e5888083d9c",
+      "source_capture_geometry_sha256": "471d199a5219f284c88de88e2a7c8d0bb2f78d00e2fe2b52750a3796fe9cf231",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    },
+    {
+      "name": "building_442",
+      "expected_geometry_sha256": "183d08d7814c891afc425f6d68ddb2823caa6e31c5f70827ed5c41a6eca4f371",
+      "source_capture_geometry_sha256": "bf9408af17914a1b136a85df9e264716a7f1d541c64c65ea64c5695e75b6490a",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    },
+    {
+      "name": "building_468",
+      "expected_geometry_sha256": "6a2cafb4750e1296110ae55527b9b095f71f87cf6613046bbd5425d8b5160cd9",
+      "source_capture_geometry_sha256": "fba20f6556d1ccadf04bd0d8de244626b6296520620aba58087c949df9e827a0",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    },
+    {
+      "name": "building_524",
+      "expected_geometry_sha256": "7458486edfe134612ebe95c56d39afa942a3ff7587971fdce45bf308defe80f5",
+      "source_capture_geometry_sha256": "0ce2d5485ecdacb944bd6ccd417159855c778df7c87d999f5d498928c5c1ad28",
+      "review": "Captured vehicle body and glazing visually confirmed; ground-level vehicle dimensions."
+    }
+  ],
+  "evidence": "Visual review of original captured meshes, vehicle dimensions and terrain-relative height. Other size-filter candidates retained as uncertain surface fragments."
+}
