@@ -13,6 +13,20 @@ from solid_city import shell,atlas,audit_shell
 
 
 class CaptureTilesTest(unittest.TestCase):
+    def test_repeated_wide_horizontal_windows_are_not_lost(self):
+        image=np.full((400,720,3),180,np.uint8)
+        for y in (30,120,210):
+            for x in (30,250,470):image[y:y+36,x:x+176]=(30,45,60)
+        openings=detect_openings(image,.05)
+        wide=[o for o in openings if o['kind']=='window' and o['bounds'][2]-o['bounds'][0]>8.]
+        self.assertEqual(len(wide),9)
+
+    def test_outlined_wall_panels_are_not_filled_into_glazing(self):
+        image=np.full((400,720,3),180,np.uint8)
+        for y in (30,120,210):
+            for x in (30,250,470):cv2.rectangle(image,(x,y),(x+176,y+48),(30,45,60),1)
+        self.assertEqual(detect_openings(image,.05),[])
+
     def test_matching_texture_without_observed_row_is_not_repeated(self):
         image=np.full((240,300,3),180,np.uint8)
         for x,y in [(30,30),(100,30),(170,160)]:image[y:y+36,x:x+18]=40

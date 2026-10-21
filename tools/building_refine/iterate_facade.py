@@ -29,7 +29,7 @@ def run(base,output,name,face_id,flush_windows=False,additions=None,scene=None,m
     pitch=max(RULES['windows']['projection_texel_m'],max(face['size'])/2040)
     openings=[]
     for instance in catalog['instances']:
-        if instance['face_id']!=face_id or 'kind' not in instance:continue
+        if instance['face_id']!=face_id or instance.get('kind') not in ('window','door_candidate'):continue
         o=copy.deepcopy(instance);prototype=prototypes[o['prototype']]
         o['shape']=prototype.get('shape','rectangular');o['measured_members']=prototype.get('captured_members',[])
         x,y,X,Y=o['bounds'];o['pixel_rect']=[round(x/pitch),round(len(image)-Y/pitch),round(X/pitch),round(len(image)-y/pitch)]
@@ -58,7 +58,7 @@ def run(base,output,name,face_id,flush_windows=False,additions=None,scene=None,m
             rect_enabled=RULES['facade_rectification']['enabled']
             if additions:RULES['facade_rectification']['enabled']=False
             try:
-                generated,report=refine_building([plane],g.objects[oid],g.textures,work,clean=True,capture_wall=True,opening_overrides={0:openings})
+                generated,report=refine_building([plane],g.objects[oid],g.textures,work,clean=True,capture_wall=catalog.get('captured_wall_material',True),opening_overrides={0:openings})
             finally:RULES['facade_rectification']['enabled']=rect_enabled
             patch=json.loads((work/'tiles.json').read_text())
             rectification=patch['faces'][0]['rectification']
@@ -66,7 +66,7 @@ def run(base,output,name,face_id,flush_windows=False,additions=None,scene=None,m
                 (output/'rejected_iteration.json').write_text(json.dumps(dict(building=name,face_id=face_id,reason=rectification),indent=2))
                 print('No accepted correction; keep previous scene',rectification,flush=True)
                 return False
-            if sum('kind' in i for i in patch['instances'])!=len(openings):raise ValueError('Opening count changed; reject iteration')
+            if sum(i.get('kind') in ('window','door_candidate') for i in patch['instances'])!=len(openings):raise ValueError('Opening count changed; reject iteration')
             if not all(any(p['id']==i['prototype'] and len(p['geometry'].get('frame',[])) for p in patch['prototypes']) for i in patch['instances'] if i.get('kind')=='window'):
                 raise ValueError('Window without frame')
             keep=[];roles=[];old_roles={r['local_mesh_index']:r['part'] for r in catalog['semantic_meshes']}

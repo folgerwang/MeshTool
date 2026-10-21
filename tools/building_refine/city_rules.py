@@ -258,7 +258,7 @@ def refine_preserved_roofs(own,group,source,obj,source_cache):
     return other+temporary.meshes,dict(status='captured_roof_finish',coverage=coverage,geometry='captured_deck_recovered' if deck else 'unchanged',deck=deck_report,faces=len(samples))
 
 
-def run(reference,source,landmark,output,only=None,fallback=None):
+def run(reference,source,landmark,output,only=None,fallback=None,procedural_facades=False):
     output=Path(output);output.mkdir(parents=True,exist_ok=False);config_record=snapshot(output)
     import shutil
     profile_dir=Path(__file__).parent/RULES['profiles']['facade_directory']
@@ -388,7 +388,7 @@ def run(reference,source,landmark,output,only=None,fallback=None):
                     temporary=mtscene.Group(group.textures,roofs,group.objects)
                     capture_appearance.bake(temporary,sg,only={obj.name},source_cache=(src,decoded))
                     roofs=temporary.meshes
-                meshes,report=refine_building(fitted,obj,group.textures,directory,observed_masks=observed_masks,clean=True,capture_wall=True)
+                meshes,report=refine_building(fitted,obj,group.textures,directory,observed_masks=observed_masks,clean=True,capture_wall=not procedural_facades)
                 before,after=audit_shell(fitted),audit_shell(meshes)
                 if any(after[k]>before[k] for k in before):
                     if fallback_scene is None:raise ValueError(f'{obj.name}: broken shell {after}')
@@ -414,7 +414,7 @@ def run(reference,source,landmark,output,only=None,fallback=None):
                     continue
                 report.update(roof=roof_report,envelope=envelope_report,audit=after,glass_meshes=sum(m.material==1 for m in meshes))
                 if obj.name in associations:report['source_members']=source_members
-                if RULES['captured_glazing']['enabled']:
+                if RULES['captured_glazing']['enabled'] and not procedural_facades:
                     from captured_glazing import transfer
                     selected=np.isin(src.obj,[source_ids.get(n,-1) for n in source_members])&(src.tex>=0)
                     evidence_source=raster.SceneTris(*[getattr(src,k)[selected] for k in ('pos','uv','tex','obj','mesh')])
@@ -426,11 +426,11 @@ def run(reference,source,landmark,output,only=None,fallback=None):
             group.meshes=output_meshes
     mtscene.save(output/'city.mtscene',scene)
     for p in paths:assert hashlib.sha256(p.read_bytes()).hexdigest()==hashes[str(p)]
-    (output/'manifest.json').write_text(json.dumps(dict(config=config_record,ruleset=RULESET_VERSION,inputs=hashes,buildings=reports,
+    (output/'manifest.json').write_text(json.dumps(dict(config=config_record,ruleset=RULESET_VERSION,inputs=hashes,buildings=reports,procedural_facades=procedural_facades,
         limitations=['Capture-derived roofs use fitted closed plane regions; thin ornaments and roof glazing are not fully classified','Missing roof samples use nearest supported planes; fallback shells are explicitly reported','Window detection is conservative and may miss or misclassify openings','Captured wall and roof finishes retain baked lighting']),indent=2))
 
 
 if __name__=='__main__':
     import argparse
-    p=argparse.ArgumentParser();p.add_argument('reference');p.add_argument('source');p.add_argument('landmark');p.add_argument('output');p.add_argument('--rules');p.add_argument('--only');p.add_argument('--fallback');a=p.parse_args();configure(a.rules)
-    run(a.reference,a.source,a.landmark,a.output,set(a.only.split(',')) if a.only else None,a.fallback)
+    p=argparse.ArgumentParser();p.add_argument('reference');p.add_argument('source');p.add_argument('landmark');p.add_argument('output');p.add_argument('--rules');p.add_argument('--only');p.add_argument('--fallback');p.add_argument('--procedural-facades',action='store_true',help='Use sampled palettes and procedural wall/window materials');a=p.parse_args();configure(a.rules)
+    run(a.reference,a.source,a.landmark,a.output,set(a.only.split(',')) if a.only else None,a.fallback,a.procedural_facades)

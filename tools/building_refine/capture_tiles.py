@@ -23,6 +23,12 @@ from capture_appearance import faces
 from rules_config import RULES, configure, snapshot
 
 
+def json_value(value):
+    if isinstance(value,np.generic):return value.item()
+    if isinstance(value,np.ndarray):return value.tolist()
+    raise TypeError(f'Cannot serialize {type(value).__name__}')
+
+
 def detect_openings(image, pitch, ground_offset=0.,_large=False):
     """Observed components, with row/column support; never impose a regular grid."""
     gray=cv2.cvtColor(image,cv2.COLOR_RGB2GRAY).astype(np.float32)
@@ -37,7 +43,7 @@ def detect_openings(image, pitch, ground_offset=0.,_large=False):
     candidates=[];height,width=gray.shape
     for i in range(1,count):
         x,y,w,h,area=stats[i];wm,hm=w*pitch,h*pitch
-        if not(RULES['windows']['min_width_m']<=wm<=(RULES['windows']['large_max_width_m'] if _large else RULES['windows']['max_width_m']) and RULES['windows']['min_height_m']<=hm<=(RULES['windows']['large_max_height_m'] if _large else RULES['windows']['max_height_m']) and RULES['windows']['min_aspect']<=wm/hm<=RULES['windows']['max_aspect']):continue
+        if not(RULES['windows']['min_width_m']<=wm<=(RULES['windows']['large_max_width_m'] if _large else RULES['windows']['max_width_m']) and RULES['windows']['min_height_m']<=hm<=(RULES['windows']['large_max_height_m'] if _large else RULES['windows']['max_height_m']) and RULES['windows']['min_aspect']<=wm/hm<=(RULES['windows']['large_max_aspect'] if _large else RULES['windows']['max_aspect'])):continue
         if _large and hm<=4.5 and wm<=3.5:continue
         touches_base=_large and ground_offset<=RULES['doors']['max_sill_offset_m'] and height-y-h<=2
         if x<2 or y<2 or x+w>width-2 or (y+h>height-2 and not touches_base):continue
@@ -45,6 +51,9 @@ def detect_openings(image, pitch, ground_offset=0.,_large=False):
         if fill<RULES['windows']['min_fill']:continue
         region=labels[y:y+h,x:x+w]==i
         strength=float(np.median(contrast[y:y+h,x:x+w][region]))
+        # Filling crossbar holes must not turn an outlined wall panel into a
+        # glass opening. The component interior still needs glazing contrast.
+        if strength<RULES['windows']['contrast_min']:continue
         widths=region.sum(1);top_width=float(np.median(widths[:max(2,round(h*.15))]));middle=float(np.median(widths[round(h*.35):max(round(h*.7),round(h*.35)+1)]))
         symmetry=float(np.mean(abs(region.astype(float)-region[:,::-1])))
         shape='arched' if top_width<.85*middle and middle>.7*w and symmetry<.2 else 'rectangular'
@@ -134,7 +143,11 @@ def recover_patterned_windows(image,pitch,openings):
     for _,row in rows:
         if len(row)<RULES['pattern']['min_row_members']:continue
         row.sort(key=lambda o:o['bounds'][0]);centers=np.array([(o['bounds'][0]+o['bounds'][2])/2 for o in row])
-        steps=np.diff(centers);spacing=float(np.percentile(steps,25))
+        steps=np.diff(centers)
+        from facade_layout import lattice
+        fitted=lattice(centers)
+        if fitted is None:continue
+        spacing=fitted['spacing_m']
         if spacing<RULES['pattern']['min_bay_m']:continue
         regular=abs(steps/spacing-np.round(steps/spacing))<RULES['pattern']['spacing_tolerance']
         if regular.mean()<RULES['pattern']['min_regular_fraction']:continue
@@ -147,6 +160,12 @@ def recover_patterned_windows(image,pitch,openings):
                 shape=box(*bounds)
                 if any(shape.intersects(other) for other in occupied):continue
                 a,b,A,B=bounds;rect=[round(a/pitch),round(height-B/pitch),round(A/pitch),round(height-b/pitch)]
+                # Repetition proposes a location; captured contrast must confirm it.
+                ra,rb,rc,rd=rect;sample=gray[rb:rd,ra:rc]
+                lx,ly,lX,lY=left['pixel_rect'];reference=gray[ly:lY,lx:lX]
+                if not sample.size or not reference.size:continue
+                if abs(float(np.median(sample))-float(np.median(reference)))>RULES['pattern']['max_template_tone_difference']:continue
+                if sample.std()<max(2.,reference.std()*RULES['pattern']['min_template_contrast_ratio']):continue
                 recovered.append(dict(left,bounds=bounds.tolist(),pixel_rect=rect,confidence=.55,recovery='bounded_row_gap',kind='window'));occupied.append(shape)
     return recovered
 
@@ -175,17 +194,60 @@ def facade_image(mesh,face,indices,texture,pitch=None):
 from building_rules import planar, outline, opening_template, RULESET_VERSION, material_for_part
 
 
-def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,capture_wall=False,opening_overrides=None):
-    library=[];instances=[];reports=[];parts=defaultdict(list);untouched=[];decoded={};style_keys={}
+def capture_faces(mesh):
+    """Metric wall frames; merge coplanar patches sharing one affine UV map."""
+    groups=[];lookup={}
+    for face,indices in faces(mesh):
+        if face.kind=='wall' and np.linalg.norm(face.normal)>1e-12:
+            n=face.normal/np.linalg.norm(face.normal)
+            u=np.array([-n[1],n[0],0.]);u/=np.linalg.norm(u)
+            v=np.cross(n,u)
+            points=face.tris.reshape(-1,3)
+            x,y=points@u,points@v
+            origin=u*x.min()+v*y.min()+n*np.mean(points@n)
+            face=building.Face(face.tris,origin,u,v,n,(max(.01,np.ptp(x)),max(.01,np.ptp(y))),'wall')
+            # Fit relative to the mesh translation for georeferenced scenes.
+            local=mesh.vertices[indices].astype(float)
+            design=np.c_[local@u,local@v,np.ones(len(local))]
+            uv=np.linalg.lstsq(design,mesh.uvs[indices],rcond=None)[0]
+            error=float(np.max(np.abs(design@uv-mesh.uvs[indices])))
+            key=(*np.round(n,6),round(float(np.mean(local@n)),4),*np.round(uv.ravel(),5))
+            if error<1e-6 and key in lookup:
+                target=groups[lookup[key]];base=target[0]
+                points=face.tris.reshape(-1,3)
+                if np.max(np.abs((points-base.origin)@base.normal))<1e-5:
+                    base_local=points-mesh.translation
+                    design=np.c_[base_local@base.u,base_local@base.v,np.ones(len(points))]
+                    if np.max(np.abs(design@target[2]-mesh.uvs[indices]))<1e-6:
+                        target[1].append(indices);target[3].append(face.tris);continue
+            if error<1e-6:lookup[key]=len(groups)
+            groups.append([face,[indices],uv,[face.tris]])
+        else:groups.append([face,[indices],None,[face.tris]])
+    for face,indices,_,triangles in groups:
+        if len(triangles)>1:
+            points=np.concatenate(triangles);flat=points.reshape(-1,3)
+            x,y=flat@face.u,flat@face.v
+            origin=face.u*x.min()+face.v*y.min()+face.normal*np.mean(flat@face.normal)
+            face=building.Face(points,origin,face.u,face.v,face.normal,(np.ptp(x),np.ptp(y)),'wall')
+        yield face,np.concatenate(indices)
+
+
+def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,capture_wall=False,opening_overrides=None,support_levels=None,preserve_roofs=False,write_previews=True):
+    """support_levels maps face IDs to measured patio/landing world-Z levels."""
+    library=[];instances=[];reports=[];parts=defaultdict(list);untouched=[];decoded={};style_keys={};preserved=defaultdict(list);native_parts=[]
     # One translation for all new parts avoids independent float32 seam rounding.
     center=own[0].translation.copy()
     bottom=min(float((m.vertices+m.translation)[:,2].min()) for m in own)
+    def save_preview(path,image):
+        if write_previews:cv2.imwrite(str(path),cv2.cvtColor(image,cv2.COLOR_RGB2BGR))
     def emit(local,face,affine,texture,semantic):
         if not len(local):return
         world=face.origin+local[:,0,None]*face.u+local[:,1,None]*face.v+local[:,2,None]*face.normal
         uv=np.c_[local[:,:2],np.ones(len(local))]@affine
         if clean:
             texture=palette[semantic];uv=np.zeros_like(uv)
+            if semantic=='wall' and face_finish_texture is not None:
+                texture=face_finish_texture;uv=np.c_[local[:,0]/finish_size[0],1-local[:,1]/finish_size[1]]
             if capture_wall and semantic=='wall':uv=np.c_[local[:,0]/wall_size[0],1-local[:,1]/wall_size[1]]
             if capture_wall and semantic=='glazing' and face_glass_texture is not None:
                 texture=face_glass_texture;uv=np.c_[local[:,0]/wall_size[0],1-local[:,1]/wall_size[1]]
@@ -200,15 +262,38 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
         return material_cache[key]
     palette={}
     face_id=0
-    for mesh in own:
+    for mesh_index,mesh in enumerate(own):
+        if clean and mesh.material in (mtscene.MAT_GLASS,mtscene.MAT_INTERIOR):
+            # A previous PCG pass may already have resolved window assemblies.
+            # Their glass/interior triangles are not opaque wall observations.
+            kept=copy.copy(mesh)
+            color=(45,61,72) if mesh.material==mtscene.MAT_GLASS else (28,32,36)
+            if mesh.material==mtscene.MAT_GLASS and mesh.tex_index<len(textures):
+                sampled=decode(textures[mesh.tex_index])
+                color=np.clip(np.median(sampled.reshape(-1,3),axis=0),RULES['materials']['glass_min'],RULES['materials']['glass_max'])
+            kept.tex_index=material(color);kept.uvs=np.zeros((len(kept.vertices),2),np.float32);kept.colors=None
+            native_parts.append((kept,'glazing' if mesh.material==mtscene.MAT_GLASS else 'interior'))
+            continue
         if mesh.uvs is None or mesh.tex_index>=len(textures):untouched.append(mesh);continue
         if mesh.tex_index not in decoded:decoded[mesh.tex_index]=decode(textures[mesh.tex_index])
-        retained=[]
-        for face,indices in faces(mesh):
+        retained=[];roof_indices=[]
+        for face,indices in capture_faces(mesh):
+            if preserve_roofs and face.kind!='wall':
+                roof_indices.extend(indices);continue
             if face.kind!='wall' or face.size[0]<1. or face.size[1]<1.5:
                 retained.extend(indices);continue
             image,affine,pitch=facade_image(mesh,face,indices,decoded[mesh.tex_index])
+            levels=[bottom]+list((support_levels or {}).get(face_id,[]))
             openings=detect_openings(image,pitch,float(face.origin[2]-bottom))
+            # Elevated doors require explicit supporting patio/landing evidence.
+            for level in levels[1:]:
+                for candidate in detect_openings(image,pitch,float(face.origin[2]-level)):
+                    if candidate['kind']!='door_candidate':continue
+                    sill=float(face.origin[2]+candidate['bounds'][1])
+                    if not level-.01<=sill<=level+RULES['doors']['max_sill_offset_m']:continue
+                    candidate['support_level_z']=float(level)
+                    openings=[o for o in openings if not box(*o['bounds']).intersects(box(*candidate['bounds']))]
+                    openings.append(candidate)
             if clean:openings=recover_patterned_windows(image,pitch,openings)
             if clean:
                 from curtain_wall import detect as detect_curtain
@@ -259,25 +344,46 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                 yy,xx=np.indices(image.shape[:2]);uv=np.stack([(xx+.5)*pitch,(len(image)-yy-.5)*pitch,np.ones_like(xx)],axis=-1)@affine
                 known=cv2.remap(evidence,(uv[:,:,0]*evidence.shape[1]-.5).astype(np.float32),(uv[:,:,1]*evidence.shape[0]-.5).astype(np.float32),cv2.INTER_NEAREST,borderMode=cv2.BORDER_CONSTANT)>0
             else:known=np.ones(image.shape[:2],bool)
+            # Rectangular projection bounds include pixels outside triangular,
+            # stepped, or courtyard faces. They must never vote as wall evidence.
+            covered=np.zeros(image.shape[:2],np.uint8)
+            for triangle in face.tris:
+                rel=triangle-face.origin
+                pixels=np.c_[rel@face.u/pitch,len(image)-rel@face.v/pitch]
+                cv2.fillConvexPoly(covered,np.round(pixels).astype(np.int32),1)
+            known &= covered.astype(bool)
             for item in openings:
                 x0,y0,x1,y1=item['pixel_rect'];item['observed_fraction']=float(known[y0:y1,x0:x1].mean())
                 item['confidence']*=.5+.5*item['observed_fraction']
             # Never turn hallucinated ground-floor imagery into a door instance.
             openings=[o for o in openings if o['kind']!='door_candidate' or o['observed_fraction']>=RULES['doors']['min_observed_fraction']]
-            boundary=Polygon((face.tris.reshape(-1,3)-face.origin)@np.stack([face.u,face.v],axis=1)).convex_hull
+            xy=(face.tris.reshape(-1,3)-face.origin)@np.stack([face.u,face.v],axis=1)
+            boundary=unary_union([Polygon(t) for t in xy.reshape(-1,3,2)])
             openings=[o for o in openings if boundary.buffer(-.025).covers(box(*o['bounds']))]
-            rectification=None;face_glass_texture=None
+            deviation=float(np.max(np.abs((face.tris.reshape(-1,3)-face.origin)@face.normal)))
+            # Adjacent capture triangles can have similar normals while lying
+            # off the same plane. Cutting planar holes would move their seams.
+            if deviation>1e-5:openings=[]
+            rectification=None;face_glass_texture=None;face_finish_texture=None
             if clean and RULES['facade_rectification']['enabled']:
                 from facade_rectify import rectify
-                cv2.imwrite(str(directory/f'face_{face_id:03d}_source.png'),cv2.cvtColor(image,cv2.COLOR_RGB2BGR))
+                save_preview(directory/f'face_{face_id:03d}_source.png',image)
                 image,openings,rectification=rectify(image,openings,pitch)
+            from facade_layout import pattern,wall_mask,finish,details
+            wall_pixels=wall_mask(image,known,openings,pitch)
+            marks=details(image,wall_pixels,pitch) if clean and not capture_wall else []
+            marks=[m for m in marks if boundary.buffer(-.025).covers(box(*m['bounds']))]
+            finish_pixels=wall_pixels.copy()
+            for mark in marks:
+                x,y,X,Y=mark['bounds'];finish_pixels[round(len(image)-Y/pitch):round(len(image)-y/pitch),round(x/pitch):round(X/pitch)]=False
+            wall_finish=finish(image,finish_pixels,pitch)
             if clean:
                 from facade_pattern import panel_color
-                wall_mask=known.copy()
-                for opening in openings:
-                    ax,ay,bx,by=opening['pixel_rect'];wall_mask[ay:by,ax:bx]=False
-                estimate=panel_color(image,wall_mask)
-                wall_color=estimate['rgb'] if estimate else (164,160,151)
+                estimate=panel_color(image,finish_pixels)
+                # Missed glazing can dominate the median of a partly observed
+                # facade. Prefer the robust cladding sample over dark pane tone.
+                wall_color=estimate['rgb'] if estimate else wall_finish['rgb']
+                wall_finish['render_rgb']=list(wall_color)
                 # Captured pixels estimate color only; no photographic underlay survives.
                 samples=[]
                 for opening in openings:
@@ -298,6 +404,12 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                         edge=np.concatenate([rim[1:-1,0],rim[1:-1,-1]])
                     frame_samples.append(np.percentile(edge,RULES['materials']['frame_sample_percentile'],axis=0))
                 if frame_samples:palette['frame']=material(np.median(frame_samples,axis=0))
+                if wall_finish['kind']=='tile_candidate' and not capture_wall:
+                    from facade_layout import procedural_tiles
+                    tile=procedural_tiles(wall_finish,image.shape,pitch)
+                    th,tw=tile.shape[:2];finish_size=(tw*pitch,th*pitch)
+                    face_finish_texture=len(textures)
+                    textures.append(mtscene.Texture(raster.GL_COMPRESSED_RGB_S3TC_DXT1,raster.GL_COMPRESSED_RGB_S3TC_DXT1,0,[(tw,th,raster.encode_dxt1(tile))]))
             if capture_wall:
                 from building_rules import captured_wall_material
                 finish,_=captured_wall_material(image,openings,pitch)
@@ -311,16 +423,41 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
             report=dict(face_id=face_id,origin=face.origin.tolist(),u=face.u.tolist(),v=face.v.tolist(),normal=face.normal.tolist(),size=list(face.size),openings=len(openings),observed_fraction=float(known.mean()))
             report['shape_changes']=shape_changes
             report['rectification']=rectification
-            report['window_finish']='captured' if RULES['captured_glazing']['enabled'] else 'procedural'
+            report['window_finish']='captured' if face_glass_texture is not None else ('procedural' if clean else 'captured')
+            report['pattern']=pattern(openings)
+            report['wall_finish']=wall_finish
+            report['wall_details']=len(marks)
+            report['plane_deviation_m']=deviation
+            report['geometry_policy']='cut_planar_openings' if openings else 'preserve_source_triangles'
             reports.append(report)
-            cv2.imwrite(str(directory/f'face_{face_id:03d}_capture.png'),cv2.cvtColor(image,cv2.COLOR_RGB2BGR))
+            for mark in marks:
+                from building_rules import extrusion
+                x,y,X,Y=mark['bounds'];w,h=X-x,Y-y
+                key=('wall_detail',round(w,2),round(h,2),tuple(mark['rgb']))
+                if key not in style_keys:
+                    pid=f'wall_detail_{len(style_keys):03d}'
+                    template={'wall_detail':extrusion(box(0,0,1,1),.002,.006)}
+                    style_keys[key]=(pid,template)
+                    library.append(dict(id=pid,kind='wall_detail',rgb=mark['rgb'],geometry={k:v.tolist() for k,v in template.items()},semantic_status=mark['semantic_status']))
+                pid,template=style_keys[key];palette['wall_detail']=material(mark['rgb'])
+                local=template['wall_detail'].copy();local[:,0]=x+local[:,0]*w;local[:,1]=y+local[:,1]*h
+                emit(local,face,affine,mesh.tex_index,'wall_detail')
+                instances.append(dict(prototype=pid,face_id=face_id,kind='wall_detail',bounds=mark['bounds'],origin=(face.origin+face.u*x+face.v*y).tolist(),basis=np.stack([face.u*w,face.v*h,face.normal],axis=1).tolist(),confidence=mark['confidence'],semantic_status=mark['semantic_status']))
+            save_preview(directory/f'face_{face_id:03d}_capture.png',image)
             if not openings:
-                cv2.imwrite(str(directory/f'face_{face_id:03d}_detections.png'),cv2.cvtColor(image,cv2.COLOR_RGB2BGR))
-                local=np.c_[(face.tris.reshape(-1,3)-face.origin)@face.u,(face.tris.reshape(-1,3)-face.origin)@face.v,np.zeros(len(indices))]
+                save_preview(directory/f'face_{face_id:03d}_detections.png',image)
+                basis=np.stack([face.u,face.v,face.normal],axis=1)
+                local=np.linalg.solve(basis,(face.tris.reshape(-1,3)-face.origin).T).T
                 pid=f'wall_{face_id}'
                 library.append(dict(id=pid,kind='wall',geometry={'wall':local.tolist()},appearance='Captured wall; no confidently detected openings'))
                 instances.append(dict(prototype=pid,face_id=face_id,origin=face.origin.tolist(),basis=np.stack([face.u,face.v,face.normal],axis=1).tolist(),texture_index=mesh.tex_index,uv_transform=affine.tolist()))
-                if clean:emit(local,face,affine,mesh.tex_index,'wall')
+                if clean:
+                    texture=face_finish_texture if face_finish_texture is not None else palette['wall']
+                    if capture_wall or face_finish_texture is not None:
+                        size=wall_size if capture_wall else finish_size
+                        uv=np.c_[local[:,0]/size[0],1-local[:,1]/size[1]]
+                    else:uv=np.zeros((len(indices),2),np.float32)
+                    preserved[mesh_index,texture].append((indices,uv))
                 else:retained.extend(indices)
                 face_id+=1;continue
             from shapely.affinity import translate
@@ -348,8 +485,8 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                     bars=geometry(w,h,item['shape'],members,RULES['windows']['flush_recess_m'] if item.get('surface_mode')=='flush' else RULES['windows']['recess_m'])
                     if len(bars):template['mullion']=bars
                     style_keys[key]=(pid,template)
-                    cv2.imwrite(str(directory/(pid+'.png')),cv2.cvtColor(crop,cv2.COLOR_RGB2BGR))
-                    library.append(dict(id=pid,kind=item['kind'],shape=item['shape'],reference_size_m=[w,h],captured_members=members,geometry={k:v.tolist() for k,v in template.items()},preview=pid+'.png',depth_inferred=True))
+                    save_preview(directory/(pid+'.png'),crop)
+                    library.append(dict(id=pid,kind=item['kind'],shape=item['shape'],reference_size_m=[w,h],captured_members=members,geometry={k:v.tolist() for k,v in template.items()},preview=pid+'.png' if write_previews else None,depth_inferred=True))
                 pid,template=style_keys[key]
                 previous_frame=palette.get('frame')
                 if clean:
@@ -365,13 +502,17 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                     emit(local,face,affine,mesh.tex_index,semantic)
                 if previous_frame is not None:palette['frame']=previous_frame
                 origin=face.origin+face.u*x0+face.v*y0
-                if item['kind']=='door_candidate' and not(bottom-.01<=origin[2]<=bottom+RULES['doors']['max_sill_offset_m']):
-                    raise ValueError('Door instance must be at the overall building base')
+                support=item.get('support_level_z',bottom)
+                if item['kind']=='door_candidate' and not(support-.01<=origin[2]<=support+RULES['doors']['max_sill_offset_m']):
+                    raise ValueError('Door instance must meet the building base or an evidenced landing')
                 transform=np.array([[w,0,0],[0,h,0],[x0,y0,1.]])@affine
                 instances.append(dict(prototype=pid,face_id=face_id,kind=item['kind'],surface_mode=item.get('surface_mode'),origin=origin.tolist(),basis=np.stack([face.u*w,face.v*h,face.normal],axis=1).tolist(),texture_index=mesh.tex_index,uv_transform=transform.tolist(),bounds=item['bounds'],confidence=item['confidence'],observed_fraction=item['observed_fraction'],recovery=item.get('recovery','detected'),semantic_status='inferred_ground_level_opening' if item['kind']=='door_candidate' else ('ml_repaired_opening' if item['observed_fraction']<.8 else 'repeated_capture_opening')))
+                if item['kind']=='door_candidate':
+                    instances[-1]['support_level_z']=float(support)
+                    instances[-1]['semantic_status']='inferred_patio_opening' if 'support_level_z' in item else 'inferred_ground_level_opening'
                 cv2.rectangle(debug,(px0,py0),(px1,py1),(255,130,20) if item['kind']=='door_candidate' else (40,240,70),1)
-            cv2.imwrite(str(directory/f'face_{face_id:03d}_capture.png'),cv2.cvtColor(image,cv2.COLOR_RGB2BGR))
-            cv2.imwrite(str(directory/f'face_{face_id:03d}_detections.png'),cv2.cvtColor(debug,cv2.COLOR_RGB2BGR))
+            save_preview(directory/f'face_{face_id:03d}_capture.png',image)
+            save_preview(directory/f'face_{face_id:03d}_detections.png',debug)
             face_id+=1
         if retained:
             kept=copy.copy(mesh);kept.draw_calls=[(4,np.asarray(retained,np.uint32))]
@@ -379,7 +520,22 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                 # Roof caps and tiny unclassified shell sections also lose photo imagery.
                 kept.tex_index=material((125,124,119));kept.uvs=np.zeros((len(kept.vertices),2),np.float32);kept.colors=None;kept.material=0
             untouched.append(kept)
+        if roof_indices:
+            kept=copy.copy(mesh);kept.draw_calls=[(4,np.asarray(roof_indices,np.uint32))]
+            native_parts.append((kept,'roof'))
     meshes=list(untouched);semantic_meshes=[]
+    for mesh,semantic in native_parts:
+        semantic_meshes.append(dict(local_mesh_index=len(meshes),part=semantic))
+        meshes.append(mesh)
+    for (mesh_index,texture),pieces in preserved.items():
+        # Keep original float32 vertices AND translation; rebasing all fragments
+        # at one new center can itself break seams through rounding.
+        mesh=copy.copy(own[mesh_index]);mesh.tex_index=texture;mesh.material=material_for_part('wall');mesh.colors=None
+        mesh.uvs=np.zeros((len(mesh.vertices),2),np.float32)
+        for indices,uv in pieces:mesh.uvs[indices]=uv
+        mesh.draw_calls=[(4,np.concatenate([indices for indices,uv in pieces]))]
+        semantic_meshes.append(dict(local_mesh_index=len(meshes),part='wall'))
+        meshes.append(mesh)
     for (texture,semantic),pieces in parts.items():
         world=np.concatenate([p for p,uv in pieces]);uv=np.concatenate([uv for p,uv in pieces])
         semantic_meshes.append(dict(local_mesh_index=len(meshes),part=semantic))
@@ -390,7 +546,8 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
     counts=Counter(i.get('kind','wall') for i in instances)
     catalog=dict(captured_wall_material=capture_wall,ruleset=RULESET_VERSION,clean_procedural_materials=clean,building=obj.name,building_base_z=bottom,door_rule=dict(max_sill_offset_m=RULES['doors']['max_sill_offset_m'],min_observed_fraction=RULES['doors']['min_observed_fraction'],reference='overall_building_base'),prototypes=library,instances=instances,faces=reports,semantic_meshes=semantic_meshes,
                  counts=dict(counts),note=('Captured wall finish with procedural frames and native glass.' if capture_wall else ('Clean procedural wall/frame/glazing materials; capture UVs are reference metadata only.' if clean else 'UV transforms retain individual capture variation.'))+' Renderer export expands shared prototypes; GPU instancing is not implemented. Door semantics and recess depths are inferred.')
-    (directory/'tiles.json').write_text(json.dumps(catalog,indent=2))
+    catalog['retained_native_parts']=dict(Counter(role for _,role in native_parts))
+    (directory/'tiles.json').write_text(json.dumps(catalog,indent=2,default=json_value))
     usage=Counter(i['prototype'] for i in instances)
     return meshes,dict(building=obj.name,counts=dict(counts),prototypes=len(library),instances=len(instances),
                        reused_opening_prototypes=sum(n>1 and not key.startswith('wall_') for key,n in usage.items()),
@@ -401,7 +558,7 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
 def semantic_review(scene,out,reports):
     """Diagnostic colors only; the main export keeps captured materials."""
     review=copy.deepcopy(scene);catalogs={r['building']:r['catalog'] for r in reports if 'catalog' in r}
-    colors=dict(wall=(170,160,145),frame=(220,220,210),mullion=(200,200,190),interior=(28,32,36),reveal=(55,60,65),glazing=(30,140,210),door_leaf=(245,120,30))
+    colors=dict(wall=(170,160,145),roof=(125,124,119),wall_detail=(220,60,180),frame=(220,220,210),mullion=(200,200,190),interior=(28,32,36),reveal=(55,60,65),glazing=(30,140,210),door_leaf=(245,120,30))
     for batch in review:
         for group in batch.groups:
             textures={}
@@ -418,7 +575,7 @@ def semantic_review(scene,out,reports):
     mtscene.save(out/'semantic_review.mtscene',review)
 
 
-def main(scene_path,out,only=None,review=False,clean=False):
+def main(scene_path,out,only=None,review=False,clean=False,preserve_roofs=False):
     out=Path(out)
     if out.exists():raise ValueError('Use a new output directory')
     path=Path(scene_path).resolve();digest=hashlib.sha256(path.read_bytes()).hexdigest()
@@ -436,7 +593,7 @@ def main(scene_path,out,only=None,review=False,clean=False):
                 if obj.name=='building_367' or (only and obj.name not in only):
                     output+=own;reports.append(dict(building=obj.name,status='existing_refined_preserved' if obj.name=='building_367' else 'not_selected'));continue
                 directory=out/obj.name;directory.mkdir()
-                meshes,report=refine_building(own,obj,group.textures,directory,observed,clean)
+                meshes,report=refine_building(own,obj,group.textures,directory,observed,clean,preserve_roofs=preserve_roofs)
                 from solid_city import audit_shell
                 before,after=audit_shell(own),audit_shell(meshes)
                 if any(after[key]>before[key] for key in before):
@@ -453,5 +610,5 @@ def main(scene_path,out,only=None,review=False,clean=False):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('scene');p.add_argument('output');p.add_argument('--only');p.add_argument('--semantic-review',action='store_true');p.add_argument('--clean-materials',action='store_true');p.add_argument('--rules');a=p.parse_args();configure(a.rules)
-    main(a.scene,a.output,set(a.only.split(',')) if a.only else None,a.semantic_review,a.clean_materials)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('scene');p.add_argument('output');p.add_argument('--only');p.add_argument('--semantic-review',action='store_true');p.add_argument('--clean-materials',action='store_true');p.add_argument('--preserve-roofs',action='store_true');p.add_argument('--rules');a=p.parse_args();configure(a.rules)
+    main(a.scene,a.output,set(a.only.split(',')) if a.only else None,a.semantic_review,a.clean_materials,a.preserve_roofs)
