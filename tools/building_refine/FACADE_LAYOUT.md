@@ -113,6 +113,30 @@ python -m unittest discover -s tools/building_refine -p test_capture_tiles.py
 python -m unittest discover -s tools/building_refine -p test_facade_iteration.py
 ```
 
+## Architectural detail pass on an existing facade
+
+`facade_details.py` adds inferred projecting window sills, shallow U-shaped
+surrounds, floor courses, base trim and cornices to an existing isolated building
+asset. It uses the catalog's actual wall triangles, skips blank/nonplanar faces,
+and clips every detail away from openings, signs and other trim. The existing
+meshes, roof, window slots and texture payloads are retained exactly. These trim
+styles and depths are design inferences, not newly detected capture evidence.
+
+The base directory must contain a manifest, iterations report and matching
+`building_NAME.mtscene` asset from the repair/install workflow. Use new output
+directories for each pass:
+
+```powershell
+python tools/building_refine/facade_details.py previous_city detail_trials --building building_434
+python tools/building_refine/install_building_repairs.py previous_city/city.mtscene detail_trials detailed_city
+python -m unittest discover -s tools/building_refine -p test_facade_details.py
+```
+
+`facade_details.json` records inferred detail counts, exact mesh preservation,
+trim/opening clearance, wall planarity and closed topology. The exported asset
+is reloaded and checked before installation. Reapplying details to an already
+detailed catalog is rejected; start a new pass from the undetailed asset.
+
 ## Capture-scored city iteration
 
 `iterate_building_shells.py` ranks buildings with mesh defects and evaluates
