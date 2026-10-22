@@ -1,0 +1,10 @@
+{
+  "building": "building_278",
+  "roof_start_z": 52.0,
+  "source_geometry_sha256": "54641643286dea96c627591c1f1d26f47fc342bbf643fc92c0469bb648c70588",
+  "active_geometry_sha256": "cda8a23639f6e5d6b1df1849e31a37a9f2fcaa4f48eb89a8ae8f5bf33df835b0",
+  "exclude_source_meshes": [
+    97
+  ],
+  "evidence": "Original and generated roof inspected from opposite oblique views and overhead. Main terrace is approximately 52.5-53.5 m. Restore capture above 52 m; exclude isolated source mesh 97, a single tiny triangle at 76.03 m above all roof structures."
+}

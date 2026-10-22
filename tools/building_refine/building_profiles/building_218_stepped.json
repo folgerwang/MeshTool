@@ -1,0 +1,4504 @@
+{
+  "building": "building_218",
+  "source_geometry_sha256": "7e3a228fe9ef2021691e3564b45e438a514a8b37ae538f49048add269b469960",
+  "ground_z": 16.95731879499463,
+  "notes": "Measured from archived capture in a 7.468-degree facade-aligned coordinate system. Retains open central courtyard, rear setback, narrow east facade wing, skylight roof block and rooftop service volumes. Small rooftop machinery and broken scan spikes are simplified. Window bounds and mullions measured against facade captures 0,1,2,3,5. Unseen courtyard and rear-wall windows are not invented. Upper central bays stop below the roof-band seam; the photographed architectural ornament is simplified. Follow-up capture review adds 24 previously omitted openings: six ground-floor front bays, two lower side openings, seven upper courtyard windows, four tower attic windows and five roof-level service/clerestory openings. Partly damaged opening boundaries are completed locally; unseen lower courtyard rows remain blank. User-requested regularization: consistent widths, sill/lintel heights and floor/bay spacing within each capture-supported motif, keeping 102 openings and the different facade patterns. Thicker pale frames, uniform light mullions and dark blue glazing improve legibility. Pane divisions and frame thickness are designed regularizations rather than exact capture measurements. Complete reinstall of all windows and entrance doors: 104 framed/glazed windows and four paired-panel doors. The two tall portal bases now contain doors below retained arched glazing; two front entrance bays receive door leaves and transoms. Entrance locations follow the capture, while leaf divisions, transom splits and finishes are inferred. Every installed opening is checked for full geometric infill coverage.",
+  "layers": [
+    {
+      "height": 41.95,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -25.827672442876082,
+              -22.24570376912134
+            ],
+            [
+              13.616878994553291,
+              -16.16726960397746
+            ],
+            [
+              15.137605940898759,
+              -27.76801912953221
+            ],
+            [
+              22.37568043120215,
+              -26.8191894963423
+            ],
+            [
+              25.49512032114157,
+              -50.61559877953153
+            ],
+            [
+              37.195021552042945,
+              -49.08187416697798
+            ],
+            [
+              37.35099354653992,
+              -50.27169463113745
+            ],
+            [
+              25.690085314262785,
+              -52.10287435973086
+            ],
+            [
+              -21.10951960934271,
+              -58.23777280994506
+            ],
+            [
+              -25.827672442876082,
+              -22.24570376912134
+            ]
+          ],
+          [
+            [
+              10.465613326065409,
+              -36.751475313370506
+            ],
+            [
+              -3.217322011768399,
+              -38.545153250085676
+            ],
+            [
+              -2.229499379954249,
+              -46.080682856428936
+            ],
+            [
+              11.45343595787956,
+              -44.287004919713766
+            ],
+            [
+              10.465613326065409,
+              -36.751475313370506
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "height": 43.55,
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                -21.10951960934271,
+                -58.23777280994506
+              ],
+              [
+                -22.994181209514444,
+                -43.8607755346849
+              ],
+              [
+                -3.6595986669231895,
+                -41.32623062410912
+              ],
+              [
+                -2.749762032357525,
+                -48.26684999837264
+              ],
+              [
+                18.072096090433057,
+                -45.53734009467565
+              ],
+              [
+                17.799145100063356,
+                -43.45515428239659
+              ],
+              [
+                11.45343595787956,
+                -44.287004919713766
+              ],
+              [
+                10.517603990897733,
+                -37.148082134757004
+              ],
+              [
+                16.86331313308153,
+                -36.31623149743983
+              ],
+              [
+                15.732516172978489,
+                -27.690033132283723
+              ],
+              [
+                22.37568043120215,
+                -26.8191894963423
+              ],
+              [
+                24.715260348656713,
+                -44.66649645873422
+              ],
+              [
+                25.469124988725408,
+                -50.41729536883829
+              ],
+              [
+                25.49512032114157,
+                -50.61559877953153
+              ],
+              [
+                37.195021552042945,
+                -49.08187416697798
+              ],
+              [
+                37.35099354653992,
+                -50.27169463113745
+              ],
+              [
+                25.690085314262785,
+                -52.10287435973086
+              ],
+              [
+                -1.7749370667514563,
+                -55.70322789936928
+              ],
+              [
+                -21.10951960934271,
+                -58.23777280994506
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                -5.2193186118929,
+                -29.428025982514498
+              ],
+              [
+                -4.37447030836764,
+                -35.87288683004492
+              ],
+              [
+                -23.709052850958894,
+                -38.407431740620694
+              ],
+              [
+                -25.76268411183568,
+                -22.741462295854447
+              ],
+              [
+                -25.827672442876082,
+                -22.24570376912134
+              ],
+              [
+                13.616878994553291,
+                -16.16726960397746
+              ],
+              [
+                15.00762927881795,
+                -26.77650207606599
+              ],
+              [
+                -5.2193186118929,
+                -29.428025982514498
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "height": 44.45,
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                -22.99418120951445,
+                -43.8607755346849
+              ],
+              [
+                -3.6595986669231895,
+                -41.32623062410913
+              ],
+              [
+                -1.9958973922888328,
+                -54.017648908476716
+              ],
+              [
+                25.46912498872541,
+                -50.417295368838296
+              ],
+              [
+                25.49512032114157,
+                -50.61559877953153
+              ],
+              [
+                37.19502155204295,
+                -49.08187416697798
+              ],
+              [
+                37.35099354653992,
+                -50.27169463113745
+              ],
+              [
+                25.690085314262785,
+                -52.10287435973086
+              ],
+              [
+                -1.7749370667514572,
+                -55.70322789936929
+              ],
+              [
+                -21.109519609342712,
+                -58.23777280994506
+              ],
+              [
+                -22.99418120951445,
+                -43.8607755346849
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                11.45343595787956,
+                -44.287004919713766
+              ],
+              [
+                10.517603990897733,
+                -37.14808213475701
+              ],
+              [
+                17.854830186547748,
+                -36.186254835359016
+              ],
+              [
+                18.790662153529574,
+                -43.32517762031578
+              ],
+              [
+                11.45343595787956,
+                -44.287004919713766
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                -24.358936161362944,
+                -33.449846473289604
+              ],
+              [
+                -25.76268411183568,
+                -22.741462295854447
+              ],
+              [
+                -20.30934031777148,
+                -22.026590654409997
+              ],
+              [
+                -18.905592367298745,
+                -32.73497483184516
+              ],
+              [
+                -24.358936161362944,
+                -33.449846473289604
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                -12.11909777670615,
+                -26.802564598907995
+              ],
+              [
+                -18.56395862423657,
+                -27.647412902433256
+              ],
+              [
+                -19.213841934640612,
+                -22.689827635102166
+              ],
+              [
+                -12.768981087110198,
+                -21.84497933157691
+              ],
+              [
+                -12.11909777670615,
+                -26.802564598907995
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "height": 46.25,
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                25.469124988725408,
+                -50.41729536883829
+              ],
+              [
+                25.49512032114157,
+                -50.61559877953153
+              ],
+              [
+                37.195021552042945,
+                -49.08187416697798
+              ],
+              [
+                37.35099354653992,
+                -50.27169463113745
+              ],
+              [
+                25.690085314262785,
+                -52.10287435973086
+              ],
+              [
+                -1.7749370667514563,
+                -55.70322789936928
+              ],
+              [
+                -1.995897392288832,
+                -54.01764890847671
+              ],
+              [
+                25.469124988725408,
+                -50.41729536883829
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                17.854830186547748,
+                -36.186254835359016
+              ],
+              [
+                18.790662153529574,
+                -43.32517762031578
+              ],
+              [
+                11.45343595787956,
+                -44.287004919713766
+              ],
+              [
+                10.517603990897733,
+                -37.148082134757004
+              ],
+              [
+                17.854830186547748,
+                -36.186254835359016
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                -18.90559236729874,
+                -32.73497483184516
+              ],
+              [
+                -24.35893616136294,
+                -33.449846473289604
+              ],
+              [
+                -25.76268411183568,
+                -22.741462295854447
+              ],
+              [
+                -20.30934031777148,
+                -22.026590654409997
+              ],
+              [
+                -18.90559236729874,
+                -32.73497483184516
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                -12.768981087110197,
+                -21.844979331576905
+              ],
+              [
+                -12.11909777670615,
+                -26.802564598907995
+              ],
+              [
+                -18.56395862423657,
+                -27.647412902433256
+              ],
+              [
+                -19.213841934640612,
+                -22.689827635102166
+              ],
+              [
+                -12.768981087110197,
+                -21.844979331576905
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "height": 46.52,
+      "geometry": {
+        "type": "GeometryCollection",
+        "geometries": [
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  25.49512032114157,
+                  -50.61559877953153
+                ],
+                [
+                  37.195021552042945,
+                  -49.08187416697798
+                ],
+                [
+                  37.35099354653992,
+                  -50.27169463113745
+                ],
+                [
+                  25.690085314262785,
+                  -52.10287435973086
+                ],
+                [
+                  25.49512032114157,
+                  -50.61559877953153
+                ]
+              ]
+            ]
+          },
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  10.517603990897733,
+                  -37.148082134757004
+                ],
+                [
+                  17.854830186547748,
+                  -36.186254835359016
+                ],
+                [
+                  18.790662153529574,
+                  -43.32517762031578
+                ],
+                [
+                  11.45343595787956,
+                  -44.287004919713766
+                ],
+                [
+                  10.517603990897733,
+                  -37.148082134757004
+                ]
+              ]
+            ]
+          },
+          {
+            "type": "LineString",
+            "coordinates": [
+              [
+                25.49512032114157,
+                -50.61559877953153
+              ],
+              [
+                25.469124988725408,
+                -50.41729536883829
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "height": 48.55,
+      "geometry": {
+        "type": "GeometryCollection",
+        "geometries": [
+          {
+            "type": "LineString",
+            "coordinates": [
+              [
+                25.469124988725408,
+                -50.41729536883829
+              ],
+              [
+                25.49512032114157,
+                -50.61559877953153
+              ]
+            ]
+          },
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  37.35099354653992,
+                  -50.27169463113745
+                ],
+                [
+                  25.690085314262785,
+                  -52.10287435973086
+                ],
+                [
+                  25.49512032114157,
+                  -50.61559877953153
+                ],
+                [
+                  37.195021552042945,
+                  -49.08187416697798
+                ],
+                [
+                  37.35099354653992,
+                  -50.27169463113745
+                ]
+              ]
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "facades": {
+    "0": {
+      "origin": [
+        13.620000786514115,
+        -16.169999821149595,
+        16.95731878008366
+      ],
+      "u": [
+        -0.9883311136339769,
+        -0.15232074652857774,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        -0.15232074652857774,
+        0.9883311136339769,
+        0.0
+      ],
+      "size": [
+        39.91577338680198,
+        24.992681503295902
+      ],
+      "openings": [
+        {
+          "bounds": [
+            22.48,
+            14.4,
+            23.72,
+            16.3
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            25.6175,
+            14.4,
+            26.8575,
+            16.3
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            28.755,
+            14.4,
+            29.995,
+            16.3
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            31.8925,
+            14.4,
+            33.1325,
+            16.3
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            35.03,
+            14.4,
+            36.27,
+            16.3
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            22.48,
+            18.05,
+            23.72,
+            19.95
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            25.6175,
+            18.05,
+            26.8575,
+            19.95
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            28.755,
+            18.05,
+            29.995,
+            19.95
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            31.8925,
+            18.05,
+            33.1325,
+            19.95
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            35.03,
+            18.05,
+            36.27,
+            19.95
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            1.68,
+            21.7,
+            2.92,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            4.88,
+            21.7,
+            6.12,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            8.08,
+            21.7,
+            9.32,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            11.28,
+            21.7,
+            12.52,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            14.48,
+            21.7,
+            15.72,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            17.68,
+            21.7,
+            18.92,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_upper_six",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            22.48,
+            21.7,
+            23.72,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            25.6175,
+            21.7,
+            26.8575,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            28.755,
+            21.7,
+            29.995,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            31.8925,
+            21.7,
+            33.1325,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            35.03,
+            21.7,
+            36.27,
+            23.6
+          ],
+          "shape": "rectangular",
+          "layout_group": "rear_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        }
+      ],
+      "capture_png_sha256": "6276e54ee9a6b48ef71f590fe80bbe27cb957a998467d60c54c0618387c5dc50",
+      "capture_lower_region_mean_absolute_rgb_error": 1.518448919697318
+    },
+    "1": {
+      "origin": [
+        -25.829999976425345,
+        -22.250000221692805,
+        16.95731878008366
+      ],
+      "u": [
+        0.1300340173225202,
+        -0.9915095331558677,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        -0.9915095331558677,
+        -0.1300340173225202,
+        0.0
+      ],
+      "size": [
+        36.298188816604764,
+        24.992681503295902
+      ],
+      "openings": [
+        {
+          "bounds": [
+            20.85,
+            4.075,
+            21.65,
+            5.375
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "side_lower_pair",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            23.05,
+            4.075,
+            23.85,
+            5.375
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "side_lower_pair",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            24.18,
+            7.15,
+            25.42,
+            9.05
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            27.455,
+            7.15,
+            28.695,
+            9.05
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            30.73,
+            7.15,
+            31.97,
+            9.05
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            21.0,
+            7.25,
+            22.1,
+            8.95
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            15.8,
+            10.8,
+            16.9,
+            12.7
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_offset_service",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            24.18,
+            10.8,
+            25.42,
+            12.7
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            27.455,
+            10.8,
+            28.695,
+            12.7
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            30.73,
+            10.8,
+            31.97,
+            12.7
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            16.45,
+            14.45,
+            18.5,
+            16.35
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_wide_stack",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            24.18,
+            14.45,
+            25.42,
+            16.35
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            27.455,
+            14.45,
+            28.695,
+            16.35
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            30.73,
+            14.45,
+            31.97,
+            16.35
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            16.45,
+            18.1,
+            18.5,
+            20.0
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_wide_stack",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            24.18,
+            18.1,
+            25.42,
+            20.0
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            27.455,
+            18.1,
+            28.695,
+            20.0
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            30.73,
+            18.1,
+            31.97,
+            20.0
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_three_by_four",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            16.45,
+            21.75,
+            18.5,
+            23.65
+          ],
+          "shape": "rectangular",
+          "layout_group": "side_wide_stack",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        }
+      ],
+      "capture_png_sha256": "b336d1276f9b34713d44df0fb376488ba759943fa99920ca613534f3015c5a38",
+      "capture_lower_region_mean_absolute_rgb_error": 0.015346284393731494
+    },
+    "2": {
+      "origin": [
+        -21.110000663070853,
+        -58.24000046964813,
+        16.957318780083654
+      ],
+      "u": [
+        0.9915032572841622,
+        0.13008186189817736,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "normal": [
+        0.13008186189817736,
+        -0.9915032572841622,
+        0.0
+      ],
+      "size": [
+        47.20105637635483,
+        24.9926815032959
+      ],
+      "openings": [
+        {
+          "kind": "door_candidate",
+          "shape": "rectangular",
+          "bounds": [
+            3.15,
+            0.04,
+            5.75,
+            2.85
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.25,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.75,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Reviewed ground-level captured entrance, filled with complete paired door leaves. Panel divisions are inferred."
+        },
+        {
+          "kind": "door_candidate",
+          "shape": "rectangular",
+          "bounds": [
+            32.0,
+            0.04,
+            34.8,
+            2.85
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.25,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.75,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Reviewed ground-level captured entrance, filled with complete paired door leaves. Panel divisions are inferred."
+        },
+        {
+          "bounds": [
+            0.65,
+            0.3,
+            2.85,
+            2.5
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_four"
+        },
+        {
+          "bounds": [
+            6.45,
+            0.3,
+            8.65,
+            2.5
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_four"
+        },
+        {
+          "bounds": [
+            12.25,
+            0.3,
+            14.45,
+            2.5
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_four"
+        },
+        {
+          "bounds": [
+            18.05,
+            0.3,
+            20.25,
+            2.5
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_four"
+        },
+        {
+          "bounds": [
+            23.3,
+            0.55,
+            24.9,
+            1.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [],
+          "layout_group": "front_basement_pair"
+        },
+        {
+          "bounds": [
+            41.9,
+            0.55,
+            43.5,
+            1.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [],
+          "layout_group": "front_basement_pair"
+        },
+        {
+          "kind": "window",
+          "shape": "rectangular",
+          "bounds": [
+            3.15,
+            3.05,
+            5.75,
+            4.45
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Glazed transom above the reviewed entrance; split between leaves and glazing is inferred."
+        },
+        {
+          "kind": "window",
+          "shape": "arched",
+          "bounds": [
+            32.0,
+            3.05,
+            34.8,
+            5.25
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Glazed transom above the reviewed entrance; split between leaves and glazing is inferred."
+        },
+        {
+          "bounds": [
+            23.05,
+            3.1,
+            25.15,
+            5.2
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_pair",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            41.65,
+            3.1,
+            43.75,
+            5.2
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_lower_pair",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            2.0,
+            6.8,
+            6.9,
+            9.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            8.025,
+            6.8,
+            12.925,
+            9.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            14.05,
+            6.8,
+            18.95,
+            9.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            23.05,
+            7.1,
+            25.15,
+            8.45
+          ],
+          "shape": "rectangular",
+          "layout_group": "front_middle_pair",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            41.65,
+            7.1,
+            43.75,
+            8.45
+          ],
+          "shape": "rectangular",
+          "layout_group": "front_middle_pair",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            2.0,
+            10.45,
+            6.9,
+            13.35
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            8.025,
+            10.45,
+            12.925,
+            13.35
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            14.05,
+            10.45,
+            18.95,
+            13.35
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            22.9,
+            11.5,
+            25.3,
+            14.5
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            27.55,
+            11.5,
+            29.95,
+            14.5
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            32.2,
+            11.5,
+            34.6,
+            14.5
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            36.85,
+            11.5,
+            39.25,
+            14.5
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            41.5,
+            11.5,
+            43.9,
+            14.5
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            2.0,
+            14.1,
+            6.9,
+            17.0
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            8.025,
+            14.1,
+            12.925,
+            17.0
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            14.05,
+            14.1,
+            18.95,
+            17.0
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            22.9,
+            16.6,
+            25.3,
+            19.6
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            27.55,
+            16.6,
+            29.95,
+            19.6
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            32.2,
+            16.6,
+            34.6,
+            19.6
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            36.85,
+            16.6,
+            39.25,
+            19.6
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            41.5,
+            16.6,
+            43.9,
+            19.6
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            2.0,
+            17.75,
+            6.9,
+            20.65
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            8.025,
+            17.75,
+            12.925,
+            20.65
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            14.05,
+            17.75,
+            18.95,
+            20.65
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            2.0,
+            21.4,
+            6.9,
+            24.3
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            8.025,
+            21.4,
+            12.925,
+            24.3
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            14.05,
+            21.4,
+            18.95,
+            24.3
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.25,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.75,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.14,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.14,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_three_by_five",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            22.9,
+            21.7,
+            25.3,
+            24.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            27.55,
+            21.7,
+            29.95,
+            24.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            32.2,
+            21.7,
+            34.6,
+            24.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            36.85,
+            21.7,
+            39.25,
+            24.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        },
+        {
+          "bounds": [
+            41.5,
+            21.7,
+            43.9,
+            24.7
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "front_five_by_three",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds."
+        }
+      ],
+      "capture_png_sha256": "e5770ec7f709d7e5c5b8069c385b0d23da2845f7788fede35f0a30cd1e69ebd5",
+      "capture_lower_region_mean_absolute_rgb_error": 0.03152385971725241
+    },
+    "3": {
+      "origin": [
+        25.69000048133833,
+        -52.09999917265106,
+        16.957318780083654
+      ],
+      "u": [
+        0.9879068068719797,
+        0.15504883403627698,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "normal": [
+        0.15504883403627698,
+        -0.9879068068719797,
+        0.0
+      ],
+      "size": [
+        11.80273257184177,
+        24.9926815032959
+      ],
+      "openings": [
+        {
+          "kind": "door_candidate",
+          "shape": "rectangular",
+          "bounds": [
+            3.0500000000000003,
+            0.04,
+            7.35,
+            2.85
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.25,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.75,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Reviewed ground-level captured entrance, filled with complete paired door leaves. Panel divisions are inferred."
+        },
+        {
+          "bounds": [
+            3.0500000000000003,
+            3.05,
+            7.35,
+            10.2
+          ],
+          "shape": "arched",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.3333333333333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.6666666666666666,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.3333333333333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.6666666666666666,
+              "width_m": 0.13,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Retained upper arched portal glazing above newly installed paired entrance doors."
+        },
+        {
+          "bounds": [
+            3.7,
+            13.6,
+            6.7,
+            16.05
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            3.8000000000000003,
+            18.0,
+            6.6,
+            23.85
+          ],
+          "shape": "arched",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.13,
+              "support": 1.0
+            }
+          ]
+        }
+      ],
+      "capture_png_sha256": "c4d8b07e2244892d238673f72a1f423e31e3209b0490074d2406bc1c1cc69d9f",
+      "capture_lower_region_mean_absolute_rgb_error": 0.04501550731058928
+    },
+    "5": {
+      "origin": [
+        37.19999880287154,
+        -49.08000062223602,
+        16.957318780083654
+      ],
+      "u": [
+        -0.9914485325484709,
+        -0.13049830384906855,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "normal": [
+        -0.13049830384906855,
+        0.9914485325484709,
+        0.0
+      ],
+      "size": [
+        11.800912063652873,
+        24.9926815032959
+      ],
+      "openings": [
+        {
+          "kind": "door_candidate",
+          "shape": "rectangular",
+          "bounds": [
+            4.4,
+            0.04,
+            8.7,
+            2.85
+          ],
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.25,
+              "width_m": 0.12,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.75,
+              "width_m": 0.12,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Reviewed ground-level captured entrance, filled with complete paired door leaves. Panel divisions are inferred."
+        },
+        {
+          "bounds": [
+            4.4,
+            3.05,
+            8.7,
+            10.2
+          ],
+          "shape": "arched",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.3333333333333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.6666666666666666,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.3333333333333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.6666666666666666,
+              "width_m": 0.13,
+              "support": 1.0
+            }
+          ],
+          "evidence": "Retained upper arched portal glazing above newly installed paired entrance doors."
+        },
+        {
+          "bounds": [
+            5.05,
+            13.6,
+            8.05,
+            16.05
+          ],
+          "shape": "rectangular",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.11,
+              "support": 1.0
+            }
+          ]
+        },
+        {
+          "bounds": [
+            5.15,
+            18.0,
+            7.949999999999999,
+            23.85
+          ],
+          "shape": "arched",
+          "measured_members": [
+            {
+              "axis": "x",
+              "position": 0.333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "x",
+              "position": 0.666667,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.333333,
+              "width_m": 0.13,
+              "support": 1.0
+            },
+            {
+              "axis": "y",
+              "position": 0.666667,
+              "width_m": 0.13,
+              "support": 1.0
+            }
+          ]
+        }
+      ],
+      "capture_png_sha256": "3c2656e790a0f4410a2a16bc120ee917f8024e7c4cbbf1d2edcf22776f200436",
+      "capture_lower_region_mean_absolute_rgb_error": 0.04755575247378526
+    },
+    "10": {
+      "origin": [
+        -3.2199993660737816,
+        -38.54999993559051,
+        16.95731878008366
+      ],
+      "u": [
+        0.9914666172738265,
+        0.13036083319615588,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        0.13036083319615588,
+        -0.9914666172738265,
+        0.0
+      ],
+      "size": [
+        13.807826091363033,
+        24.992681503295902
+      ],
+      "openings": [
+        {
+          "bounds": [
+            2.05,
+            21.55,
+            3.05,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_10"
+        },
+        {
+          "bounds": [
+            3.97,
+            21.55,
+            4.97,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_10"
+        },
+        {
+          "bounds": [
+            7.81,
+            21.55,
+            8.81,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_10"
+        },
+        {
+          "bounds": [
+            11.65,
+            21.55,
+            12.65,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_10"
+        }
+      ],
+      "capture_png_sha256": "f67a44cfcc11e615d16a958bc5ff7de9d4e6949908d3778ea90df2770ab63d74"
+    },
+    "12": {
+      "origin": [
+        11.449998802871535,
+        -44.28999970670867,
+        16.95731878008366
+      ],
+      "u": [
+        -0.9915477788032796,
+        -0.1297420608371959,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        -0.1297420608371959,
+        0.9915477788032796,
+        0.0
+      ],
+      "size": [
+        13.796612324306217,
+        24.992681503295902
+      ],
+      "openings": [
+        {
+          "bounds": [
+            1.82,
+            21.55,
+            2.82,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_12"
+        },
+        {
+          "bounds": [
+            5.94,
+            21.55,
+            6.94,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_12"
+        },
+        {
+          "bounds": [
+            8.0,
+            21.55,
+            9.0,
+            23.65
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "measured_members": [
+            {
+              "axis": "y",
+              "position": 0.5,
+              "width_m": 0.1,
+              "support": 1.0
+            }
+          ],
+          "layout_group": "courtyard_12"
+        }
+      ],
+      "capture_png_sha256": "fab2d5465f1bba20c395cdeb1e0ac019cd0705fc8ca702910de81f6dd18be8b9"
+    },
+    "38": {
+      "origin": [
+        37.19999880287154,
+        -49.08000062223602,
+        44.45000028337955
+      ],
+      "u": [
+        -0.9914485325484709,
+        -0.13049830384906855,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "normal": [
+        -0.13049830384906855,
+        0.9914485325484709,
+        0.0
+      ],
+      "size": [
+        11.800912063652873,
+        1.8000001907348633
+      ],
+      "openings": [
+        {
+          "bounds": [
+            3.07,
+            0.14,
+            3.87,
+            1.32
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "tower_attic_38",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            6.15,
+            0.14,
+            6.95,
+            1.32
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "tower_attic_38",
+          "measured_members": []
+        }
+      ],
+      "capture_png_sha256": "eebf27277802e75ab5f83972071740b98c01f71278192c5efa9f0fb4b607a473"
+    },
+    "42": {
+      "origin": [
+        25.69000048133833,
+        -52.09999917265106,
+        44.45000028337955
+      ],
+      "u": [
+        0.9879068068719797,
+        0.15504883403627698,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "normal": [
+        0.15504883403627698,
+        -0.9879068068719797,
+        0.0
+      ],
+      "size": [
+        11.80273257184177,
+        1.8000001907348633
+      ],
+      "openings": [
+        {
+          "bounds": [
+            4.73,
+            0.14,
+            5.53,
+            1.32
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "tower_attic_42",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            7.85,
+            0.14,
+            8.65,
+            1.32
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "tower_attic_42",
+          "measured_members": []
+        }
+      ],
+      "capture_png_sha256": "c24e2e001009d0d83a244d3063bce899c831be1451b6806c20bb50b830699477"
+    },
+    "33": {
+      "origin": [
+        -5.21999936607378,
+        -29.429999990426786,
+        41.950000283379566
+      ],
+      "u": [
+        0.9915292014589634,
+        0.12988395841731382,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        0.12988395841731382,
+        -0.9915292014589634,
+        0.0
+      ],
+      "size": [
+        20.402827786079676,
+        1.5999994277954102
+      ],
+      "openings": [
+        {
+          "bounds": [
+            4.775,
+            0.4,
+            5.425,
+            1.35
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "roof_clerestory",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            18.225,
+            0.4,
+            18.875,
+            1.35
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "roof_clerestory",
+          "measured_members": []
+        }
+      ],
+      "capture_png_sha256": "363abb0c3612c47da8fce86483e86cf7e3fed70aa7902aea5564d1fffb4d1360"
+    },
+    "44": {
+      "origin": [
+        11.449998802871534,
+        -44.28999970670868,
+        44.450000283379566
+      ],
+      "u": [
+        0.9915551531770875,
+        0.12968569006626232,
+        0.0
+      ],
+      "v": [
+        -0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        0.12968569006626232,
+        -0.9915551531770875,
+        0.0
+      ],
+      "size": [
+        7.402513243029859,
+        1.8000001907348633
+      ],
+      "openings": [
+        {
+          "bounds": [
+            2.095,
+            0.155,
+            2.745,
+            1.405
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "roof_service_44",
+          "measured_members": []
+        },
+        {
+          "bounds": [
+            5.425,
+            0.155,
+            6.075,
+            1.405
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "roof_service_44",
+          "measured_members": []
+        }
+      ],
+      "capture_png_sha256": "b135dd7b3ef008f41f38661914b5a2c91b71bc239cabf5a4b4cc011fad2b90af"
+    },
+    "46": {
+      "origin": [
+        16.859998650283643,
+        -36.31999991651702,
+        44.450000283379566
+      ],
+      "u": [
+        -0.9915392539757396,
+        -0.12980719481305303,
+        0.0
+      ],
+      "v": [
+        0.0,
+        0.0,
+        1.0000000000000002
+      ],
+      "normal": [
+        -0.12980719481305303,
+        0.9915392539757396,
+        0.0
+      ],
+      "size": [
+        6.392125362134882,
+        1.8000001907348633
+      ],
+      "openings": [
+        {
+          "bounds": [
+            0.435,
+            0.155,
+            1.085,
+            1.405
+          ],
+          "shape": "rectangular",
+          "evidence": "Regularized within the capture-supported facade motif; spacing and matching sizes intentionally replace scan-warped individual bounds.",
+          "layout_group": "roof_service_46",
+          "measured_members": []
+        }
+      ],
+      "capture_png_sha256": "66bd9463773a469ffa8fa6a1f45873e594e7d89a3356355b18cc522b4084293a"
+    }
+  },
+  "captured_wall_material": false,
+  "facade_details": true,
+  "window_style": {
+    "frame_width_m": 0.16,
+    "frame_rgb": [
+      210,
+      204,
+      190
+    ],
+    "mullion_rgb": [
+      196,
+      192,
+      180
+    ],
+    "glazing_rgb": [
+      27,
+      54,
+      72
+    ],
+    "reveal_rgb": [
+      42,
+      47,
+      50
+    ],
+    "door_leaf_rgb": [
+      86,
+      63,
+      43
+    ]
+  },
+  "layout_regularization": {
+    "groups": {
+      "rear_upper_six": {
+        "count": 6,
+        "bounds": [
+          [
+            1.68,
+            21.7,
+            2.92,
+            23.6
+          ],
+          [
+            4.88,
+            21.7,
+            6.12,
+            23.6
+          ],
+          [
+            8.08,
+            21.7,
+            9.32,
+            23.6
+          ],
+          [
+            11.28,
+            21.7,
+            12.52,
+            23.6
+          ],
+          [
+            14.48,
+            21.7,
+            15.72,
+            23.6
+          ],
+          [
+            17.68,
+            21.7,
+            18.92,
+            23.6
+          ]
+        ]
+      },
+      "rear_five_by_three": {
+        "count": 15,
+        "bounds": [
+          [
+            22.48,
+            14.4,
+            23.72,
+            16.3
+          ],
+          [
+            22.48,
+            18.05,
+            23.72,
+            19.95
+          ],
+          [
+            22.48,
+            21.7,
+            23.72,
+            23.6
+          ],
+          [
+            25.6175,
+            14.4,
+            26.8575,
+            16.3
+          ],
+          [
+            25.6175,
+            18.05,
+            26.8575,
+            19.95
+          ],
+          [
+            25.6175,
+            21.7,
+            26.8575,
+            23.6
+          ],
+          [
+            28.755,
+            14.4,
+            29.995,
+            16.3
+          ],
+          [
+            28.755,
+            18.05,
+            29.995,
+            19.95
+          ],
+          [
+            28.755,
+            21.7,
+            29.995,
+            23.6
+          ],
+          [
+            31.8925,
+            14.4,
+            33.1325,
+            16.3
+          ],
+          [
+            31.8925,
+            18.05,
+            33.1325,
+            19.95
+          ],
+          [
+            31.8925,
+            21.7,
+            33.1325,
+            23.6
+          ],
+          [
+            35.03,
+            14.4,
+            36.27,
+            16.3
+          ],
+          [
+            35.03,
+            18.05,
+            36.27,
+            19.95
+          ],
+          [
+            35.03,
+            21.7,
+            36.27,
+            23.6
+          ]
+        ]
+      },
+      "side_wide_stack": {
+        "count": 3,
+        "bounds": [
+          [
+            16.45,
+            14.45,
+            18.5,
+            16.35
+          ],
+          [
+            16.45,
+            18.1,
+            18.5,
+            20.0
+          ],
+          [
+            16.45,
+            21.75,
+            18.5,
+            23.65
+          ]
+        ]
+      },
+      "side_offset_service": {
+        "count": 1,
+        "bounds": [
+          [
+            15.8,
+            10.8,
+            16.9,
+            12.7
+          ]
+        ]
+      },
+      "side_three_by_four": {
+        "count": 12,
+        "bounds": [
+          [
+            24.18,
+            7.15,
+            25.42,
+            9.05
+          ],
+          [
+            24.18,
+            10.8,
+            25.42,
+            12.7
+          ],
+          [
+            24.18,
+            14.45,
+            25.42,
+            16.35
+          ],
+          [
+            24.18,
+            18.1,
+            25.42,
+            20.0
+          ],
+          [
+            27.455,
+            7.15,
+            28.695,
+            9.05
+          ],
+          [
+            27.455,
+            10.8,
+            28.695,
+            12.7
+          ],
+          [
+            27.455,
+            14.45,
+            28.695,
+            16.35
+          ],
+          [
+            27.455,
+            18.1,
+            28.695,
+            20.0
+          ],
+          [
+            30.73,
+            7.15,
+            31.97,
+            9.05
+          ],
+          [
+            30.73,
+            10.8,
+            31.97,
+            12.7
+          ],
+          [
+            30.73,
+            14.45,
+            31.97,
+            16.35
+          ],
+          [
+            30.73,
+            18.1,
+            31.97,
+            20.0
+          ]
+        ]
+      },
+      "side_lower_pair": {
+        "count": 2,
+        "bounds": [
+          [
+            20.85,
+            4.075,
+            21.65,
+            5.375
+          ],
+          [
+            23.05,
+            4.075,
+            23.85,
+            5.375
+          ]
+        ]
+      },
+      "front_three_by_five": {
+        "count": 15,
+        "bounds": [
+          [
+            2.0,
+            6.8,
+            6.9,
+            9.7
+          ],
+          [
+            2.0,
+            10.45,
+            6.9,
+            13.35
+          ],
+          [
+            2.0,
+            14.1,
+            6.9,
+            17.0
+          ],
+          [
+            2.0,
+            17.75,
+            6.9,
+            20.65
+          ],
+          [
+            2.0,
+            21.4,
+            6.9,
+            24.3
+          ],
+          [
+            8.025,
+            6.8,
+            12.925,
+            9.7
+          ],
+          [
+            8.025,
+            10.45,
+            12.925,
+            13.35
+          ],
+          [
+            8.025,
+            14.1,
+            12.925,
+            17.0
+          ],
+          [
+            8.025,
+            17.75,
+            12.925,
+            20.65
+          ],
+          [
+            8.025,
+            21.4,
+            12.925,
+            24.3
+          ],
+          [
+            14.05,
+            6.8,
+            18.95,
+            9.7
+          ],
+          [
+            14.05,
+            10.45,
+            18.95,
+            13.35
+          ],
+          [
+            14.05,
+            14.1,
+            18.95,
+            17.0
+          ],
+          [
+            14.05,
+            17.75,
+            18.95,
+            20.65
+          ],
+          [
+            14.05,
+            21.4,
+            18.95,
+            24.3
+          ]
+        ]
+      },
+      "front_five_by_three": {
+        "count": 15,
+        "bounds": [
+          [
+            22.9,
+            11.5,
+            25.3,
+            14.5
+          ],
+          [
+            22.9,
+            16.6,
+            25.3,
+            19.6
+          ],
+          [
+            22.9,
+            21.7,
+            25.3,
+            24.7
+          ],
+          [
+            27.55,
+            11.5,
+            29.95,
+            14.5
+          ],
+          [
+            27.55,
+            16.6,
+            29.95,
+            19.6
+          ],
+          [
+            27.55,
+            21.7,
+            29.95,
+            24.7
+          ],
+          [
+            32.2,
+            11.5,
+            34.6,
+            14.5
+          ],
+          [
+            32.2,
+            16.6,
+            34.6,
+            19.6
+          ],
+          [
+            32.2,
+            21.7,
+            34.6,
+            24.7
+          ],
+          [
+            36.85,
+            11.5,
+            39.25,
+            14.5
+          ],
+          [
+            36.85,
+            16.6,
+            39.25,
+            19.6
+          ],
+          [
+            36.85,
+            21.7,
+            39.25,
+            24.7
+          ],
+          [
+            41.5,
+            11.5,
+            43.9,
+            14.5
+          ],
+          [
+            41.5,
+            16.6,
+            43.9,
+            19.6
+          ],
+          [
+            41.5,
+            21.7,
+            43.9,
+            24.7
+          ]
+        ]
+      },
+      "front_lower_pair": {
+        "count": 2,
+        "bounds": [
+          [
+            23.05,
+            3.1,
+            25.15,
+            5.2
+          ],
+          [
+            41.65,
+            3.1,
+            43.75,
+            5.2
+          ]
+        ]
+      },
+      "front_middle_pair": {
+        "count": 2,
+        "bounds": [
+          [
+            23.05,
+            7.1,
+            25.15,
+            8.45
+          ],
+          [
+            41.65,
+            7.1,
+            43.75,
+            8.45
+          ]
+        ]
+      },
+      "front_lower_four": {
+        "count": 4,
+        "bounds": [
+          [
+            0.65,
+            0.3,
+            2.85,
+            2.5
+          ],
+          [
+            6.45,
+            0.3,
+            8.65,
+            2.5
+          ],
+          [
+            12.25,
+            0.3,
+            14.45,
+            2.5
+          ],
+          [
+            18.05,
+            0.3,
+            20.25,
+            2.5
+          ]
+        ]
+      },
+      "front_basement_pair": {
+        "count": 2,
+        "bounds": [
+          [
+            23.3,
+            0.55,
+            24.9,
+            1.65
+          ],
+          [
+            41.9,
+            0.55,
+            43.5,
+            1.65
+          ]
+        ]
+      },
+      "courtyard_10": {
+        "count": 4,
+        "bounds": [
+          [
+            2.05,
+            21.55,
+            3.05,
+            23.65
+          ],
+          [
+            3.97,
+            21.55,
+            4.97,
+            23.65
+          ],
+          [
+            7.81,
+            21.55,
+            8.81,
+            23.65
+          ],
+          [
+            11.65,
+            21.55,
+            12.65,
+            23.65
+          ]
+        ]
+      },
+      "courtyard_12": {
+        "count": 3,
+        "bounds": [
+          [
+            1.82,
+            21.55,
+            2.82,
+            23.65
+          ],
+          [
+            5.94,
+            21.55,
+            6.94,
+            23.65
+          ],
+          [
+            8.0,
+            21.55,
+            9.0,
+            23.65
+          ]
+        ]
+      },
+      "tower_attic_38": {
+        "count": 2,
+        "bounds": [
+          [
+            3.07,
+            0.14,
+            3.87,
+            1.32
+          ],
+          [
+            6.15,
+            0.14,
+            6.95,
+            1.32
+          ]
+        ]
+      },
+      "tower_attic_42": {
+        "count": 2,
+        "bounds": [
+          [
+            4.73,
+            0.14,
+            5.53,
+            1.32
+          ],
+          [
+            7.85,
+            0.14,
+            8.65,
+            1.32
+          ]
+        ]
+      },
+      "roof_clerestory": {
+        "count": 2,
+        "bounds": [
+          [
+            4.775,
+            0.4,
+            5.425,
+            1.35
+          ],
+          [
+            18.225,
+            0.4,
+            18.875,
+            1.35
+          ]
+        ]
+      },
+      "roof_service_44": {
+        "count": 2,
+        "bounds": [
+          [
+            2.095,
+            0.155,
+            2.745,
+            1.405
+          ],
+          [
+            5.425,
+            0.155,
+            6.075,
+            1.405
+          ]
+        ]
+      },
+      "roof_service_46": {
+        "count": 1,
+        "bounds": [
+          [
+            0.435,
+            0.155,
+            1.085,
+            1.405
+          ]
+        ]
+      }
+    },
+    "max_edge_shift_m": 0.8700000000000001,
+    "changed_openings": 95
+  }
+}

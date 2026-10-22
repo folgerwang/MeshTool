@@ -10,6 +10,32 @@ from building_rules import outline
 from solid_city import audit_shell
 
 
+def filled_openings(group,catalog):
+    """Check installed frame and infill triangles, rather than prototype presence."""
+    parts=[group.meshes[r['local_mesh_index']] for r in catalog['semantic_meshes'] if r['part'] in ('frame','glazing','door_leaf')]
+    triangles=[(m.vertices[ix].astype(float)+m.translation).reshape(-1,3,3) for m in parts for prim,ix in m.draw_calls if prim==4]
+    triangles=np.concatenate(triangles) if triangles else np.empty((0,3,3))
+    surfaces={};prototypes={p['id']:p for p in catalog['prototypes']}
+    for face in catalog['faces']:
+        rel=triangles-np.array(face['origin']);depth=rel@np.array(face['normal'])
+        # Frames and glazing lie on parallel planes just behind this facade.
+        # Exclude the opposite side of a narrow wing and perpendicular reveals.
+        hit=(np.ptp(depth,axis=1)<1e-4)&(depth.min(axis=1)>-.5)&(depth.max(axis=1)<.01)
+        xy=np.stack([rel[hit]@np.array(face['u']),rel[hit]@np.array(face['v'])],axis=-1)
+        polys=[Polygon(t) for t in xy if Polygon(t).area>1e-10]
+        surfaces[face['face_id']]=(polys,shapely.STRtree(polys))
+    worst=0.;count=0
+    for instance in catalog['instances']:
+        if instance.get('kind') not in ('window','door_candidate'):continue
+        x,y,X,Y=instance['bounds'];prototype=prototypes[instance['prototype']]
+        target=translate(outline(X-x,Y-y,prototype['shape']),x,y).buffer(-.002)
+        polys,tree=surfaces[instance['face_id']];indices=tree.query(target,predicate='intersects')
+        covered=shapely.union_all([polys[i] for i in indices])
+        missing=target.difference(covered).area;worst=max(worst,missing);count+=1
+        if missing>.001:raise ValueError(f'Unfilled opening on facade {instance["face_id"]}: {missing:.6f} m2')
+    return dict(filled_openings_checked=count,max_unfilled_opening_m2=float(worst))
+
+
 def openings(group,catalog):
     walls=[group.meshes[r['local_mesh_index']] for r in catalog['semantic_meshes'] if r['part']=='wall']
     parts=[m.vertices[i].astype(float)+m.translation for m in walls for primitive,i in m.draw_calls if primitive==4]
@@ -30,9 +56,10 @@ def openings(group,catalog):
         required=('frame','reveal','door_leaf') if instance['kind']=='door_candidate' else ('frame','reveal','glazing')
         if not all(prototype['geometry'].get(k) for k in required):
             raise ValueError('Incomplete opening assembly')
+    fill=filled_openings(group,catalog)
     audit=audit_shell(group.meshes)
     if any(audit.values()):raise ValueError(f'Open building envelope: {audit}')
-    return dict(openings_checked=count,max_wall_overlap_m2=worst,audit=audit)
+    return dict(openings_checked=count,max_wall_overlap_m2=worst,audit=audit,**fill)
 
 
 def run(folders,output):

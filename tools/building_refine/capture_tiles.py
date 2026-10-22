@@ -232,8 +232,16 @@ def capture_faces(mesh):
         yield face,np.concatenate(indices)
 
 
-def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,capture_wall=False,opening_overrides=None,support_levels=None,preserve_roofs=False,write_previews=True):
+def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,capture_wall=False,opening_overrides=None,support_levels=None,preserve_roofs=False,write_previews=True,window_style=None):
     """support_levels maps face IDs to measured patio/landing world-Z levels."""
+    window_style=copy.deepcopy(window_style or {})
+    allowed={'frame_width_m','frame_rgb','mullion_rgb','glazing_rgb','reveal_rgb','door_leaf_rgb'}
+    if set(window_style)-allowed:raise ValueError('Unknown window style setting')
+    for key,value in window_style.items():
+        if key=='frame_width_m':
+            if not isinstance(value,(int,float)) or not np.isfinite(value) or not 0<value<=.4:raise ValueError('Invalid window frame width')
+        elif not isinstance(value,(list,tuple)) or len(value)!=3 or any(not isinstance(v,int) or not 0<=v<=255 for v in value):
+            raise ValueError('Invalid window style RGB')
     library=[];instances=[];reports=[];parts=defaultdict(list);untouched=[];decoded={};style_keys={};preserved=defaultdict(list);native_parts=[]
     # One translation for all new parts avoids independent float32 seam rounding.
     center=own[0].translation.copy()
@@ -249,7 +257,7 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
             if semantic=='wall' and face_finish_texture is not None:
                 texture=face_finish_texture;uv=np.c_[local[:,0]/finish_size[0],1-local[:,1]/finish_size[1]]
             if capture_wall and semantic=='wall':uv=np.c_[local[:,0]/wall_size[0],1-local[:,1]/wall_size[1]]
-            if capture_wall and semantic=='glazing' and face_glass_texture is not None:
+            if capture_wall and semantic=='glazing' and face_glass_texture is not None and 'glazing_rgb' not in window_style:
                 texture=face_glass_texture;uv=np.c_[local[:,0]/wall_size[0],1-local[:,1]/wall_size[1]]
         parts[texture,semantic].append((world,uv))
     material_cache={}
@@ -356,7 +364,8 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                 x0,y0,x1,y1=item['pixel_rect'];item['observed_fraction']=float(known[y0:y1,x0:x1].mean())
                 item['confidence']*=.5+.5*item['observed_fraction']
             # Never turn hallucinated ground-floor imagery into a door instance.
-            openings=[o for o in openings if o['kind']!='door_candidate' or o['observed_fraction']>=RULES['doors']['min_observed_fraction']]
+            openings=[o for o in openings if o['kind']!='door_candidate' or o['observed_fraction']>=RULES['doors']['min_observed_fraction']
+                or (o.get('recovery')=='reviewed_door_capture' and 'support_level_z' in o)]
             xy=(face.tris.reshape(-1,3)-face.origin)@np.stack([face.u,face.v],axis=1)
             boundary=unary_union([Polygon(t) for t in xy.reshape(-1,3,2)])
             openings=[o for o in openings if boundary.buffer(-.025).covers(box(*o['bounds']))]
@@ -475,20 +484,24 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                 from window_detail import measure, geometry
                 curtain_part=item.get('recovery') in ('captured_curtain_bay','captured_glazed_band')
                 members=measure(crop,w,h,both_polarities=RULES['window_members']['detect_dark_members']) if item['kind']!='door_candidate' and item.get('recovery')!='captured_curtain_bay' else []
+                if 'measured_members' in item:members=copy.deepcopy(item['measured_members'])
                 if item.get('recovery')=='captured_storefront':
                     from storefront import measure_members
                     members=item.get('measured_members',measure_members(crop,w,h))
                 detail_key=tuple((m['axis'],round(m['position'],2),round(m['width_m'],2)) for m in members)
-                key=(item['kind'],item['shape'],round(w/.25),round(h/.25),*(np.round(color/40).astype(int)),detail_key,curtain_part,item.get('surface_mode'))
+                frame_width=RULES['curtain_wall']['frame_width_m'] if curtain_part else None
+                if item['kind'] in ('window','door_candidate'):frame_width=window_style.get('frame_width_m',frame_width)
+                key=(item['kind'],item['shape'],round(w/.25),round(h/.25),*(np.round(color/40).astype(int)),detail_key,curtain_part,item.get('surface_mode'),frame_width)
                 if key not in style_keys:
-                    template=opening_template(w,h,item['kind'],item['shape'],RULES['curtain_wall']['frame_width_m'] if curtain_part else None,item.get('surface_mode'));pid=f'{item["kind"]}_{len(style_keys):03d}'
-                    bars=geometry(w,h,item['shape'],members,RULES['windows']['flush_recess_m'] if item.get('surface_mode')=='flush' else RULES['windows']['recess_m'])
+                    template=opening_template(w,h,item['kind'],item['shape'],frame_width,item.get('surface_mode'));pid=f'{item["kind"]}_{len(style_keys):03d}'
+                    depth=RULES['doors']['recess_m'] if item['kind']=='door_candidate' else (RULES['windows']['flush_recess_m'] if item.get('surface_mode')=='flush' else RULES['windows']['recess_m'])
+                    bars=geometry(w,h,item['shape'],members,depth)
                     if len(bars):template['mullion']=bars
                     style_keys[key]=(pid,template)
                     save_preview(directory/(pid+'.png'),crop)
                     library.append(dict(id=pid,kind=item['kind'],shape=item['shape'],reference_size_m=[w,h],captured_members=members,geometry={k:v.tolist() for k,v in template.items()},preview=pid+'.png' if write_previews else None,depth_inferred=True))
                 pid,template=style_keys[key]
-                previous_frame=palette.get('frame')
+                previous_palette=palette.copy()
                 if clean:
                     palette['mullion']=palette['frame'];palette['interior']=material((28,32,36))
                 if clean and members and RULES['materials']['sample_measured_frame_color']:
@@ -497,10 +510,13 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                     if measured_color is not None:palette['mullion']=material(measured_color)
                 elif clean and item.get('recovery')=='captured_storefront':
                     palette['frame']=material(np.percentile(crop.reshape(-1,3),20,axis=0))
+                if clean and item['kind'] in ('window','door_candidate'):
+                    for part in ('frame','mullion','glazing','reveal','door_leaf'):
+                        if part+'_rgb' in window_style:palette[part]=material(window_style[part+'_rgb'])
                 for semantic,points in template.items():
                     local=points.copy();local[:,0]=x0+local[:,0]*w;local[:,1]=y0+local[:,1]*h
                     emit(local,face,affine,mesh.tex_index,semantic)
-                if previous_frame is not None:palette['frame']=previous_frame
+                palette.clear();palette.update(previous_palette)
                 origin=face.origin+face.u*x0+face.v*y0
                 support=item.get('support_level_z',bottom)
                 if item['kind']=='door_candidate' and not(support-.01<=origin[2]<=support+RULES['doors']['max_sill_offset_m']):
@@ -510,6 +526,7 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
                 if item['kind']=='door_candidate':
                     instances[-1]['support_level_z']=float(support)
                     instances[-1]['semantic_status']='inferred_patio_opening' if 'support_level_z' in item else 'inferred_ground_level_opening'
+                    if item.get('recovery')=='reviewed_door_capture':instances[-1]['semantic_status']='reviewed_ground_level_door'
                 cv2.rectangle(debug,(px0,py0),(px1,py1),(255,130,20) if item['kind']=='door_candidate' else (40,240,70),1)
             save_preview(directory/f'face_{face_id:03d}_capture.png',image)
             save_preview(directory/f'face_{face_id:03d}_detections.png',debug)
@@ -547,6 +564,7 @@ def refine_building(own,obj,textures,directory,observed_masks=None,clean=False,c
     catalog=dict(captured_wall_material=capture_wall,ruleset=RULESET_VERSION,clean_procedural_materials=clean,building=obj.name,building_base_z=bottom,door_rule=dict(max_sill_offset_m=RULES['doors']['max_sill_offset_m'],min_observed_fraction=RULES['doors']['min_observed_fraction'],reference='overall_building_base'),prototypes=library,instances=instances,faces=reports,semantic_meshes=semantic_meshes,
                  counts=dict(counts),note=('Captured wall finish with procedural frames and native glass.' if capture_wall else ('Clean procedural wall/frame/glazing materials; capture UVs are reference metadata only.' if clean else 'UV transforms retain individual capture variation.'))+' Renderer export expands shared prototypes; GPU instancing is not implemented. Door semantics and recess depths are inferred.')
     catalog['retained_native_parts']=dict(Counter(role for _,role in native_parts))
+    if window_style:catalog['window_style']=window_style
     (directory/'tiles.json').write_text(json.dumps(catalog,indent=2,default=json_value))
     usage=Counter(i['prototype'] for i in instances)
     return meshes,dict(building=obj.name,counts=dict(counts),prototypes=len(library),instances=len(instances),

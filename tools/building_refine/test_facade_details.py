@@ -2,10 +2,11 @@ import copy
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
-from shapely.geometry import box
+from shapely.geometry import box, Polygon
 
 import mtscene
 from building_rules import extrusion
@@ -16,6 +17,22 @@ from solid_city import audit_shell, shell, atlas
 
 
 class FacadeDetailsTest(unittest.TestCase):
+    def test_float32_collapsed_trim_is_skipped_without_breaking_envelope(self):
+        textures = [atlas((175, 175, 175)), atlas((155, 155, 155))]
+        obj = mtscene.SceneObject('test_building', 3)
+        with tempfile.TemporaryDirectory() as directory:
+            meshes, _ = refine_building(shell(box(0, 0, 12, 10), 0, 12, 0),
+                                        obj, textures, Path(directory), clean=True)
+            catalog = json.loads((Path(directory)/'tiles.json').read_text())
+        group = mtscene.Group(textures, meshes, [obj])
+        thin = Polygon([(1, .5), (2, .5), (2, .50000000001)])
+        with patch('facade_details.face_details', return_value=[('base_course', thin, .065)]):
+            report = enhance(group, catalog)
+        self.assertGreater(report['skipped_collapsed_trim'], 0)
+        self.assertEqual(report['counts'], {})
+        self.assertFalse(any(report['validation']['audit'].values()))
+        self.assertFalse(any(i.get('kind') == 'facade_detail' for i in catalog['instances']))
+
     def test_details_are_closed_and_clear_of_openings_and_existing_signs(self):
         items = [dict(kind='window', bounds=[x, y, x+1, y+1.8])
                  for x in (1., 3., 5.) for y in (2., 5., 8.)]

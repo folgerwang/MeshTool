@@ -21,6 +21,7 @@ import raster
 from building_rules import extrusion
 from compose_iteration import fingerprint
 from install_building_repairs import planarity
+from solid_city import audit_shell
 from validate_city_iteration import openings as validate_openings
 
 
@@ -91,6 +92,8 @@ def enhance(group, catalog):
     counts = Counter()
     reuse = {}
     max_overlap = 0.
+    skipped_collapsed_trim = 0
+    center = group.meshes[0].translation.copy()
     for face in catalog['faces']:
         fid = face['face_id']
         instances = [i for i in catalog['instances'] if i['face_id'] == fid]
@@ -117,8 +120,17 @@ def enhance(group, catalog):
             # Embed the back slightly in the wall; independent closed solids
             # avoid coplanar surfaces and do not alter the approved shell.
             local = extrusion(orient(polygon, sign=1), -.025, depth)
+            world = local@basis.T+origin
+            # Boolean clipping can leave tiny sliver edges. Validate each trim
+            # solid at its actual export precision before adding it to the
+            # catalog, so an ornamental sliver cannot invalidate the building.
+            probe = mtscene.Mesh(0, 0, center, (world-center).astype(np.float32),
+                None, None, [(4, np.arange(len(world), dtype=np.uint32))])
+            if any(audit_shell([probe]).values()):
+                skipped_collapsed_trim += 1
+                continue
             rgb = tuple(np.clip(wall_rgb*.78 if role == 'base_course' else wall_rgb+22, 25, 220).astype(int))
-            parts[role, rgb].append(local@basis.T+origin)
+            parts[role, rgb].append(world)
             x, y, X, Y = polygon.bounds
             normalized = local - [x, y, 0]
             key = (role, hashlib.sha256(np.round(normalized, 6).tobytes()).hexdigest())
@@ -149,6 +161,7 @@ def enhance(group, catalog):
     checks.update(existing_meshes_unchanged=True, max_trim_opening_overlap_m2=max_overlap)
     catalog['counts'] = dict(Counter(i.get('kind', 'wall') for i in catalog['instances']))
     catalog['facade_detailing'] = dict(version=1, counts=dict(counts), validation=checks,
+        skipped_collapsed_trim=skipped_collapsed_trim,
         inference='Trim style and depths are inferred, not measured from the capture. Existing window locations, shell and roof are retained.')
     return catalog['facade_detailing']
 

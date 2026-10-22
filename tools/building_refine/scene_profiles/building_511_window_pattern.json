@@ -1,0 +1,366 @@
+{
+  "building": "building_511",
+  "source_geometry_sha256": "28ab9e0f198d08560c74ab49d5f2dd5dc23b66809c916fdf59d09dce81cc2f64",
+  "layers_sha256": "79e50ffcd4bc214bc4e932e2d7acfd4f8f0747dd7bb4bf11ae432fcaf16d2ccf",
+  "catalog_sha256": "0ffcbc4aa0009924eaef5db4e29cab04c671e50a177036fe8d16fc02d0112a7f",
+  "floor_hint": [
+    9.25,
+    2.85
+  ],
+  "floor_count": 7,
+  "floor_fit_faces": [
+    2,
+    3,
+    13,
+    14,
+    15
+  ],
+  "window_height_m": 2.05,
+  "notes": "Seven observed upper-floor rows fitted from reviewed regular-window facades. Independent column groups preserve wide dark glazing and narrow service windows with different heights. Dark vertical bands are separated at the observed floor rhythm. Missing repetition is inferred only within reviewed columns; blank end walls and unobserved ground-floor bays are not extrapolated. Roof equipment is simplified by the approved envelope fit.",
+  "faces": {
+    "2": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              1.65
+            ]
+          ],
+          "window_width_m": 2.1,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "c20c2ecb51b66c19a630061182bade683735463623f1bb1ede47fcb2b762e844"
+    },
+    "3": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              0.85
+            ]
+          ],
+          "window_width_m": 1.0,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              3.57
+            ]
+          ],
+          "window_width_m": 0.9,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "0baf110623598a44def2227b6dcee651d5ad959517f5d6f6f00a929651d6f382"
+    },
+    "5": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              1.5
+            ]
+          ],
+          "window_width_m": 2.1,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              3.8
+            ]
+          ],
+          "window_width_m": 0.9,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              9.05
+            ]
+          ],
+          "window_width_m": 0.95,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              13.65
+            ]
+          ],
+          "window_width_m": 0.65,
+          "window_height_m": 1.3,
+          "floor_offset_m": 0.3
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              14.95
+            ]
+          ],
+          "window_width_m": 1.2,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              19.8
+            ]
+          ],
+          "window_width_m": 0.65,
+          "window_height_m": 1.25,
+          "floor_offset_m": 0.35
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              22.0
+            ]
+          ],
+          "window_width_m": 0.65,
+          "window_height_m": 1.25,
+          "floor_offset_m": 0.35
+        }
+      ],
+      "capture_png_sha256": "8ce47a353d5162aa45e4ba358bbdbbc882ea6c53a08aaf7581d213c35b483324"
+    },
+    "6": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              2.9
+            ]
+          ],
+          "window_width_m": 0.7,
+          "window_height_m": 1.1,
+          "floor_offset_m": 0.55
+        }
+      ],
+      "capture_png_sha256": "55f74a53ffd2c5c2a70455174270a014a06e825281ca522a42b00f1b722063ad"
+    },
+    "7": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              3.65
+            ]
+          ],
+          "window_width_m": 2.6,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              7.45
+            ]
+          ],
+          "window_width_m": 2.0,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              11.8
+            ]
+          ],
+          "window_width_m": 2.5,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              14.75
+            ]
+          ],
+          "window_width_m": 0.7,
+          "window_height_m": 1.1,
+          "floor_offset_m": 0.55
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              17.35
+            ]
+          ],
+          "window_width_m": 2.3,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "6794b0ec7346293cbe1f5a644e7400610846ce910eadb22c23b2ad55bba6b75d"
+    },
+    "10": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              1.03
+            ]
+          ],
+          "window_width_m": 0.65,
+          "window_height_m": 1.0,
+          "floor_offset_m": 0.6
+        }
+      ],
+      "capture_png_sha256": "948dda666c5cc8ccb4261841ffceb596d9005741e0597594b259361cd53d2225"
+    },
+    "13": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              2.72
+            ]
+          ],
+          "window_width_m": 1.05,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              5.47
+            ]
+          ],
+          "window_width_m": 1.05,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "7c0e17707f3cf3f6043c57bc71766e31b8637e0ec97d9412c580c070c7b5d78a"
+    },
+    "14": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              1.5
+            ]
+          ],
+          "window_width_m": 2.1,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              5.4
+            ]
+          ],
+          "window_width_m": 1.8,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "cab01ba67428f2da0e9291e3ce22acd3385df5dd0c5037ec62632eaa651aae18"
+    },
+    "15": {
+      "column_groups": [
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              4.47
+            ]
+          ],
+          "window_width_m": 1.0,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        },
+        {
+          "bay_count": 1,
+          "column_observations": [
+            [
+              0,
+              0,
+              8.18
+            ]
+          ],
+          "window_width_m": 0.95,
+          "window_height_m": 2.05,
+          "floor_offset_m": 0
+        }
+      ],
+      "capture_png_sha256": "5db604c4c4867c427cddd32528b2d2f901dd933c200225b941e41c12876acd2e"
+    }
+  }
+}

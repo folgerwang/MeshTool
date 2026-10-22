@@ -62,3 +62,29 @@ def openings(floors,columns,width,height,face_size,image_shape,pitch):
             result.append(dict(kind='window',shape='rectangular',bounds=bounds,pixel_rect=rect,
                                confidence=.8,recovery='fitted_repeating_motif',layout_row=row,layout_column=column))
     return result,skipped
+
+
+def profile_openings(floors,config,default_height,face_size,image_shape,pitch):
+    """Fit independent reviewed window groups on the same facade/floor grid.
+
+    Wide glazing and narrow stair/service windows need separate widths and
+    vertical offsets; neither should force an artificial repeating bay spacing.
+    Profiles without column_groups retain the original single-motif behavior.
+    """
+    groups=config.get('column_groups',[config])
+    if not groups:raise ValueError('A reviewed facade needs window column groups')
+    result=[];reports=[]
+    for group in groups:
+        columns=fit_columns(group['column_observations'],group['bay_count'])
+        height=group.get('window_height_m',default_height)
+        local=dict(floors,first_center_m=floors['first_center_m']+group.get('floor_offset_m',0.))
+        items,skipped=openings(local,columns,group['window_width_m'],height,face_size,image_shape,pitch)
+        for item in items:
+            if any(box(*item['bounds']).intersects(box(*other['bounds'])) for other in result):
+                raise ValueError('Reviewed column groups overlap')
+        result.extend(items)
+        reports.append(dict(columns=columns,width_m=group['window_width_m'],height_m=height,
+            floor_offset_m=group.get('floor_offset_m',0.),slots=len(items),skipped=skipped))
+    # Stable order keeps prototype generation and exact-slot verification reproducible.
+    result.sort(key=lambda o:(o['layout_row'],o['bounds'][0]))
+    return result,dict(groups=reports,slots=len(result)) if 'column_groups' in config else reports[0]

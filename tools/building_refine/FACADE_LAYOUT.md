@@ -139,6 +139,29 @@ detailed catalog is rejected; start a new pass from the undetailed asset.
 
 ## Capture-scored city iteration
 
+### Restore a damaged roof from the archived capture
+
+When a generated roof is worse than the archived original, a reviewed profile
+can bind both geometry hashes and a world-height transition. The restoration
+clips triangles at that height, interpolates texture coordinates, and retains
+the current lower facades. Explicit source-mesh exclusions in the profile must
+be justified by visual inspection; building 278 excludes one isolated floating
+triangle above its actual rooftop structures.
+
+```powershell
+python tools/building_refine/restore_captured_roof.py previous/city.mtscene tools/building_refine/building_profiles/building_278_roof.json repaired_city
+python -m unittest discover -s tools/building_refine -p test_restore_captured_roof.py
+```
+
+This is a local restoration of an existing scan, not a closed-shell rebuild.
+Reports retain boundary-edge counts and compare total open-edge length because
+clipping subdivides edges. New nonmanifold/degenerate geometry or greater open
+boundary length is rejected; a closed input must remain closed. Saved-scene
+checks verify the repaired geometry, other objects and route. The active facade
+catalog is clipped as well, with restored roof meshes recorded separately.
+
+### Fit complete building envelopes
+
 `iterate_building_shells.py` ranks buildings with mesh defects and evaluates
 three envelope fits per building against its archived capture. Acceptance
 requires a closed mesh, at least 0.90 footprint IoU, 0.87 roof-height agreement
@@ -171,6 +194,19 @@ implausible or unsupported labels are reported without invented replacements.
 `trees/trees.gltf` and `trees.bin` contain native shared-mesh instances, while
 the MeshTool v7 preview expands the same placements into compatible meshes.
 Trees are broadleaf approximations; their species is not inferred.
+
+For a tree-free city, remove all tree-class meshes from every model variant:
+
+```powershell
+python tools/building_refine/remove_trees.py previous/city.mtscene tree_free_city
+python -m unittest discover -s tools/building_refine -p test_remove_trees.py
+```
+
+The new scene retains ground surfaces, buildings, texture payloads, object IDs
+and any saved route. `tree_removal.json` records removed objects and verifies
+zero remaining tree meshes after reloading the saved scene. This does not
+remove canopy photographs from an unprocessed capture; use the clean-paving
+composition workflow first for those scenes.
 
 Vehicle-shaped geometry is not sufficient evidence to remove a building label.
 For visually confirmed mislabeled vehicles, `compose_iteration.py` accepts
@@ -238,6 +274,87 @@ the approved wall planes, exact fitted slots, closed topology, and clear wall
 cutouts. `pattern_fit.json` records fitted spacings, observation residuals,
 skipped corner slots, and inferred repetition. This is a reviewed geometric
 fit, not a claim that every recovered window was visible in the capture.
+
+The 511 profile uses `column_groups` for wide glazing and narrow service windows
+on the same facade. Each group has its own measured columns, width, optional
+height and vertical offset, while sharing the fitted floor spacing. Optional
+`floor_fit_faces` selects reviewed facades with reliable full-height windows so
+small offset openings do not bias that spacing. Overlapping groups are rejected.
+Finishing preserves these reviewed motif positions instead of rectifying them
+again. The profile covers seven observed upper rows; unobserved ground-floor
+openings are not extrapolated.
+
+### Measured stepped facades for building 218
+
+`building_profiles/building_218_stepped.json` binds the archived capture geometry
+to a measured courtyard envelope, roof levels, 104 windows and four reviewed doors.
+The automatic flat-roof fit rejects this capture; the measured profile retains
+the courtyard, rear setback, narrow eastern facade wing and major roof blocks.
+Small roof equipment and classical ornament are simplified. A second facade review adds
+24 omitted openings on the ground-floor frontage, lower side wall, upper courtyard,
+tower attic and roof-level service walls. Unobserved lower courtyard rows remain blank.
+
+`repair_stepped_building.py` accepts optional `facades` entries containing an
+exact facade frame, capture PNG hash, metric opening bounds, rectangular or
+arched shape, and measured mullions. Unlisted faces receive no guessed windows.
+It rejects frame/image mismatches, overlapping slots, changed opening positions,
+obstructed cutouts and nonplanar walls. `facade_details: true` adds inferred sills,
+surrounds and courses while preserving the reviewed slots. Clean wall materials
+remove the photographed surface fragments; roof imagery is retained.
+
+The latest 218 profile regularizes the captured motifs into exact repeated
+rows and columns, with matching opening sizes within each group. The broad
+front glazing uses three columns and five rows; the central front uses five
+columns and three rows. `layout_regularization`
+records the groups and maximum adjustment from the prior measured bounds.
+`window_style` sets a local frame width and frame, mullion, glazing and reveal
+RGB colors without changing the defaults used by other buildings. The 218
+style uses 0.16 m pale frames, consistent pane divisions and dark blue glass
+to keep the window layout visible at the building overview scale. Four captured
+entrances have opaque paneled doors with glazed transoms above them; panel and
+transom subdivisions are inferred. Reviewed doors must meet the building base
+or an evidenced landing. The two added front transoms raise the window count
+from 102 to 104. `door_leaf_rgb` controls their opaque leaf finish.
+
+Validation checks actual installed frame, glazing and door triangles against
+every opening outline, with a 2 mm edge tolerance and at most 0.001 square meters
+of uncovered area. Prototype presence alone does not establish that a hole is
+filled. Cutout obstruction, closed topology and planar walls are checked too.
+
+```powershell
+python tools/building_refine/repair_stepped_building.py build/city-building-218-regular-v4-20261022/city.mtscene tools/building_refine/building_profiles/building_218_stepped.json build/city-building-218-openings-v5-20261022
+python -m unittest discover -s tools/building_refine -p test_repair_stepped_building.py
+```
+
+### City artifact repair
+
+`repair_city_artifacts.py` audits every active building, including installed
+opening coverage on closed envelopes. Damaged buildings are fitted against the
+archived capture using orthogonal, polygonal and stepped candidates. Roof support,
+footprint agreement and side silhouettes gate replacements. Unsupported partial
+captures remain unchanged and are listed as `needs_measured_review`.
+
+Accepted buildings receive clean planar wall finishes, capture-supported opening
+layouts, pale frames, dark glazing and clipped facade trim. The generator removes
+collapsed, zero-area finishing triangles without moving vertices or UVs. A repair
+also skips decorative trim pieces that collapse at float32 export precision;
+the window and door assemblies remain mandatory. A repair
+must still pass complete topology, opening coverage and planar-wall checks after
+serialization. Captured entrances need ground support; no doors are guessed on
+unobserved facades. Building 278's individually restored captured roof is protected
+from generic envelope replacement.
+
+The output includes `audit_before.json`, per-building captures and assets,
+`repair_report.json`, `manifest.json` and the installed `city.mtscene`. The report
+distinguishes repaired buildings from unchanged buildings and failed fits.
+Archived captures, unselected objects, terrain, routes and existing texture
+payloads are verified unchanged. The saved city is checked against the in-memory
+result before completion.
+
+```powershell
+python tools/building_refine/repair_city_artifacts.py build/city-building-218-openings-v5-20261022/city.mtscene build/city-artifact-repairs-20261022
+python -m unittest discover -s tools/building_refine -p test_repair_city_artifacts.py
+```
 
 ```powershell
 python -m unittest discover -s tools/building_refine -p test_city_iteration.py

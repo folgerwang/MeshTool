@@ -9,7 +9,7 @@ from capture_tiles import refine_building,capture_faces
 from iterate_building_shells import local_group
 from repair_stepped_building import geometry_digest
 from stepped_shell import build
-from regular_window_layout import fit_floors,fit_columns,openings
+from regular_window_layout import fit_floors,profile_openings
 from install_building_repairs import planarity
 from validate_city_iteration import openings as validate_openings
 
@@ -27,7 +27,9 @@ def repair(source,base,profile_path,output):
     scene=mtscene.load(source);bi,gi,oid=record['batch'],record['group'],record['object_id']
     group=local_group(scene[bi].groups[gi],oid)
     if group.objects[0].name!=name or geometry_digest(group.meshes)!=profile['source_geometry_sha256']:raise ValueError('Original capture mismatch')
-    floors=fit_floors(catalog,{int(f) for f in profile['faces']},profile['floor_hint'],profile['floor_count'])
+    floor_faces={int(f) for f in profile.get('floor_fit_faces',profile['faces'])}
+    if not floor_faces or not floor_faces.issubset({int(f) for f in profile['faces']}):raise ValueError('Floor-fit faces must be reviewed facades')
+    floors=fit_floors(catalog,floor_faces,profile['floor_hint'],profile['floor_count'])
     overrides={f['face_id']:[] for f in catalog['faces']};patterns={}
     for key,config in profile['faces'].items():
         fid=int(key);image_path=folder/f'face_{fid:03d}_source.png'
@@ -38,9 +40,7 @@ def repair(source,base,profile_path,output):
         from rules_config import RULES
         pitch=max(RULES['windows']['projection_texel_m'],max(face['size'])/2040)
         if abs(image.shape[1]*pitch-face['size'][0])>pitch*2:raise ValueError('Unexpected capture pixel pitch')
-        columns=fit_columns(config['column_observations'],config['bay_count'])
-        overrides[fid],skipped=openings(floors,columns,config['window_width_m'],profile['window_height_m'],face['size'],image.shape,pitch)
-        patterns[key]=dict(columns=columns,width_m=config['window_width_m'],height_m=profile['window_height_m'],slots=len(overrides[fid]),skipped=skipped)
+        overrides[fid],patterns[key]=profile_openings(floors,config,profile['window_height_m'],face['size'],image.shape,pitch)
     layers=[(x['height'],shape(x['geometry'])) for x in json.loads((folder/'layers.json').read_text())]
     bottom=float(np.percentile(raster.collect(group).pos[:,:,2],.5))
     points,_=build(layers,bottom);center=points.mean(0)
@@ -79,7 +79,7 @@ def repair(source,base,profile_path,output):
     for fid,expected in overrides.items():
         actual=[i for i in updated['instances'] if i.get('kind')=='window' and i['face_id']==fid]
         if len(actual)!=len(expected):raise ValueError('Some pattern slots were lost during window cutting')
-        for a,b in zip(actual,expected):
+        for a,b in zip(sorted(actual,key=lambda o:tuple(o['bounds'])),sorted(expected,key=lambda o:tuple(o['bounds']))):
             if not np.allclose(a['bounds'],b['bounds'],atol=1e-7,rtol=0):raise ValueError('Window layout moved during finishing')
     # Compare the roof triangles to the approved saved asset as an additional
     # independent shape check, including roof levels and courtyard boundaries.

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from regular_window_layout import fit_floors,fit_columns,openings
+from regular_window_layout import fit_floors,fit_columns,openings,profile_openings
 
 
 class RegularWindowLayoutTest(unittest.TestCase):
@@ -38,6 +38,30 @@ class RegularWindowLayoutTest(unittest.TestCase):
     def test_unsupported_floor_pattern_is_rejected(self):
         with self.assertRaisesRegex(ValueError,'Insufficient'):
             fit_floors(dict(instances=[]),{0},[7,3])
+
+    def test_mixed_glazing_and_service_windows_share_floor_grid(self):
+        groups=[dict(bay_count=1,column_observations=[[0,0,2]],window_width_m=2.4),
+                dict(bay_count=1,column_observations=[[0,0,5]],window_width_m=.7,
+                     window_height_m=1.,floor_offset_m=.4)]
+        slots,report=profile_openings(dict(first_center_m=3,spacing_m=3,count=2),
+            dict(column_groups=groups),2.,[8,10],[125,100,3],.08)
+        self.assertEqual(len(slots),4)
+        np.testing.assert_allclose([o['bounds'][2]-o['bounds'][0] for o in slots],[2.4,.7,2.4,.7])
+        np.testing.assert_allclose([(o['bounds'][1]+o['bounds'][3])/2 for o in slots],[3,3.4,6,6.4])
+        self.assertEqual(report['slots'],4)
+
+    def test_independent_column_groups_must_not_overlap(self):
+        group=dict(bay_count=1,column_observations=[[0,0,2]],window_width_m=2.)
+        with self.assertRaisesRegex(ValueError,'groups overlap'):
+            profile_openings(dict(first_center_m=3,spacing_m=3,count=2),
+                dict(column_groups=[group,group]),2.,[8,10],[125,100,3],.08)
+
+    def test_single_motif_profile_retains_existing_slots(self):
+        floors=dict(first_center_m=3,spacing_m=3,count=2)
+        config=dict(bay_count=2,column_observations=[[0,0,2],[1,0,5]],window_width_m=1.)
+        expected,_=openings(floors,fit_columns(config['column_observations'],2),1.,2.,[8,10],[125,100,3],.08)
+        actual,_=profile_openings(floors,config,2.,[8,10],[125,100,3],.08)
+        self.assertEqual(actual,expected)
 
 
 if __name__=='__main__':unittest.main()

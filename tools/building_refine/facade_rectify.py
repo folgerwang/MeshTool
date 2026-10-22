@@ -10,7 +10,7 @@ def regularize(openings):
     cfg=RULES['facade_rectification'];result=copy.deepcopy(openings)
     rows=[]
     for i,o in sorted(enumerate(openings),key=lambda p:(p[1]['bounds'][1]+p[1]['bounds'][3])/2):
-        if o['kind']!='window' or o.get('recovery') in ('visually_measured_capture','captured_storefront'):continue
+        if o['kind']!='window' or o.get('recovery') in ('visually_measured_capture','captured_storefront','fitted_repeating_motif'):continue
         bounds=np.array(o['bounds']);center=(bounds[1]+bounds[3])/2
         row=next((r for r in rows if abs(np.median(r[0])-center)<cfg['row_tolerance_m']),None)
         if row is None:rows.append(([center],[i]))

@@ -45,6 +45,15 @@ class FacadeRectifyTest(unittest.TestCase):
         out=regularize(items)
         self.assertEqual(out[-1],items[-1]);self.assertEqual(out[3],items[3])
 
+    def test_reviewed_motif_preserves_intentional_vertical_offsets(self):
+        items=[dict(opening(1+i*2,2,delta),recovery='fitted_repeating_motif')
+               for i,delta in enumerate([-.075,0,.075])]
+        image=np.full((100,100,3),160,np.uint8)
+        warped,updated,report=rectify(image,items,.1)
+        self.assertEqual(updated,items)
+        self.assertEqual(report['changed_windows'],0)
+        np.testing.assert_array_equal(warped,image)
+
     def test_warp_preserves_border_and_repeated_iteration_converges(self):
         yy,xx=np.indices((100,100));image=np.stack([xx,yy,xx],axis=-1).astype(np.uint8)
         items=[opening(1+i*2,2,j) for i,j in enumerate([-.08,0,.08])]
