@@ -15,6 +15,7 @@
 struct RefineSettings
 {
     bool        replaceTrees = false;
+    bool        removeTrees = false;
     int         treeShape = 0; // fitted, round, conifer
     bool        treeGround = true;
     bool        noSam = false; // optional CLI outline-only mode

@@ -67,7 +67,7 @@ bool BuildingRefiner::Start(const std::string& inputPath, const RefineSettings& 
         m_started = m_updated = std::chrono::steady_clock::now();
     }
     m_running = true;
-    SetStatus(settings.replaceTrees ? "Starting procedural tree replacement..." : "Starting refine.py...");
+    SetStatus(settings.removeTrees ? "Saving tree planting records..." : (settings.replaceTrees ? "Starting procedural tree replacement..." : "Starting refine.py..."));
     m_thread = std::thread(&BuildingRefiner::Run, this, inputPath, settings);
     return true;
 }
@@ -121,6 +121,8 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
         return finish(false, "tools\\building_refine\\refine.py not found next to MeshTool.");
     if (settings.replaceTrees)
         script = (fs::path(script).parent_path() / "trees.py").string();
+    if (settings.removeTrees)
+        script = (fs::path(script).parent_path() / "remove_trees.py").string();
 
     // MESHTOOL_PYTHON picks the interpreter (default: python on PATH).
     const char* py = getenv("MESHTOOL_PYTHON");
@@ -130,10 +132,13 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     const fs::path work = fs::absolute(settings.workDir, ec);
     inputPath = fs::absolute(inputPath, ec).string();
     result->outputPath = (work / (settings.replaceTrees ? "procedural_trees.mtscene" : "refined.mtscene")).string();
-    const std::string logPath = (work / (settings.replaceTrees ? "trees.log" : "refine.log")).string();
+    const fs::path removalDir = work / ("tree-removal-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+    if (settings.removeTrees) result->outputPath = (removalDir / "city.mtscene").string();
+    const std::string logPath = (work / (settings.removeTrees ? "remove_trees.log" : (settings.replaceTrees ? "trees.log" : "refine.log"))).string();
     std::string cmd = Quote(python) + " -X utf8 -u " + Quote(script) + " " + Quote(inputPath) + " " +
-                      Quote(result->outputPath) + " --progress";
-    if (settings.replaceTrees)
+                      Quote(settings.removeTrees ? removalDir.string() : result->outputPath) + " --progress";
+    if (settings.removeTrees) { /* All segmented trees; bounds are saved before removal. */ }
+    else if (settings.replaceTrees)
     {
         const char* shapes[] = { "fitted", "round", "conifer" };
         const int shape = settings.treeShape >= 0 && settings.treeShape < 3 ? settings.treeShape : 0;
@@ -244,7 +249,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
                 SetStatus(msg);
                 continue;
             }
-            if (line.rfind("Refined ", 0) == 0)
+            if (line.rfind("Refined ", 0) == 0 || (settings.removeTrees && line.rfind("Removed ", 0) == 0))
                 summary = line;
             if (!line.empty())
             {
@@ -265,7 +270,7 @@ void BuildingRefiner::Run(std::string inputPath, RefineSettings settings)
     if (code != 0 || summary.empty())
     {
         std::string why = tail.empty() ? "no output" : tail.back();
-        return finish(false, std::string(settings.replaceTrees ? "Tree replacement" : "refine.py") + " failed (" + why + "); log: " + logPath);
+        return finish(false, std::string(settings.removeTrees ? "Tree removal" : (settings.replaceTrees ? "Tree replacement" : "refine.py")) + " failed (" + why + "); log: " + logPath);
     }
     result->summary = summary;
     m_progress = 1.0f;

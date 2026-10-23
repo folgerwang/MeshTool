@@ -188,6 +188,73 @@ After pulling hook changes, redeploy the proxy (`deploy_hook.bat` as
 administrator, option 2): MeshTool and `opengl32.dll` share the capture buffer
 layout (16 GB, 64-bit offsets) and must match - an older hook shows "not connected".
 
+## Capture names and folders
+
+New captured scenes use `capture_<UTC YYYYMMDDTHHMMSSZ>_<8-character ID>`.
+For example, `capture_20261022T235905Z_d47e65df`. A permanent 128-bit capture ID
+is stored inside the scene; saving a processed version or renaming/moving a file
+preserves that ID. Multiple frames merged into the current scene share its identity.
+Opening a legacy scene assigns an identity which becomes permanent when saved.
+The Python cleanup tool uses `capture_legacy_<12-character content hash>` for
+legacy files, so identical old inputs match without guessing a capture date.
+`created_utc` records identity creation, not an inferred historical capture time.
+
+Choose **File > Save Capture Folder**, then select a parent folder. The app creates:
+
+```text
+capture_20261022T235905Z_d47e65df/
+  capture_20261022T235905Z_d47e65df.mtscene
+  capture_20261022T235905Z_d47e65df.trees.json
+  capture.json
+```
+
+The manifest contains the capture identity and relative filenames. The tree catalog
+references the same capture; new planting records carry `capture_id`. Meshes,
+textures, segmentation, route and tree records remain embedded in the `.mtscene`,
+so it is also usable alone. The JSON files are portable exports for later planting.
+An existing capture folder is never overwritten; choose a different parent for
+another saved version. `capture.json` is written last after successful export.
+
+```powershell
+build\Release\MeshTool.exe --save-capture input.mtscene captures
+```
+
+## Remove trees and retain planting data
+
+After segmentation, choose **Tools > Remove Trees (Keep Planting Data)**.
+The tool records every tree-class object's identity, bounding box, dimensions,
+approximate base position and geographic reference, then removes its meshes
+from all variants. Building and ground geometry, materials, object IDs and the
+captured driving route are preserved. The result opens automatically.
+
+Planting records are embedded in the saved `.mtscene` and also exported as
+`tree_instances.json` beside the generated scene. Repeated removal retains
+existing records. The original input is unchanged; outputs use a new directory.
+
+```powershell
+build\Release\MeshTool.exe --remove-trees input.mtscene output.mtscene
+# Writes output.mtscene and output.tree_instances.json; both must be new.
+python tools/building_refine/remove_trees.py input.mtscene new_output_directory
+```
+
+Each record contains a stable `instance_id`, source `batch`, `group`, `object_id`
+and `name`, `bbox.min/max`, `size_m`, `position`, `reference_lon_lat` and variant
+bounds. Georeferenced positions are local East/North/Up metres at the recorded
+longitude/latitude reference. Bounds use drawn vertices, including mesh
+translation; original capture variants take precedence over procedural variants.
+The base position is the bounding box's horizontal centre and lowest vertex.
+`ground_verified` and `trunk_position_measured` are false: later planting should
+fit the base to terrain and may need to correct the trunk position. Merged crowns
+remain one instance. Trees mislabeled as buildings or ground need their class
+corrected first. This tool stores planting data; it does not plant replacement trees.
+
+Scenes with capture identity use format v9 and require this updated app.
+Readers still accept v1-v8. Without capture identity, writers use v8 for planting
+records and v7 otherwise. Version 9 appends three length-prefixed UTF-8 strings
+(capture ID, name, identity creation UTC) after the route.
+The v8 addition is a uint32 byte length and UTF-8 JSON list after each group's
+object table. Native save/load preserves that metadata even with no tree meshes.
+
 ## Procedural tree replacement
 
 Segment the scene first (Tools > Segment Scene), then choose **Tools > Replace

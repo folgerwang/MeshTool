@@ -250,6 +250,14 @@ void MeshToolUI::DrawMenuBar()
                 ActionSaveScene();
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Save meshes, textures, segmented objects and their labels together in one .mtscene file.");
+            if (ImGui::MenuItem("Save Capture Folder...", nullptr, false, !g_world.mesh_data_batches.empty()))
+            {
+                nfdchar_t* parent = nullptr;
+                if (NFD_PickFolder(nullptr, &parent) == NFD_OKAY && parent)
+                { pendingCaptureParent = parent; free(parent); }
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Choose a parent folder. Saves the named capture, its tree records and a manifest together in a new capture folder.");
             ImGui::Separator();
             if (ImGui::MenuItem("Import USGS...",     "Ctrl+U"))   ActionImportUSGS();
             if (ImGui::MenuItem("Import KML...",      "Ctrl+K"))   ActionImportKML();
@@ -297,6 +305,10 @@ void MeshToolUI::DrawMenuBar()
         {
             if (ImGui::MenuItem("Segment Scene (AI)...", nullptr, false, !g_world.mesh_data_batches.empty()))
                 showSegmentDialog = true;
+            if (ImGui::MenuItem("Remove Trees (Keep Planting Data)", nullptr, false, SceneHasTrees() && !refineRunning && !segRunning))
+                wantRemoveTrees = true;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Save each segmented tree's bounding box and planting position, then remove its meshes.\nPlanting records remain in the saved scene and a JSON catalog.");
             if (ImGui::MenuItem("Refine Buildings (AI)...", nullptr, false, SceneHasBuildings()))
             {
                 refinePCG = false;
@@ -1115,9 +1127,11 @@ void MeshToolUI::DrawObjectsSection()
 {
     size_t instances[kObjClassCount] = {};
     size_t total = 0, glassMeshes = 0, comparable = 0;
+    bool hasPlantingData = false;
     for (const BatchMeshData* batch : g_world.mesh_data_batches)
         for (const GroupMeshData* group : batch->group_meshes)
         {
+            hasPlantingData = hasPlantingData || (!group->tree_instances_json.empty() && group->tree_instances_json != "[]");
             for (const SceneObject& o : group->objects)
             {
                 instances[o.cls < kObjClassCount ? o.cls : kObjUnknown]++;
@@ -1135,6 +1149,8 @@ void MeshToolUI::DrawObjectsSection()
     if (ImGui::CollapsingHeader("Objects", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Indent(8);
+        if (!sceneCaptureName.empty()) ImGui::TextWrapped("Capture: %s", sceneCaptureName.c_str());
+        if (hasPlantingData) ImGui::TextWrapped("Tree planting data saved with this scene.");
         if (comparable)
         {
             ImGui::Text("Compare %zu replaced objects:", comparable);
@@ -1189,8 +1205,9 @@ bool MeshToolUI::SceneHasTrees() const
 {
     for (const BatchMeshData* batch : g_world.mesh_data_batches)
         if (batch) for (const GroupMeshData* group : batch->group_meshes)
-            if (group) for (const SceneObject& o : group->objects)
-                if (o.cls == kObjTree) return true;
+            if (group) for (const MeshData* m : group->meshes)
+                if (m && m->object_id >= 0 && size_t(m->object_id) < group->objects.size() &&
+                    group->objects[size_t(m->object_id)].cls == kObjTree) return true;
     return false;
 }
 

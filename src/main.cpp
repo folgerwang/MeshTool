@@ -41,7 +41,9 @@ static int RunSegmentCommand(int argc, char* argv[])
 
     std::vector<BatchMeshData*> batches;
     std::string error;
-    if (!LoadScene(argv[2], batches, error))
+    RoutePlan route;
+    SceneCapture capture;
+    if (!LoadScene(argv[2], batches, error, &route, &capture))
     {
         fprintf(stderr, "Cannot open %s: %s\n", argv[2], error.c_str());
         return 1;
@@ -70,7 +72,7 @@ static int RunSegmentCommand(int argc, char* argv[])
         delete m;
     printf("%s\n", result->summary.c_str());
 
-    if (!SaveScene(argv[3], batches, error))
+    if (!SaveScene(argv[3], batches, error, &route, &capture))
     {
         fprintf(stderr, "Cannot save %s: %s\n", argv[3], error.c_str());
         return 1;
@@ -181,7 +183,9 @@ static int RunObjectsCommand(int argc, char* argv[])
 
     std::vector<BatchMeshData*> batches;
     std::string error;
-    if (!LoadScene(argv[2], batches, error))
+    RoutePlan route;
+    SceneCapture capture;
+    if (!LoadScene(argv[2], batches, error, &route, &capture))
     {
         fprintf(stderr, "Cannot open %s: %s\n", argv[2], error.c_str());
         return 1;
@@ -252,7 +256,7 @@ static int RunObjectsCommand(int argc, char* argv[])
 
     if (out_path)
     {
-        if (!SaveScene(out_path, batches, error))
+        if (!SaveScene(out_path, batches, error, &route, &capture))
         {
             fprintf(stderr, "Cannot save %s: %s\n", out_path, error.c_str());
             return 1;
@@ -262,8 +266,57 @@ static int RunObjectsCommand(int argc, char* argv[])
     return 0;
 }
 
+static int RunRemoveTreesCommand(int argc, char* argv[])
+{
+    if (argc != 4) { fprintf(stderr, "usage: MeshTool --remove-trees input.mtscene output.mtscene\n"); return 2; }
+    namespace fs = std::filesystem;
+    const fs::path output = fs::absolute(argv[3]);
+    const fs::path catalog = output.parent_path() / (output.stem().string() + ".tree_instances.json");
+    if (fs::exists(output) || fs::exists(catalog))
+    { fprintf(stderr, "Use a new output scene and planting catalog path.\n"); return 2; }
+    std::error_code ec; fs::create_directories(output.parent_path(), ec);
+    if (ec) { fprintf(stderr, "Cannot create output directory: %s\n", ec.message().c_str()); return 1; }
+    RefineSettings settings; settings.removeTrees = true; settings.workDir = output.parent_path().string();
+    BuildingRefiner worker; worker.Start(fs::absolute(argv[2]).string(), settings);
+    std::string last;
+    while (worker.Running())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        auto status = worker.Status();
+        if (status != last) { printf("%s\n", status.c_str()); last = status; }
+    }
+    auto result = worker.TakeResult();
+    if (!result || !result->ok)
+    { fprintf(stderr, "Tree removal failed: %s\n", result ? result->error.c_str() : "no result"); return 1; }
+    fs::copy_file(fs::path(result->outputPath).parent_path()/"tree_instances.json", catalog, ec);
+    if (!ec) fs::rename(result->outputPath, output, ec);
+    if (ec) { fprintf(stderr, "Cannot install output: %s\n", ec.message().c_str()); return 1; }
+    printf("%s\nSaved %s\nPlanting catalog: %s\n", result->summary.c_str(), output.string().c_str(), catalog.string().c_str());
+    return 0;
+}
+
+static int RunCaptureFolderCommand(int argc, char* argv[])
+{
+    if (argc != 4) { fprintf(stderr, "usage: MeshTool --save-capture input.mtscene parent-folder\n"); return 2; }
+    std::vector<BatchMeshData*> batches;
+    RoutePlan route;
+    SceneCapture capture;
+    std::string error, saved;
+    if (!LoadScene(argv[2], batches, error, &route, &capture, true))
+    { fprintf(stderr, "Cannot open scene: %s\n", error.c_str()); return 1; }
+    if (capture.id.empty()) capture = NewSceneCapture();
+    if (!SaveCaptureFolder(argv[3], batches, capture, saved, error, &route))
+    { fprintf(stderr, "Cannot save capture folder: %s\n", error.c_str()); return 1; }
+    printf("Saved capture %s\n", saved.c_str());
+    return 0;
+}
+
 int main(int argc, char* argv[])
 {
+    if (argc >= 2 && !strcmp(argv[1], "--save-capture"))
+        return RunCaptureFolderCommand(argc, argv);
+    if (argc >= 2 && !strcmp(argv[1], "--remove-trees"))
+        return RunRemoveTreesCommand(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "--segment"))
         return RunSegmentCommand(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "--refine"))

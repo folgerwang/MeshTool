@@ -830,6 +830,8 @@ void MeshToolApp::ClearScene()
     vkDeviceWaitIdle(m_renderer->GetContext().device);
     StopDriveSim(false);   // its canopy cut refers to meshes that are about to go
     m_sceneRoute = RoutePlan();
+    m_sceneCapture = SceneCapture();
+    if (m_ui) m_ui->sceneCaptureName.clear();
     BatchMeshData* live = m_ui ? m_ui->liveBatch : nullptr;
     if (m_ui && m_ui->captureProcessor)
         m_ui->captureProcessor->ResetMerge();   // the group it merges into is about to go
@@ -898,13 +900,15 @@ void MeshToolApp::UpdateSegmentation()
             m_ui->statusTimeout = 5.0f;
             return;
         }
+        if (m_sceneCapture.id.empty()) m_sceneCapture = NewSceneCapture();
+        m_ui->sceneCaptureName = m_sceneCapture.name;
         // The exact input, for re-running offline:
         //   MeshTool --segment <debugDir>\last_input.mtscene out.mtscene
         {
             std::error_code ec;
             std::filesystem::create_directories(m_ui->segSettings.debugDir, ec);
             std::string err;
-            SaveScene((std::filesystem::path(m_ui->segSettings.debugDir) / "last_input.mtscene").string(), input, err);
+            SaveScene((std::filesystem::path(m_ui->segSettings.debugDir) / "last_input.mtscene").string(), input, err, &m_sceneRoute, &m_sceneCapture);
         }
         m_segmenter->Start(groups, m_ui->segSettings);
     }
@@ -963,20 +967,24 @@ void MeshToolApp::UpdateRefine()
         m_refiner->Cancel();
     }
 
-    if (m_ui->wantStartRefine || m_ui->wantReplaceTrees)
+    if (m_ui->wantStartRefine || m_ui->wantReplaceTrees || m_ui->wantRemoveTrees)
     {
         const bool trees = m_ui->wantReplaceTrees;
+        const bool removeTrees = m_ui->wantRemoveTrees;
         m_ui->wantStartRefine = false;
         m_ui->wantReplaceTrees = false;
+        m_ui->wantRemoveTrees = false;
         if (m_refiner->Running() || (m_segmenter && m_segmenter->Running()))
             return;
         RefineSettings settings;
         settings.replaceTrees = trees;
+        settings.removeTrees = removeTrees;
+        m_ui->removingTrees = removeTrees;
         settings.treeShape = m_ui->treeShape;
         settings.treeGround = m_ui->treeGround;
         m_ui->replacingTrees = trees;
         settings.pcg = m_ui->refinePCG;
-        if ((trees ? m_ui->treeScope : m_ui->refineScope) == 0)
+        if (!removeTrees && (trees ? m_ui->treeScope : m_ui->refineScope) == 0)
         {
             if (!m_selGroup || m_selObject < 0 || size_t(m_selObject) >= m_selGroup->objects.size() ||
                 m_selGroup->objects[size_t(m_selObject)].cls != (trees ? kObjTree : kObjBuilding))
@@ -1007,11 +1015,13 @@ void MeshToolApp::UpdateRefine()
         settings.workDir = m_ui->segSettings.debugDir;
         std::error_code ec;
         std::filesystem::create_directories(settings.workDir, ec);
-        const std::string input = (std::filesystem::path(settings.workDir) / (trees ? "trees_input.mtscene" : "refine_input.mtscene")).string();
+        const std::string input = (std::filesystem::path(settings.workDir) / (removeTrees ? "remove_trees_input.mtscene" : (trees ? "trees_input.mtscene" : "refine_input.mtscene"))).string();
         std::string err;
-        if (!SaveScene(input, g_world.mesh_data_batches, err, &m_sceneRoute))
+        if (m_sceneCapture.id.empty()) m_sceneCapture = NewSceneCapture();
+        m_ui->sceneCaptureName = m_sceneCapture.name;
+        if (!SaveScene(input, g_world.mesh_data_batches, err, &m_sceneRoute, &m_sceneCapture))
         {
-            m_ui->statusMessage = std::string(trees ? "Replace Trees: " : "Refine Buildings: ") + "cannot save the input scene: " + err;
+            m_ui->statusMessage = std::string(removeTrees ? "Remove Trees: " : (trees ? "Replace Trees: " : "Refine Buildings: ")) + "cannot save the input scene: " + err;
             m_ui->statusTimeout = 10.0f;
             return;
         }
@@ -1033,7 +1043,7 @@ void MeshToolApp::UpdateRefine()
     m_ui->refineInfo = m_refiner->Info();
     if (!result->ok)
     {
-        m_ui->statusMessage = std::string(m_ui->replacingTrees ? "Replace Trees: " : "Refine Buildings: ") + result->error;
+        m_ui->statusMessage = std::string(m_ui->removingTrees ? "Remove Trees: " : (m_ui->replacingTrees ? "Replace Trees: " : "Refine Buildings: ")) + result->error;
         m_ui->statusTimeout = 15.0f;
         return;
     }
@@ -1049,7 +1059,7 @@ void MeshToolApp::UpdateRefine()
             { selectedBatch = bi; selectedGroup = gi; }
     ClearSelection();
     OpenScene(result->outputPath, /*keepCamera=*/true);
-    if (selectedObject >= 0 && selectedBatch < g_world.mesh_data_batches.size())
+    if (!m_ui->removingTrees && selectedObject >= 0 && selectedBatch < g_world.mesh_data_batches.size())
     {
         auto* batch = g_world.mesh_data_batches[selectedBatch];
         if (selectedGroup < batch->group_meshes.size())
@@ -1119,7 +1129,8 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
     std::vector<BatchMeshData*> loaded;
     std::string error;
     RoutePlan route;
-    if (!LoadScene(path, loaded, error, &route))
+    SceneCapture capture;
+    if (!LoadScene(path, loaded, error, &route, &capture))
     {
         m_ui->statusMessage = "Open failed: " + error;
         m_ui->statusTimeout = 10.0f;
@@ -1128,6 +1139,8 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
 
     ClearScene();
     m_sceneRoute = route;
+    m_sceneCapture = capture.id.empty() ? NewSceneCapture() : capture;
+    m_ui->sceneCaptureName = m_sceneCapture.name;
     size_t meshes = 0;
     for (BatchMeshData* batch : loaded)
     {
@@ -1159,7 +1172,9 @@ void MeshToolApp::OpenScene(const std::string& path, bool keepCamera)
 void MeshToolApp::SaveSceneTo(const std::string& path)
 {
     std::string error;
-    if (SaveScene(path, g_world.mesh_data_batches, error, &m_sceneRoute))
+    if (m_sceneCapture.id.empty()) m_sceneCapture = NewSceneCapture();
+    m_ui->sceneCaptureName = m_sceneCapture.name;
+    if (SaveScene(path, g_world.mesh_data_batches, error, &m_sceneRoute, &m_sceneCapture))
         m_ui->statusMessage = "Saved " + path + " (" +
                               SegmentationSummary(SegmentationInfo(g_world.mesh_data_batches)) +
                               (m_sceneRoute.ok ? ", route" : "") + " included).";
@@ -1893,6 +1908,18 @@ void MeshToolApp::ProcessPendingActions()
         m_ui->pendingSaveScenePath.clear();
         SaveSceneTo(path);
     }
+    if (!m_ui->pendingCaptureParent.empty() && !m_ui->segRunning && !m_ui->refineRunning)
+    {
+        const std::string parent = std::move(m_ui->pendingCaptureParent);
+        m_ui->pendingCaptureParent.clear();
+        if (m_sceneCapture.id.empty()) m_sceneCapture = NewSceneCapture();
+        m_ui->sceneCaptureName = m_sceneCapture.name;
+        std::string saved, error;
+        if (SaveCaptureFolder(parent, g_world.mesh_data_batches, m_sceneCapture, saved, error, &m_sceneRoute))
+            m_ui->statusMessage = "Saved capture folder: " + saved;
+        else m_ui->statusMessage = "Save capture folder failed: " + error;
+        m_ui->statusTimeout = 12.0f;
+    }
     const bool segmenting = m_segmenter && m_segmenter->Running();
 
     // A finished capture, requested here or with F12 inside Google Earth.
@@ -1955,6 +1982,8 @@ void MeshToolApp::ProcessPendingActions()
         // area beside the others.
         if (batch && result.new_data && result.group)
         {
+            if (m_sceneCapture.id.empty()) m_sceneCapture = NewSceneCapture();
+            m_ui->sceneCaptureName = m_sceneCapture.name;
             auto& batches = g_world.mesh_data_batches;
             if (std::find(batches.begin(), batches.end(), batch) == batches.end())
                 batches.push_back(batch);

@@ -258,6 +258,7 @@ struct GroupMeshData
     vector<core::Texture2DInfo*> loaded_textures;
     vector<shared_ptr<string>> texture_names;
     vector<SceneObject>     objects;    // filled by segmentation
+    string                 tree_instances_json; // v8 planting records; retained without tree meshes
     vector<CaptureInfo>     captures;   // filled by live capture, in capture order
     bool                    no_gps = false;   // captured without GPS: set beside the GPS areas, not at its true place
 

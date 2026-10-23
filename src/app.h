@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <future>
 #include "route.h"
+#include "scenefile.h"
 #include "sim.h"
 #include "coremath.h"
 
@@ -159,6 +160,7 @@ private:
     // The driving route the scene was captured along: set when a route
     // capture has planned it, saved in the scene file, restored on open.
     RoutePlan m_sceneRoute;
+    SceneCapture m_sceneCapture;
 
     // Tools > Drive Simulation: a car drives the scene route at a set speed
     // over a road recovered from the mesh (see sim.h).

@@ -1,19 +1,21 @@
 """Reader/writer for MeshTool .mtscene files (src/scenefile.cpp)."""
 import struct
+import json
 from dataclasses import dataclass, field
 
 import numpy as np
 
 MAGIC = b"MTSCENE\0"
-VERSION = 7   # 6: driving route trailer after the batches; 7: mesh lod_size
+VERSION = 9   # 9: stable capture identity after route; 8: per-group tree planting JSON
 MAT_CAPTURED, MAT_GLASS, MAT_INTERIOR = 0, 1, 2
 
 
 class Scene(list):
     """List-compatible batches with an exact v6 driving-route payload."""
-    def __init__(self, batches=(), route_data=b'\x00\x00\x00\x00'):
+    def __init__(self, batches=(), route_data=b'\x00\x00\x00\x00', capture=None):
         super().__init__(batches)
         self.route_data=route_data
+        self.capture = dict(capture or {})
 
 
 @dataclass
@@ -49,6 +51,7 @@ class Group:
     textures: list
     meshes: list
     objects: list
+    tree_instances: list = field(default_factory=list)
 
 
 @dataclass
@@ -134,7 +137,14 @@ def load(path, route=None):
                 for _ in range(r.pod("<I")):
                     name = bytes(r.take(r.pod("<I"))).decode("utf-8", "replace")
                     objects.append(SceneObject(name, r.pod("<B")))
-            groups.append(Group(textures, meshes, objects))
+            trees = []
+            if version >= 8:
+                size = r.pod('<I')
+                if size > 512*1024*1024: raise ValueError('invalid tree metadata size')
+                payload = bytes(r.take(size))
+                trees = json.loads(payload.decode('utf-8')) if payload else []
+                if not isinstance(trees, list): raise ValueError('invalid tree instance records')
+            groups.append(Group(textures, meshes, objects, trees))
         batches.append(Batch(is_spline, is_dump, georef, ref, groups))
     if version >= 6 and r.p < len(r.d):
         start = r.p
@@ -150,15 +160,27 @@ def load(path, route=None):
                 route.update(polyline=polyline, from_name=from_name, to_name=to_name,
                              **{"from": (ends[0], ends[1]), "to": (ends[2], ends[3])}, length_m=length)
         batches.route_data = bytes(r.d[start:r.p])
+    if version >= 9:
+        for key in ('id', 'name', 'created_utc'):
+            size = r.pod('<I')
+            if size > 4096: raise ValueError('invalid capture identity size')
+            batches.capture[key] = bytes(r.take(size)).decode('utf-8')
+        if not batches.capture['id'] or not batches.capture['name']:
+            raise ValueError('invalid capture identity')
     return batches
 
 
 def save(path, batches, route=None):
-    """Write a version 7 scene; `route` is a dict as filled by load (or None)."""
+    """Write v9 with capture identity, v8 with trees, otherwise v7; retain route bytes."""
     out = bytearray()
     w = lambda fmt, *v: out.extend(struct.pack(fmt, *v))
     out += MAGIC
-    w("<I", VERSION)
+    version = 8 if any(g.tree_instances for b in batches for g in b.groups) else 7
+    capture = getattr(batches, 'capture', {})
+    if capture:
+        if not capture.get('id') or not capture.get('name'): raise ValueError('invalid capture identity')
+        version = 9
+    w("<I", version)
     w("<I", len(batches))
     for b in batches:
         w("<BBB", int(b.is_spline), int(b.is_google_dump), int(b.is_georeferenced))
@@ -196,6 +218,10 @@ def save(path, batches, route=None):
                 w("<I", len(nb))
                 out += nb
                 w("<B", o.cls)
+            if version >= 8:
+                payload = json.dumps(g.tree_instances, ensure_ascii=False, allow_nan=False).encode('utf-8')
+                w('<I', len(payload))
+                out += payload
     if route is None:
         out += getattr(batches,'route_data',b'\x00\x00\x00\x00')
     else:
@@ -213,5 +239,10 @@ def save(path, batches, route=None):
             a, b = route.get("from", polyline[0]), route.get("to", polyline[-1])
             w("<dddd", float(a[0]), float(a[1]), float(b[0]), float(b[1]))
             w("<d", float(route.get("length_m", 0.0)))
+    if version >= 9:
+        for key in ('id', 'name', 'created_utc'):
+            payload = capture.get(key, '').encode('utf-8')
+            if len(payload) > 4096: raise ValueError('invalid capture identity size')
+            w('<I', len(payload)); out += payload
     with open(path, "wb") as f:
         f.write(out)

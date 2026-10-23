@@ -3,15 +3,108 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <filesystem>
+#include <fstream>
+#include <random>
+#include <ctime>
+#include <cctype>
 #include <unordered_map>
 #include "meshdata.h"
 #include "coretexture.h"
 #include "route.h"
 
+SceneCapture NewSceneCapture()
+{
+    SceneCapture capture;
+    std::random_device random;
+    char part[9];
+    for (int i = 0; i < 4; ++i)
+    {
+        snprintf(part, sizeof(part), "%08x", uint32_t(random()));
+        capture.id += part;
+    }
+    const time_t now = time(nullptr);
+    tm utc{};
+    gmtime_s(&utc, &now);
+    char stamp[32];
+    strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &utc);
+    capture.name = std::string("capture_") + stamp + "_" + capture.id.substr(0, 8);
+    strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    capture.createdUtc = stamp;
+    return capture;
+}
+
+namespace
+{
+    std::string JsonString(const std::string& value)
+    {
+        std::string out = "\"";
+        for (unsigned char ch : value)
+        {
+            if (ch == '"' || ch == '\\') { out += '\\'; out += char(ch); }
+            else if (ch < 32) { char escaped[7]; snprintf(escaped, sizeof(escaped), "\\u%04x", ch); out += escaped; }
+            else out += char(ch);
+        }
+        return out + "\"";
+    }
+}
+
+bool SaveCaptureFolder(const std::string& parent, const std::vector<BatchMeshData*>& batches,
+                       const SceneCapture& capture, std::string& scenePath, std::string& error,
+                       const RoutePlan* route)
+{
+    namespace fs = std::filesystem;
+    // Names are a single portable path component, never paths supplied by metadata.
+    if (capture.id.empty() || capture.name.empty() || capture.name.size() > 120 ||
+        capture.name.rfind("capture_", 0) != 0 ||
+        capture.name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos)
+    { error = "Invalid capture identity or folder name."; return false; }
+    const fs::path dir = fs::path(parent) / capture.name;
+    std::error_code ec;
+    fs::create_directories(parent, ec);
+    if (ec || !fs::create_directory(dir, ec))
+    { error = "Capture folder already exists or cannot be created. Choose another parent folder."; return false; }
+    scenePath = (dir / (capture.name + ".mtscene")).string();
+    if (!SaveScene(scenePath, batches, error, route, &capture)) return false;
+    const std::string identity = "{\"id\":" + JsonString(capture.id) + ",\"name\":" +
+        JsonString(capture.name) + ",\"created_utc\":" + JsonString(capture.createdUtc) + "}";
+    const std::string treeName = capture.name + ".trees.json";
+    std::ofstream trees(dir / treeName, std::ios::binary);
+    trees << "{\n  \"schema_version\":1,\n  \"capture\":" << identity
+          << ",\n  \"scene_file\":" << JsonString(fs::path(scenePath).filename().string())
+          << ",\n  \"units\":\"metres\",\n  \"instances\":[";
+    bool first = true;
+    for (const auto* b : batches) if (b) for (const auto* g : b->group_meshes) if (g)
+    {
+        const auto& json = g->tree_instances_json;
+        const auto begin = json.find_first_not_of(" \r\n\t"), end = json.find_last_not_of(" \r\n\t");
+        if (begin == std::string::npos) continue;
+        if (json[begin] != '[' || json[end] != ']')
+        { error = "Invalid embedded tree catalog; capture folder is incomplete."; return false; }
+        const auto body = json.substr(begin + 1, end - begin - 1);
+        if (body.find_first_not_of(" \r\n\t") == std::string::npos) continue;
+        if (!first) trees << ',';
+        trees << body;
+        first = false;
+    }
+    trees << "]\n}\n";
+    trees.close();
+    if (!trees) { error = "Cannot write tree catalog; capture folder is incomplete."; return false; }
+    // Written last: its presence marks a completed bundle. Paths are portable and relative.
+    std::ofstream manifest(dir / "capture.json", std::ios::binary);
+    manifest << "{\n  \"schema_version\":1,\n  \"capture\":" << identity
+             << ",\n  \"scene_file\":" << JsonString(fs::path(scenePath).filename().string())
+             << ",\n  \"trees_file\":" << JsonString(treeName)
+             << ",\n  \"tree_records_embedded\":true\n}\n";
+    manifest.close();
+    if (!manifest) { error = "Cannot write capture manifest; capture folder is incomplete."; return false; }
+    return true;
+}
+
 namespace
 {
     const char     kMagic[8] = { 'M', 'T', 'S', 'C', 'E', 'N', 'E', '\0' };
-    const uint32_t kVersion = 7;          // 2: per-batch georeferenced flag, 3: segmented objects, 4: mesh material,
+    const uint32_t kVersion = 9;          // 9: capture identity; 8: per-group planting records
                                           // 7: mesh lod_size (GE tile edge, the LOD depth order),
                                           // 5: model variants, 6: driving route
     const uint32_t kOldestVersion = 1;
@@ -314,14 +407,21 @@ namespace
 }
 
 bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batches, std::string& error,
-               const RoutePlan* route)
+               const RoutePlan* route, const SceneCapture* capture)
 {
+    if (capture && !capture->id.empty() && (capture->name.empty() || capture->id.size() > 4096 ||
+        capture->name.size() > 4096 || capture->createdUtc.size() > 4096))
+    { error = "Invalid capture identity."; return false; }
     Writer w;
     w.f = fopen(path.c_str(), "wb");
     if (!w.f) { error = "Cannot open file for writing."; return false; }
 
     w.bytes(kMagic, sizeof(kMagic));
-    w.pod(kVersion);
+    uint32_t version = 7;
+    for (const auto* b : batches) if (b) for (const auto* g : b->group_meshes)
+        if (g && !g->tree_instances_json.empty()) version = 8;
+    if (capture && !capture->id.empty()) version = 9;
+    w.pod(version);
 
     uint32_t num_batches = 0;
     for (const BatchMeshData* b : batches) if (b) num_batches++;
@@ -357,6 +457,11 @@ bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batch
                 w.bytes(o.name.data(), o.name.size());
                 w.pod(uint8_t(o.cls));
             }
+            if (version >= 8)
+            {
+                w.pod(uint32_t(g->tree_instances_json.size()));
+                w.bytes(g->tree_instances_json.data(), g->tree_instances_json.size());
+            }
         }
     }
 
@@ -375,6 +480,14 @@ bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batch
         }
     }
 
+    if (version >= 9)
+    {
+        for (const auto* value : { &capture->id, &capture->name, &capture->createdUtc })
+        {
+            w.pod(uint32_t(value->size()));
+            w.bytes(value->data(), value->size());
+        }
+    }
     bool ok = w.ok;
     if (fclose(w.f) != 0) ok = false;
     if (!ok) { error = "Write failed (disk full?)."; remove(path.c_str()); }
@@ -382,7 +495,7 @@ bool SaveScene(const std::string& path, const std::vector<BatchMeshData*>& batch
 }
 
 bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches, std::string& error,
-               RoutePlan* route)
+               RoutePlan* route, SceneCapture* capture, bool preserveMeshes)
 {
     Reader r;
     r.f = fopen(path.c_str(), "rb");
@@ -433,7 +546,9 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
                 if (m->bbox_ws.b_valid)
                     g->bbox_ws += m->bbox_ws;
             }
-            DropDuplicateMeshes(g);
+            // Named capture snapshots must round-trip without changing geometry.
+            // Keep the old capture cleanup only for legacy interactive imports.
+            if (!preserveMeshes && version < 9) DropDuplicateMeshes(g);
             if (version >= 3)
             {
                 uint32_t num_objects = r.count(1u << 24);
@@ -459,6 +574,12 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
                         object.hasRefinedModel = object.hasRefinedModel || m->model_variant == 2;
                     }
                 }
+            }
+            if (version >= 8)
+            {
+                uint32_t len = r.count(kMaxBytes);
+                g->tree_instances_json.resize(len);
+                r.bytes(g->tree_instances_json.data(), len);
             }
             if (g->bbox_ws.b_valid)
                 b->bbox_ws += g->bbox_ws;
@@ -489,6 +610,17 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
             loadedRoute.ok = r.ok && loadedRoute.polyline.size() >= 2;
         }
     }
+    SceneCapture loadedCapture;
+    if (version >= 9 && r.ok)
+    {
+        for (auto* value : { &loadedCapture.id, &loadedCapture.name, &loadedCapture.createdUtc })
+        {
+            uint32_t len = r.count(4096);
+            value->resize(len);
+            r.bytes(value->data(), len);
+        }
+        if (loadedCapture.id.empty() || loadedCapture.name.empty()) r.ok = false;
+    }
     fclose(r.f);
 
     if (!r.ok)
@@ -498,6 +630,7 @@ bool LoadScene(const std::string& path, std::vector<BatchMeshData*>& outBatches,
         return false;
     }
     outBatches.insert(outBatches.end(), batches.begin(), batches.end());
+    if (capture) *capture = std::move(loadedCapture);
     if (route && loadedRoute.ok)
         *route = std::move(loadedRoute);
     return true;

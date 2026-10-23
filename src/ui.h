@@ -109,6 +109,8 @@ public:
     // Refine Buildings (Tools menu): requests for the app, and its progress.
     bool  wantStartRefine = false;
     bool  wantReplaceTrees = false;
+    bool  wantRemoveTrees = false;
+    bool  removingTrees = false;
     bool  replacingTrees = false;
     int   treeScope = 1; // 0 selected tree, 1 all trees
     int   treeShape = 0; // fitted, round, conifer
@@ -174,6 +176,8 @@ public:
     // Scene file requests, chosen in a file dialog and carried out by the app.
     std::string pendingOpenScenePath;
     std::string pendingSaveScenePath;
+    std::string pendingCaptureParent;
+    std::string sceneCaptureName;
     void ActionOpenScene();
     void ActionSaveScene();
     // Viewport rect (set each frame, read by app for 3D rendering)
