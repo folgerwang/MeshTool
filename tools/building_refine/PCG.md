@@ -20,6 +20,14 @@ Uncertain raised regions stay unclassified rather than automatically becoming
 buildings. Both PCG modes repeat the check on original captured geometry before
 generating details, including when opening scenes segmented by an older build.
 Sparse triangles, sloped ground and weak incidental wall patches are insufficient.
+Three routes establish a building: dense facade planes; locally coherent
+walls and roofs (around every surface point a wall or roof keeps one
+orientation, foliage does not), which suits fine, wrinkled capture meshes; and,
+in segmentation, the bird's-eye view: a smooth surface standing 2.5 m above
+the ground model (2.5 m plane fit within 10 cm) over at least 20% of the
+object's footprint, on some vertical surface. Tree crowns are rough from above
+and sloped ground has no walls. The log reports how many objects each route
+accepted. On the Bellevue capture this keeps tree false accepts near 1.5%.
 A failed check preserves the existing object and reports "Building structure not
 confirmed". This is conservative: incomplete or unusual real buildings may remain
 captured until there is enough structural evidence.
@@ -122,6 +130,62 @@ from the original and reuses matching texture atlases rather than stacking them.
 Each generated glass pane lies on its recovered facade plane. When no supported
 planes can be recovered, the older captured-surface method remains the fallback.
 
+### Captured layout (default)
+
+Each recovered wall plane reproduces its own capture instead of a procedural
+design. The original wall imagery is rectified at about 8 cm per pixel and
+mapped onto the clean plane, so murals, trim, signage and colour are the
+capture's. Windows and doors are recessed openings exactly where the rectified
+capture shows them (`capture_tiles.detect_openings` with row-supported pattern
+recovery); the opening imagery is inpainted out of the wall finish and kept on
+the glass and frame ring. No window grid is imposed: a wall with no visible
+openings stays a plain captured wall, and a wall nobody captured stays plain
+cladding without invented windows. The camera fit only checks acceptance in
+this mode, since there are no facade parameters to search. Captured lighting
+remains baked in. Where a top-down capture missed the lower floors that base
+recovery completes, each column's lowest captured storey (3.6 m band) is
+repeated down the completed base instead of a flat fill colour; this is an
+inference, not observed ground-floor design. Captured bands wholly above a
+closed envelope's eave (parapets, signage, crowns) stay captured. The camera
+fit does not count generated base below a column's lowest captured surface as
+outline error, because the capture has no data there; extra walls at the sides
+or top still count. Captured roofs are kept as photographed, set-back
+structures standing on the roof (penthouses) stay captured, and the structural
+deck under them takes the captured tiles' LOD depth push so the viewer draws it
+beneath the roof. Foliage in front of a wall is neither a window nor a source
+for base continuation. Pass `layout='modules'` in the build parameters for the
+procedural module grid described below; it is also used when a building has
+no captured imagery at all.
+
+### Captured appearance per patch
+
+Each wall patch is sampled from the original capture, including on recovered
+facade planes (the regularized proxy carries no imagery of its own). Its
+generated wall, glass and frame colours come from that patch's own captured
+tones: the dominant upper half of its luminance for cladding, the darkest third
+for panes, and a mix for mullions and frames. Colours keep the capture's baked
+shading so the refined facade reads like the image; a fitted colour or per-face
+palette still takes precedence. Frames, coping and canopies use a fifth atlas
+texture, so the viewer and the camera fit show the same frame colour.
+
+Clad cells keep a punched window only where the capture shows a darker
+window-sized opening (the rectangle may slide within its cell to absorb grid
+phase error). Columns vote: a mostly blank column stays solid and a mostly
+windowed column keeps every window. Glazed cells are checked the same way on
+patches whose wall and glass tones nearly agree, and an all-glazed patch whose
+dark tone covers well under half its surface is treated as a shaded clad wall.
+Blank cladding, murals and party walls therefore stay solid. Every module also
+has a rear cladding skin behind its dark backing: nothing is culled, so a wall
+seen from behind shows cladding rather than a black slab.
+
+Weak recovered planes a few degrees off a stronger wall at the same depth are
+dropped, and captured slivers piercing a rebuilt wall are removed; either one
+otherwise shows as diagonal wedges. Diagonal scan slits inside one connected
+wall part are filled to its orthogonally convex extent (never bridging
+separate wings), and mostly covered modules on recovered planes are built
+whole. Closed envelopes follow the captured base along each wall on sloping
+sites instead of one recovered ground level.
+
 Internal diagonal mesh joins are stitched before window layout when neighboring
 patches have compatible normals and bounded fit error. Vertical corners and
 open boundaries remain separate. Geometry is mapped back onto the captured
@@ -180,13 +244,16 @@ The fitter compares unlit texture appearance, local window/edge structure,
 silhouette, and depth in every view. Its normalized error is
 `0.40 * RGB error + 0.20 * structural error + 0.25 * (1 - silhouette IoU)
 + 0.15 * depth MAE / source span`. **Max error per view (%)** defaults to 20%.
-Each of the nine views must also have silhouette IoU of at least 90%, depth MAE
+Each of the nine views must also have silhouette IoU of at least 90%, depth MAE (the worst tenth of
+shared pixels excluded, so dropped scan smears cannot dominate)
 of at most 2% of the source framing span, and at least 64 valid textured pixels.
 A good average or an improvement over a poor initial model cannot pass a failed
 side or roof. The percentage is this weighted image/shape error, not a percentage
 of physical reconstruction accuracy.
 
-A bounded coordinate search adjusts facade colors, window proportions, spacing,
+A model whose outline or depth is far outside these limits (IoU more than five points
+below, or depth error over twice the limit) is rejected without a search, since facade
+parameters cannot move the outline. Otherwise a bounded coordinate search adjusts facade colors, window proportions, spacing,
 and grid offsets with progressively smaller steps. The roof is compared but its
 geometry is not optimized by this facade search. Fitting stops as soon as all
 nine views pass, or after the configured maximum (1-6 rounds, default 3). If the

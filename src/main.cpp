@@ -366,13 +366,27 @@ int main(int argc, char* argv[])
 
         // MeshTool.exe --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg]
         //   [--dwell s] [--look-back] [--save scene.mtscene]: run a route capture at startup.
-        if (argc >= 4 && !strcmp(argv[1], "--capture-route"))
+        // MeshTool.exe --capture-zone lon0 lat0 lon1 lat1 [--spacing m] [--height m]
+        //   [--dwell s] [--save scene.mtscene]: run an overlapping zone capture at startup.
+        const bool zoneCapture = argc >= 6 && !strcmp(argv[1], "--capture-zone");
+        if (zoneCapture || (argc >= 4 && !strcmp(argv[1], "--capture-route")))
         {
             MeshToolApp::AutoRoute route;
             route.enabled = true;
-            route.from = argv[2];
-            route.to = argv[3];
-            for (int i = 4; i < argc; i++)
+            if (zoneCapture)
+            {
+                route.zone = true;
+                route.lon0 = atof(argv[2]); route.lat0 = atof(argv[3]);
+                route.lon1 = atof(argv[4]); route.lat1 = atof(argv[5]);
+                route.height = 300.0;
+                route.spacing = 0.0;
+            }
+            else
+            {
+                route.from = argv[2];
+                route.to = argv[3];
+            }
+            for (int i = zoneCapture ? 6 : 4; i < argc; i++)
             {
                 if (!strcmp(argv[i], "--spacing") && i + 1 < argc) route.spacing = atof(argv[++i]);
                 else if (!strcmp(argv[i], "--height") && i + 1 < argc) route.height = atof(argv[++i]);

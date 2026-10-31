@@ -101,9 +101,11 @@ class CameraFitTest(unittest.TestCase):
     def test_bounded_iterations_report_all_nine_views_and_preserve_source(self):
         meshes,textures=source()
         before=fingerprint(meshes[0])
-        baseline=facade.build(meshes,0,1,textures)
+        # The parameter search applies to the procedural module layout.
+        baseline=facade.build(meshes,0,1,textures,parameters={'layout':'modules'})
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
-            result=multiview.fit(meshes,0,1,textures,'painted-concrete',baseline,2,d,max_error=.000001)
+            result=multiview.fit(meshes,0,1,textures,'painted-concrete',baseline,2,d,
+                                 initial_parameters={'layout':'modules'},max_error=.000001)
             report=result[2]['multiview']
             self.assertFalse(report['accepted'])
             self.assertEqual({h['iteration'] for h in report['history']},{0,1,2})
@@ -118,6 +120,18 @@ class CameraFitTest(unittest.TestCase):
             self.assertLessEqual(multiview.rank(report['candidate'],.000001),
                                  multiview.rank(report['baseline'],.000001))
         self.assertEqual(before,fingerprint(meshes[0]))
+
+    def test_captured_layout_reproduces_capture_without_search(self):
+        meshes,textures=source()
+        captured=facade.build(meshes,0,1,textures)
+        modules=facade.build(meshes,0,1,textures,parameters={'layout':'modules'})
+        self.assertEqual(captured[2]['layout'],'captured')
+        cameras=multiview.Cameras(meshes,textures,128)
+        error=lambda result:multiview.aggregate(cameras.scores(cameras.render(result[0],textures+result[1])),multiview.SIDE_VIEWS)
+        self.assertLess(error(captured),error(modules))
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            report=multiview.fit(meshes,0,1,textures,'painted-concrete',captured,3,d)[2]['multiview']
+        self.assertEqual({h['iteration'] for h in report['history']},{0})
 
     def test_rejected_building_is_not_applied_or_given_new_textures(self):
         import test_pcg

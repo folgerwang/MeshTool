@@ -72,6 +72,10 @@ public:
         std::string from, to, savePath;
         double      spacing = 100.0, height = 100.0, tilt = 0.0, dwell = 4.0;
         bool        lookBack = false;
+        // --capture-zone lon0 lat0 lon1 lat1: an overlapping rectangular zone
+        // capture instead of a route (spacing <= 0 derives it from the view).
+        bool        zone = false;
+        double      lon0 = 0, lat0 = 0, lon1 = 0, lat1 = 0;
     };
     void SetAutoRoute(const AutoRoute& route) { m_autoRoute = route; }
     void MainLoop();

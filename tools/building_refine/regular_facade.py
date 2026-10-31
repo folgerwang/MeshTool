@@ -13,6 +13,29 @@ import mtscene
 from shapely.affinity import affine_transform
 
 
+def wall_base(points, n, offset, u, span, ground, reach=3., limit=8.):
+    """Lowest captured surface along one wall line on a sloping site.
+
+    One recovered ground level leaves the downhill side of a closed envelope
+    hanging above its captured base. Vertices within `reach` of the wall line
+    and inside its span lower that wall, by at most `limit` metres.
+    """
+    p=points.reshape(-1,3)
+    along=p@u;near=(np.abs(p[:,:2]@n[:2]-offset)<reach)&(along>=min(span)-.5)&(along<=max(span)+.5)
+    if near.sum()<6:return ground
+    return float(max(ground-limit,min(ground,np.percentile(p[near,2],1))))
+
+
+def sloped_wall(points, n, offset, u, span, ground, top):
+    """Wall region whose bottom follows the captured base from end to end."""
+    a,b=float(min(span)),float(max(span))
+    third=(b-a)/3
+    low=wall_base(points,n,offset,u,(a,a+third),ground)
+    high=wall_base(points,n,offset,u,(b-third,b),ground)
+    if min(low,high)>=top-1:return Polygon([(a,ground),(b,ground),(b,top),(a,top)])
+    return Polygon([(a,low),(b,high),(b,top),(a,top)])
+
+
 def roof_supported_envelope(planes, points, ground):
     """Complete four observed exterior walls only with a supported roof above.
 
@@ -58,7 +81,7 @@ def roof_supported_envelope(planes, points, ground):
     result=[]
     for p in selected:
         u=p['u'];edge=corners[abs(corners@p['n'][:2]-p['offset'])<1e-5];span=edge@u[:2]
-        region=box(float(span.min()),ground,float(span.max()),eave)
+        region=sloped_wall(points,p['n'],p['offset'],u,span,ground,eave)
         result.append(dict(p,region=region))
     return result
 
@@ -89,7 +112,7 @@ def close_supported_envelope(planes, points, ground):
         u=np.cross([0.,0.,1.],n);offset=float(a@n[:2]);span=np.array([a,b])@u[:2]
         match=max(planes,key=lambda p:p['n']@n)
         wall_top=match['region'].bounds[3]
-        region=box(float(span.min()),ground,float(span.max()),wall_top)
+        region=sloped_wall(points,n,offset,u,span,ground,wall_top)
         result.append(dict(n=n,u=u,v=np.array([0.,0.,1.]),offset=offset,region=region,raw_area=region.area))
     return result if len(result)>=4 else None
 
@@ -103,6 +126,22 @@ def resolve_overlaps(planes, tolerance):
     accepted=[];trimmed=0.
     for plane in sorted(planes,key=lambda p:-p['raw_area']):
         region=plane['region']
+        # A weak plane a few degrees off a stronger wall at the same depth is
+        # a skewed fit of that wall's scan noise: kept, the two surfaces cross
+        # each other in long diagonal seams.
+        skewed=False
+        for strong in accepted:
+            cosine=float(plane['n']@strong['n'])
+            if not .94<cosine<.9995 or plane['raw_area']>.5*strong['raw_area']:continue
+            a=float(plane['u']@strong['u']);b=float((plane['offset']*plane['n'])@strong['u'])
+            projected=affine_transform(strong['region'],[1/a,0,0,1,-b/a,0])
+            mid=np.asarray(region.representative_point().coords[0])
+            point=plane['offset']*plane['n']+mid[0]*plane['u']
+            if abs(point@strong['n']-strong['offset'])<tolerance*8 and \
+               region.intersection(projected.buffer(2.)).area>.5*region.area:
+                skewed=True;break
+        if skewed:
+            trimmed+=region.area;continue
         for strong in accepted:
             cosine=float(plane['n']@strong['n'])
             if cosine<-.98 or abs(cosine)<1e-4:continue
@@ -128,6 +167,39 @@ def resolve_overlaps(planes, tolerance):
         if not region.is_empty:
             plane=dict(plane,region=region);accepted.append(plane)
     return accepted,trimmed
+
+
+def orthogonal_fill(part, step=.5, minimum=.6):
+    """Close diagonal scan slits inside one connected wall part.
+
+    A grid cell is wall when its column and its row both have wall above and
+    below / left and right of it (the part's orthogonally convex hull). Only
+    one connected part is filled, so separate wings never merge; a fill that
+    would invent more than 1/minimum times the observed area is refused.
+    """
+    from shapely.geometry import box
+    x0,y0,x1,y1=part.bounds
+    nx=max(1,int(np.ceil((x1-x0)/step)));ny=max(1,int(np.ceil((y1-y0)/step)))
+    if nx*ny>250000:return part
+    xs=x0+(np.arange(nx)+.5)*step;ys=y0+(np.arange(ny)+.5)*step
+    X,Y=np.meshgrid(xs,ys)
+    grid=shapely.contains_xy(part,X,Y)
+    if not grid.any():return part
+    def span(mask,axis):
+        n=mask.shape[axis];idx=np.arange(n)
+        shape=[1,1];shape[axis]=n;idx=idx.reshape(shape)
+        first=np.where(mask,idx,n).min(axis=axis,keepdims=True)
+        last=np.where(mask,idx,-1).max(axis=axis,keepdims=True)
+        return (idx>=first)&(idx<=last)
+    filled=span(grid,0)&span(grid,1)
+    boxes=[]
+    for r in range(ny):
+        row=np.r_[False,filled[r],False].astype(np.int8);edges=np.flatnonzero(np.diff(row))
+        for a,b in zip(edges[::2],edges[1::2]):
+            boxes.append(box(x0+a*step,y0+r*step,x0+b*step,y0+(r+1)*step))
+    result=unary_union(boxes+[part])
+    if result.is_empty or part.area<minimum*result.area:return part
+    return result
 
 
 def rebuild(source, tolerance=.8, recovery=None):
@@ -192,6 +264,7 @@ def rebuild(source, tolerance=.8, recovery=None):
                 if part.area<2:continue
                 # Near-convex wall boundaries should not inherit scan scratches.
                 if part.convex_hull.area<=part.area*1.025 and not part.interiors:part=part.convex_hull
+                else:part=orthogonal_fill(part)
                 pieces.append(part)
             region=unary_union(pieces)
             if region.is_empty:continue
@@ -225,12 +298,30 @@ def rebuild(source, tolerance=.8, recovery=None):
         if len(ids):
             inside=shapely.covers(plane['region'].buffer(.25),shapely.points(centers[ids]@u,centers[ids]@v))
             removed[ids[inside]]=True
+        # Long captured slivers that pierce the rebuilt wall, and wrinkled
+        # copies just behind it, would show through the new facade as
+        # diagonal wedges. Roof surfaces are never removed here.
+        signed=points@n-offset
+        crossing=(signed.min(1)<-.05)&(signed.max(1)>.05)
+        behind=(signed.max(1)<=.05)&(signed.min(1)>-tolerance*6)&(np.abs(normals@n)>.7)
+        ids=np.flatnonzero((crossing|behind)&(np.abs(normals[:,2])<.75)&~removed)
+        if len(ids):
+            inside=shapely.covers(plane['region'].buffer(.1),shapely.points(centers[ids]@u,centers[ids]@v))
+            removed[ids[inside]]=True
     if envelope:
         # The closed shell owns the facade; only the captured roof remains.
         eave=min(p['region'].bounds[3] for p in envelope)
         roof_detail=(abs(normals[:,2])>=.35)&(centers[:,2]>ground+.65*(eave-ground))
         removed |= (centers[:,2]<eave-1.)&~roof_detail
         removed[roof_detail]=False
+        if envelope_method=='roof_supported':
+            # One eave closes every wall; captured surfaces above it
+            # (parapets, signage, crowns, penthouse walls standing on the
+            # roof) are not replaced and stay captured.
+            # Near the eave, set-back structures well off every rebuilt wall
+            # plane cannot overlap the new facade either.
+            off=np.min([np.abs(centers[:,:2]@p['n'][:2]-p['offset']) for p in envelope],axis=0)
+            removed[(centers[:,2]>eave+.3)|((points[:,:,2].max(1)>eave+.3)&(off>1.))]=False
     groups=[];proxies=[]
     for plane in planes:
         n,u,v,offset=plane['n'],plane['u'],plane['v'],plane['offset']

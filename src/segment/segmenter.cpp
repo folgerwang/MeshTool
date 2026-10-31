@@ -237,6 +237,112 @@ void BuildGroundModel(const std::vector<float>& top, int W, int H, double res, d
             }
     }
 
+    // 2b. Large flat roofs: the flood reaches a mall or garage roof over a
+    //     ramp or a run of steps. Such a roof meets the rest of the ground
+    //     only through narrow links: eroding the ground mask by 10 m isolates
+    //     it, and it stands well above the ground ring around it. Streets and
+    //     plazas on a hill connect broadly and match their surroundings.
+    int plateaus = 0, plateauCells = 0;
+    {
+        const int erode = std::max(1, int(round(10.0 / (c * res))));
+        const size_t NC = size_t(cw) * ch;
+        std::vector<uint8_t> isGround(NC, 0), core(NC, 0);
+        for (size_t i = 0; i < NC; i++) isGround[i] = cand[i].ground;
+        // Square erosion: a core cell has ground in its whole (2e+1)^2 window.
+        std::vector<int> run(NC, 0);
+        for (int cy = 0; cy < ch; cy++)
+            for (int cx = 0, r = 0; cx < cw; cx++)
+            {
+                r = isGround[size_t(cy) * cw + cx] ? r + 1 : 0;
+                run[size_t(cy) * cw + cx] = r;
+            }
+        for (int cy = erode; cy + erode < ch; cy++)
+            for (int cx = erode; cx + erode < cw; cx++)
+            {
+                bool ok = true;
+                for (int dy = -erode; ok && dy <= erode; dy++)
+                    ok = run[size_t(cy + dy) * cw + cx + erode] >= 2 * erode + 1;
+                core[size_t(cy) * cw + cx] = ok;
+            }
+        // Components of the eroded ground, regrown into the ground they own.
+        std::vector<int32_t> comp(NC, -1);
+        std::vector<int> stack;
+        int ncomp = 0;
+        for (size_t s0 = 0; s0 < NC; s0++)
+        {
+            if (!core[s0] || comp[s0] >= 0) continue;
+            comp[s0] = ncomp; stack.assign(1, int(s0));
+            while (!stack.empty())
+            {
+                int i = stack.back(); stack.pop_back();
+                int cx = i % cw, cy = i / cw;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+                        size_t k = size_t(ny) * cw + nx;
+                        if (core[k] && comp[k] < 0) { comp[k] = ncomp; stack.push_back(int(k)); }
+                    }
+            }
+            ncomp++;
+        }
+        for (int grow = 0; grow < erode; grow++)
+        {
+            std::vector<int32_t> next = comp;
+            for (int cy = 0; cy < ch; cy++)
+                for (int cx = 0; cx < cw; cx++)
+                {
+                    size_t i = size_t(cy) * cw + cx;
+                    if (!isGround[i] || comp[i] >= 0) continue;
+                    for (int dy = -1; dy <= 1 && next[i] < 0; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            int nx = cx + dx, ny = cy + dy;
+                            if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+                            int32_t o = comp[size_t(ny) * cw + nx];
+                            if (o >= 0) { next[i] = o; break; }
+                        }
+                }
+            comp.swap(next);
+        }
+        // Per compact component: median height against the median height of
+        // other ground 10-30 m around it. Large components are the street
+        // network; pieces up to 15 ha (a mall) can be roofs.
+        std::vector<std::vector<int>> members(static_cast<size_t>(ncomp));
+        for (size_t i = 0; i < NC; i++) if (comp[i] >= 0) members[size_t(comp[i])].push_back(int(i));
+        const int r0 = std::max(1, int(round(10.0 / (c * res)))), r1 = std::max(r0 + 1, int(round(30.0 / (c * res))));
+        auto median = [](std::vector<float> v) { std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end()); return v[v.size() / 2]; };
+        std::vector<int> stamp(NC, -1);
+        for (int k = 0; k < ncomp; k++)
+        {
+            const auto& cells = members[size_t(k)];
+            if (cells.size() < 8 || cells.size() > 6000) continue;
+            std::vector<float> own, ring;
+            for (int i : cells)
+            {
+                own.push_back(cand[size_t(i)].z);
+                int cx = i % cw, cy = i / cw;
+                for (int dy = -r1; dy <= r1; dy++)
+                    for (int dx = -r1; dx <= r1; dx++)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dy)) < r0) continue;
+                        int nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+                        size_t j = size_t(ny) * cw + nx;
+                        if (stamp[j] == k || !isGround[j] || comp[j] == k) continue;
+                        stamp[j] = k; ring.push_back(cand[j].z);
+                    }
+            }
+            if (ring.size() < 8) continue;
+            const float lift = median(own) - median(ring);
+            if (cells.size() >= 40) SegLog("    ground component %d: %zu cells, %.1f m above its surroundings%s\n", k, cells.size(), lift, lift >= 3.0f ? " -> roof" : "");
+            if (lift < 3.0f) continue;
+            plateaus++;
+            for (int i : cells) { cand[size_t(i)].ground = false; plateauCells++; }
+        }
+    }
+
     // 3. Local planes per cell centre: z = a + b * (x - cx) + e * (y - cy), in metres.
     const int max_ring = std::max(2, int(ceil(maxRadius / (c * res))));
     std::vector<double> plane(size_t(cw) * ch * 3, 0.0);
@@ -335,6 +441,7 @@ void BuildGroundModel(const std::vector<float>& top, int W, int H, double res, d
 
     int accepted = 0, valid = 0;
     for (const Cand& k : cand) { valid += k.valid; accepted += k.ground; }
+    if (plateaus) SegLog("  ground model: %d raised plateaus (%d cells) taken off the ground: large roofs reached over ramps\n", plateaus, plateauCells);
     SegLog("  ground model: %d x %d cells of %.1f m, %d pits ignored, %d seeds, %d of %d cells ground "
            "(%d dropped as off-surface, %d enclosed added)\n",
            cw, ch, c * res, pits, seeds, accepted, valid, dropped, added);
@@ -1687,18 +1794,35 @@ void Segmenter::Run(std::vector<GroupMeshData*> groups, SegmentSettings st)
             if(valid) candidates[oid].push_back(tri);
         }
     }
+    // Bird's-eye evidence: smooth roof surfaces standing above the ground
+    // model, per object. Top-down captures often show little wall geometry
+    // but a clear roof; tree crowns are rough from above.
+    std::map<int32_t,building_evidence::Birdview> birdview;
+    {
+        const auto smooth=building_evidence::SmoothRaised(top,hag,W,H,res);
+        const double px=res*res;
+        for(size_t i=0;i<N;i++) {
+            if(region[i]<0) continue;
+            const int32_t oid=regions[size_t(region[i])].object;
+            if(oid<0 || !candidates.count(oid)) continue;
+            auto& b=birdview[oid]; b.footprint+=px; if(smooth[i]) b.smooth+=px;
+        }
+    }
     int rejectedBuildings=0;
+    std::map<std::string,int> routes;
     for(auto& item:candidates) {
         if(m_cancel) return finish(false,"Cancelled.");
-        auto evidence=building_evidence::Check(item.second);
-        if(evidence.accepted) continue;
+        auto found=birdview.find(item.first);
+        auto evidence=building_evidence::Check(item.second,found!=birdview.end()?&found->second:nullptr);
+        if(evidence.accepted) { routes[evidence.route]++; continue; }
         auto& object=result->objects[size_t(item.first)];
-        SegLog("  %s: building structure unconfirmed (%d planes, %.1f%% wall support); kept unclassified\n",
-               object.name.c_str(),evidence.planes,evidence.wallFraction*100);
+        SegLog("  %s: building structure unconfirmed (%d planes, %.1f%% wall support, coherent wall %.0f / roof %.0f m2, smooth roof from above %.0f m2); kept unclassified\n",
+               object.name.c_str(),evidence.planes,evidence.wallFraction*100,evidence.coherentWall,evidence.coherentRoof,evidence.smoothRoof);
         object.cls=kObjUnknown; object.name="unclassified_"+std::to_string(item.first);
         ++rejectedBuildings;
     }
     SegLog("  building checks: %zu candidates, %d kept unclassified\n",candidates.size(),rejectedBuildings);
+    for(const auto& r:routes) SegLog("    accepted by %s: %d\n",r.first.c_str(),r.second);
     std::fill(std::begin(counts),std::end(counts),0);
     for(const auto& a:result->assignments) for(int32_t oid:a.triangleObject)
         if(oid>=0) ++counts[result->objects[size_t(oid)].cls];

@@ -308,6 +308,9 @@ Google Earth's finer building tiles can leave holes where the coarser streets
 were discarded. A sample that cannot settle stops the run as incomplete rather
 than silently leaving a gap. Save the result with File > Save Scene. The rectangle
 controls camera samples; captured tiles can extend outside its boundary.
+From the command line, `MeshTool --capture-zone lon0 lat0 lon1 lat1 --save out.mtscene`
+starts the same zone capture at startup (300 m height and view-derived spacing by default)
+and saves the scene when it ends, including when it ends incomplete.
 
 Progress and Stop are in the Live Capture panel and Zone Capture dialog. Zone
 and route capture share one queue, so only one runs at a time. Zone samples do
@@ -466,6 +469,7 @@ efine.py in.mtscene out.mtscene [--only building_012,...] [--no-sam] [--no-glass
 MeshTool --objects in.mtscene [out.mtscene] [--remove car]
 MeshTool --route "Ferry Building, San Francisco" "Union Square, San Francisco" [--spacing 100] [--look-back]
 MeshTool --capture-route "from" "to" [--spacing m] [--height m] [--tilt deg] [--dwell s] [--look-back] [--save out.mtscene]
+MeshTool --capture-zone lon0 lat0 lon1 lat1 [--spacing m] [--height m] [--dwell s] [--save out.mtscene]
 MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--yaw ..] [--pitch ..] [--zoom ..] [--ortho] [--sim [fraction]]
 MeshTool scene.mtscene --sim-video drive.mp4 [--sim fraction] [--sim-seconds n]
 ```

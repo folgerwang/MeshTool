@@ -49,10 +49,15 @@ void main(void)
     float G = nv/(nv*(1.0-k)+k) * nl/max(nl*(1.0-k)+k,0.00001);
     vec3 specular = D*G*F/max(4.0*nv*nl,0.00001);
     vec3 kd = (1.0-F)*(1.0-metallic);
-    vec3 direct = (kd*base/3.14159265 + specular)*nl*vec3(2.4,2.3,2.1);
     vec3 R = reflect(-V,N);
     vec3 sky = mix(vec3(0.18,0.19,0.20),vec3(0.45,0.60,0.78),smoothstep(-0.1,0.8,R.z));
-    vec3 ambient = base*(1.0-metallic)*0.34 + sky*f0*(1.0-roughness*0.65);
-    vec3 lit = direct+ambient;
-    finalColor = vec4(pow(lit/(lit+vec3(1.0)),vec3(1.0/2.2)),1.0);
+    // PCG albedo is estimated from the capture, whose texels already carry
+    // the scene's lighting: the diffuse term matches the captured surfaces'
+    // own shading, so a refined building is as bright as its neighbours.
+    // GGX highlights and sky reflection still distinguish the finishes.
+    vec3 captured = pow(max(srcColor*(diffuse*0.2+0.8),vec3(0.0)),vec3(2.2));
+    vec3 diffuseLit = kd*captured;
+    vec3 highlight = specular*nl*vec3(2.4,2.3,2.1) + sky*f0*(1.0-roughness*0.65);
+    vec3 lit = diffuseLit + highlight/(highlight+vec3(1.0));
+    finalColor = vec4(pow(clamp(lit,0.0,1.0),vec3(1.0/2.2)),1.0);
 }

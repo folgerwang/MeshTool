@@ -139,8 +139,27 @@ class Cameras:
             ma,mb = ia>=0,ib>=0
             union = ma|mb
             common = ma&mb
+            if VIEW_NAMES[len(scores)] != 'top' and ma.any():
+                # Below a column's lowest captured surface the capture has no
+                # data, not empty space: a generated base there is completion
+                # of uncaptured floors, not outline error. Sides and tops
+                # still count in full.
+                # Stray ground slivers a few pixels thin do not mark the base.
+                body = cv2.morphologyEx(ma.astype(np.uint8),cv2.MORPH_OPEN,np.ones((5,5),np.uint8)).astype(bool)
+                rows = np.arange(ma.shape[0])[:,None]
+                lowest = np.where(body.any(0), ma.shape[0]-1-np.argmax(body[::-1],0), ma.shape[0])
+                base = mb & ~ma & (rows > lowest[None,:])
+                union = union & ~base
             iou = float(common.sum()/max(1,union.sum()))
-            depth = float(np.mean(np.abs(da[common]-db[common]))) if common.any() else self.span
+            if common.any():
+                # Robust depth error: the worst tenth of shared pixels is
+                # excluded, so scan smears (ramps, stretched curtains) that a
+                # rebuilt wall rightly drops cannot outweigh a correctly
+                # placed facade. Systematic offsets still count in full.
+                errors=np.abs(da[common]-db[common])
+                kept=errors[errors<=np.percentile(errors,90)]
+                depth=float(kept.mean()) if len(kept) else float(errors.mean())
+            else:depth=self.span
             mask = valid & mb
             if mask.sum() >= 64:
                 # Two scales reduce subpixel aliasing while still penalizing
@@ -231,7 +250,13 @@ def fit(source, oid, texture_base, textures, finish, baseline, iterations=3,
     # Roof colors must not bias the facade palette.
     samples = [cameras.reference[i][0][cameras.valid[i]] for i in SIDE_VIEWS if cameras.valid[i].any()]
     eligible = all(cameras.valid[i].sum()>=64 for i in ALL_VIEWS)
-    if eligible and samples:
+    # Facade colours, window proportions and grid offsets do not move the
+    # outline: a shape far outside the limits is rejected without a search.
+    shape_failed = any(s['silhouette_iou'] < MIN_SILHOUETTE_IOU-.05 or s['depth_fraction'] > 2*MAX_DEPTH_FRACTION
+                       for s in initial_scores)
+    # A captured layout has no facade parameters to search: it is the capture.
+    captured_layout = original_stats.get('layout') == 'captured'
+    if eligible and samples and not shape_failed and not captured_layout:
         pixels = np.concatenate(samples).astype(float)
         lum = pixels @ np.array([.2126,.7152,.0722])
         dark,light = np.percentile(lum,[30,70])
@@ -265,7 +290,7 @@ def fit(source, oid, texture_base, textures, finish, baseline, iterations=3,
                 try:
                     result=facade.build(source,oid,texture_base,textures,finish,candidate,
                                         None if candidate.get('regular_facades') else original_stats['pattern'])
-                    if not result[2]['windows']:return
+                    if not facade.usable(result[2]):return
                     views=cameras.render(result[0],textures+result[1])
                     scores=cameras.scores(views)
                     score=aggregate(scores,ALL_VIEWS)
@@ -300,6 +325,7 @@ def fit(source, oid, texture_base, textures, finish, baseline, iterations=3,
                 failed_checks=failed,
                 reason=('all nine views meet the acceptance limits' if accepted else
                         'insufficient textured evidence in one or more required views' if not eligible else
+                        'outline or depth far outside the limits; facade search skipped' if shape_failed else
                         'error limits not reached within the iteration budget; existing building retained'),
                 metric='.40*unlit multiscale RGB error + .20*local structural error + .25*(1-silhouette IoU) + .15*depth MAE / source span',
                 regularization=best[2].get('regularization'),

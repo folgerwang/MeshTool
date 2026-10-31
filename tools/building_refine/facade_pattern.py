@@ -124,6 +124,110 @@ def panel_color(image,mask):
     return {'rgb':tuple(int(round(x)) for x in color),'samples':len(samples)}
 
 
+def patch_palette(image,mask,classes=None,res=None,bay=None):
+    """Captured wall, glass and frame colours of one patch, as seen in the capture.
+
+    Brighter texels are cladding, spandrels and mullions; darker texels are
+    panes. Clad and glazed bay columns are sampled separately when the patch
+    has both, so a mostly glazed patch is not painted with its glass colour.
+    Colours keep the capture's baked shading: the generated facade is meant to
+    read like the image. Returns None without enough covered texels.
+    """
+    covered=np.asarray(mask,bool)
+    if covered.sum()<200:return None
+    lum=image.astype(float)@np.array([.2126,.7152,.0722])
+    usable=covered&(lum>6)&(lum<248)
+    if usable.sum()<200:return None
+    def median(sel):
+        return np.median(image[sel].astype(float),axis=0) if sel.sum()>=40 else None
+    wall_sel=glass_sel=None
+    if classes and res and bay and len(set(classes))>1:
+        columns=np.zeros(image.shape[1],object)
+        for j,kind in enumerate(classes):
+            columns[int(round(j*bay/res)):int(round((j+1)*bay/res))]=kind
+        clad=usable&np.isin(columns,['clad','pier'])[None,:];glazed=usable&(columns=='glazed')[None,:]
+        if clad.sum()>=400 and glazed.sum()>=400:
+            wall_sel=clad&(lum>=np.percentile(lum[clad],50))
+            glass_sel=glazed&(lum<=np.percentile(lum[glazed],50))
+    if wall_sel is None:
+        # The upper half is the dominant cladding tone; brighter trim and
+        # highlights alone would repaint a brick wall in its cream dressings.
+        lo,hi=np.percentile(lum[usable],[35,50])
+        wall_sel=usable&(lum>=hi)&(lum>lo);glass_sel=usable&(lum<=lo)
+    wall,glass=median(wall_sel),median(glass_sel)
+    if wall is None or glass is None:return None
+    # Mullions and window frames sit between the two in the capture.
+    frame=.55*wall+.45*glass
+    rgb=lambda c:tuple(int(x) for x in np.clip(np.round(c),0,255))
+    return {'wall':rgb(wall),'glass':rgb(glass),'frame':rgb(frame),'samples':int(usable.sum())}
+
+
+class OpeningEvidence:
+    """Whether a captured wall cell shows a darker window-sized opening.
+
+    The opening rectangle slides within its cell, so a grid phase error of a
+    few decimetres still finds the captured window. Blank cladding, murals
+    without openings and party walls give no darker rectangle.
+    """
+    def __init__(self,image,mask,res):
+        lum=image.astype(float)@np.array([.2126,.7152,.0722])
+        m=np.asarray(mask,bool)
+        self.h,self.w=m.shape;self.res=res
+        self.sum=cv2.integral((lum*m).astype(np.float64))
+        self.count=cv2.integral(m.astype(np.float64))
+
+    def _box(self,x0,y0,x1,y1):
+        # Patch coordinates (metres, y up) to integral-image rows/columns.
+        c0=np.clip(np.round(np.asarray(x0)/self.res).astype(int),0,self.w)
+        c1=np.clip(np.round(np.asarray(x1)/self.res).astype(int),0,self.w)
+        r0=np.clip(np.round(self.h-np.asarray(y1)/self.res).astype(int),0,self.h)
+        r1=np.clip(np.round(self.h-np.asarray(y0)/self.res).astype(int),0,self.h)
+        s=self.sum[r1,c1]-self.sum[r0,c1]-self.sum[r1,c0]+self.sum[r0,c0]
+        n=self.count[r1,c1]-self.count[r0,c1]-self.count[r1,c0]+self.count[r0,c0]
+        area=np.maximum((c1-c0)*(r1-r0),1)
+        return s,n,area
+
+    def contrast(self,cell,opening):
+        """(covered share, relative darkness of the best-placed opening) or None."""
+        cx0,cy0,cx1,cy1=cell;ox0,oy0,ox1,oy1=opening
+        s,n,area=self._box(cx0,cy0,cx1,cy1)
+        if area<16 or n/area<.6:return None
+        ow,oh=ox1-ox0,oy1-oy0
+        xs=np.arange(cx0,cx1-ow+1e-6,self.res) if cx1-cx0>ow else np.array([ox0])
+        ys=np.arange(cy0,cy1-oh+1e-6,self.res) if cy1-cy0>oh else np.array([oy0])
+        X,Y=np.meshgrid(xs,ys)
+        bs,bn,barea=self._box(X,Y,X+ow,Y+oh)
+        valid=bn>=.6*barea
+        if not valid.any():return None
+        inside=np.where(valid,bs/np.maximum(bn,1),np.inf)
+        k=np.argmin(inside)
+        rest=n-bn.flat[k]
+        if rest<8:return None
+        surround=(s-bs.flat[k])/rest
+        return float(n/area),float((surround-inside.flat[k])/max(surround,20.))
+
+
+def wall_dominated(image,mask):
+    """True when a dark patch is mostly wall around darker openings.
+
+    A curtain wall is mostly glass. A shaded masonry wall with punched windows
+    is also dark against the building's lit cladding, but its darker tone
+    covers well under half the surface. Two luminance clusters must be
+    clearly separated before the share is trusted.
+    """
+    m=np.asarray(mask,bool)
+    if m.sum()<400:return False
+    lum=(image.astype(float)@np.array([.2126,.7152,.0722]))[m]
+    lum=lum[(lum>4)&(lum<250)]
+    if len(lum)<400:return False
+    c0,c1=np.percentile(lum,[20,80])
+    for _ in range(20):
+        dark=np.abs(lum-c0)<=np.abs(lum-c1)
+        if dark.all() or not dark.any():return False
+        c0,c1=lum[dark].mean(),lum[~dark].mean()
+    return bool(c1-c0>=14 and dark.mean()<.42)
+
+
 def capture(source,textures):
     """Decoded capture of one building: only the textures its meshes reference."""
     used=sorted({m.tex_index for m in source if m.uvs is not None and m.tex_index<len(textures)})

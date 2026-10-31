@@ -2106,7 +2106,17 @@ void MeshToolApp::UpdateRouteCapture()
         m_ui->routeTilt = (float)m_autoRoute.tilt;
         m_ui->routeDwell = (float)m_autoRoute.dwell;
         m_ui->routeLookBack = m_autoRoute.lookBack;
-        m_ui->wantStartRouteCapture = true;
+        if (m_autoRoute.zone)
+        {
+            m_ui->zoneLon0 = m_autoRoute.lon0; m_ui->zoneLat0 = m_autoRoute.lat0;
+            m_ui->zoneLon1 = m_autoRoute.lon1; m_ui->zoneLat1 = m_autoRoute.lat1;
+            m_ui->zoneHeight = (float)m_autoRoute.height;
+            m_ui->zoneDwell = (float)m_autoRoute.dwell;
+            if (m_autoRoute.spacing > 0) m_ui->zoneSpacing = (float)m_autoRoute.spacing;
+            m_ui->wantStartZoneCapture = true;
+        }
+        else
+            m_ui->wantStartRouteCapture = true;
     }
     auto summary = [&]() {
         char buf[96];

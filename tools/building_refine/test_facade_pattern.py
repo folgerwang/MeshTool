@@ -60,4 +60,27 @@ class PatternTest(unittest.TestCase):
         self.assertAlmostEqual(pattern.reference_luminance({'appearance':{'rgb':(112,112,112)}}),100.,places=5)
         self.assertEqual(pattern.reference_luminance({}),120.)
 
+    def test_patch_palette_keeps_captured_tones(self):
+        # Dark navy panes between grey mullions: the palette keeps both tones
+        # as captured instead of brightening toward a generic cladding colour.
+        image=np.full((200,200,3),[40,48,60],np.uint8)
+        image[:,::10]=[120,124,128];image[:,1::10]=[120,124,128];image[:,2::10]=[120,124,128];image[:,3::10]=[120,124,128]
+        found=pattern.patch_palette(image,np.ones((200,200),bool))
+        np.testing.assert_allclose(found['wall'],[120,124,128],atol=1)
+        np.testing.assert_allclose(found['glass'],[40,48,60],atol=1)
+        self.assertTrue(all(g<=f<=w for g,f,w in zip(found['glass'],found['frame'],found['wall'])))
+        self.assertIsNone(pattern.patch_palette(image,np.zeros((200,200),bool)))
+
+    def test_opening_evidence_finds_shifted_windows_only(self):
+        res=.1;image=np.full((300,300,3),170,np.uint8)
+        # One dark 1.0 x 1.5 m window in the cell x 0..3, y 0..3 (image rows run downward).
+        image[300-int(2.4/res):300-int(.9/res),int(1.3/res):int(2.3/res)]=50
+        evidence=pattern.OpeningEvidence(image,np.ones((300,300),bool),res)
+        # The nominal opening is 40 cm off the window; sliding still finds it.
+        _,contrast=evidence.contrast((0,0,3,3),(.9,.9,1.9,2.4))
+        self.assertGreater(contrast,.3)
+        plain=pattern.OpeningEvidence(np.full((300,300,3),170,np.uint8),np.ones((300,300),bool),res)
+        self.assertLess(plain.contrast((0,0,3,3),(.9,.9,1.9,2.4))[1],.02)
+        self.assertIsNone(pattern.OpeningEvidence(image,np.zeros((300,300),bool),res).contrast((0,0,3,3),(.9,.9,1.9,2.4)))
+
 if __name__=='__main__':unittest.main()

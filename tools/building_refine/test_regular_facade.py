@@ -107,5 +107,35 @@ class RegularFacadeTest(unittest.TestCase):
             p=m.vertices+m.translation
             self.assertFalse(((p[:,0]>5.01)&(p[:,0]<7.99)).any())
 
+    def test_orthogonal_fill_closes_slits_but_not_separate_wings(self):
+        from shapely.geometry import box, Polygon
+        from shapely.ops import unary_union
+        wall=box(0,0,20,12).difference(Polygon([(4,0),(5,0),(12,12),(11,12)]).intersection(box(0,1,20,11)))
+        filled=regular_facade.orthogonal_fill(wall)
+        self.assertAlmostEqual(filled.area,240.,delta=1.)
+        wings=unary_union([box(0,0,5,12),box(9,0,14,12)])
+        for part in facade._polygons(wings):
+            self.assertAlmostEqual(regular_facade.orthogonal_fill(part).area,60.,places=5)
+
+    def test_skewed_weak_plane_is_dropped_against_stronger_wall(self):
+        from shapely.geometry import box
+        def plane(angle,area,offset=0.):
+            n=np.array([np.cos(angle),np.sin(angle),0.]);u=np.cross([0.,0.,1.],n)
+            return dict(n=n,u=u,v=np.array([0.,0.,1.]),offset=offset,region=box(0,0,20,area/20),raw_area=area)
+        kept,_=regular_facade.resolve_overlaps([plane(0.,600.),plane(np.deg2rad(9),120.)],.8)
+        self.assertEqual(len(kept),1)
+        kept,_=regular_facade.resolve_overlaps([plane(0.,600.),plane(np.pi/2,120.)],.8)
+        self.assertEqual(len(kept),2)
+
+    def test_tiled_wall_has_rear_skin_instead_of_black_backing(self):
+        source=mesh_from_model(model(),0)
+        generated,textures,stats=facade.build([source],0,0)
+        backing=[m for m in generated if m.material==2]
+        self.assertTrue(backing)
+        self.assertEqual(len(textures),facade.TEXTURE_COUNT)
+        # Every module emits its cladding skin behind the backing.
+        skins=sum(len(m.vertices) for m in generated if m.material in (3,4) and m.tex_index==0)
+        self.assertGreaterEqual(skins,sum(len(m.vertices) for m in backing))
+
 
 if __name__=='__main__':unittest.main()
