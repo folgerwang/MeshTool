@@ -478,6 +478,22 @@ MeshTool scene.mtscene --sim-video drive.mp4 [--sim fraction] [--sim-seconds n]
 can drop a class; `--box` frames a fixed world box, so shots of two scenes line
 up for before/after comparison.
 
+### Clean captured buildings with Blender
+
+When the captured design should stay exactly as captured, clean the meshes
+instead of regenerating facades. Blender (headless) removes smeared faces whose
+texture collapses to a line, faces buried under the captured ground, degenerate
+slivers and floating fragments under 2 m², welds tile seams and closes small
+holes inside one source mesh with its own texture coordinates. Kept faces and
+textures are unchanged; the result is the refined variant and the capture stays
+as the original variant.
+
+```bash
+python tools/building_refine/blender_refine.py segmented.mtscene cleaned.mtscene [--only building_123 ...] [--blender G:/blender/blender.exe] [--job dir]
+```
+
+Bellevue (467 buildings, about 3.3 M faces) runs in about 12 minutes.
+
 ## Scene files
 
 File > Save Scene / Open Scene (Ctrl+S / Ctrl+O): `.mtscene`, MeshTool's
