@@ -238,7 +238,7 @@ def capture(source,textures):
         if m.tex_index not in remap or m.uvs is None:continue
         part=copy.copy(m);part.tex_index=remap[m.tex_index];meshes.append(part)
     group=SimpleNamespace(meshes=meshes,textures=[textures[i] for i in used])
-    return SimpleNamespace(src=raster.collect(group),tex=raster.decode_textures(group))
+    return SimpleNamespace(src=raster.collect(group),tex=raster.decode_textures(group,size=512))
 
 
 def project_patch(cap,origin,u,v,n,size,res):

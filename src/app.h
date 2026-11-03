@@ -38,7 +38,8 @@ public:
     MeshToolApp();
     ~MeshToolApp();
 
-    bool Init();
+    // headless: no visible window (scripted shots and videos); rendering is unchanged.
+    bool Init(bool headless = false);
     void OpenOnStart(const std::string& path);   // scene file given on the command line
 
     // Unattended check screenshots (MeshTool scene.mtscene --shots prefix ...):

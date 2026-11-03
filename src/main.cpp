@@ -352,8 +352,21 @@ int main(int argc, char* argv[])
 
     try
     {
+        // --headless: no visible window, in any mode. Scripted shots and videos
+        // run headless by default; --show keeps their window visible.
+        bool headless = false, show = false, automated = false;
+        for (int i = 1; i < argc; i++)
+        {
+            if (!strcmp(argv[i], "--headless")) headless = true;
+            else if (!strcmp(argv[i], "--show")) show = true;
+            else if (!strcmp(argv[i], "--shots") || !strcmp(argv[i], "--sim-video") ||
+                     !strcmp(argv[i], "--capture-route") || !strcmp(argv[i], "--capture-zone")) automated = true;
+        }
+        if (headless && !automated)
+            fprintf(stderr, "--headless: nothing scripted to run (--shots, --sim-video, --capture-route, "
+                            "--capture-zone); the hidden window stays open until the process is ended.\n");
         MeshToolApp app;
-        if (!app.Init())
+        if (!app.Init((headless || (automated && !strstr(argv[1], "--capture"))) && !show))
         {
             fprintf(stderr, "Init failed. Press enter to exit.\n");
             getchar();

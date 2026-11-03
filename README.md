@@ -474,6 +474,9 @@ MeshTool scene.mtscene --shots prefix --box x0 y0 z0 x1 y1 z1 [--no-glass] [--ya
 MeshTool scene.mtscene --sim-video drive.mp4 [--sim fraction] [--sim-seconds n]
 ```
 
+`--shots` and `--sim-video` run without a visible window (`--show` keeps it);
+`--headless` hides the window in any mode.
+
 `--objects` lists a segmented scene's objects (name, class, size, centre) and
 can drop a class; `--box` frames a fixed world box, so shots of two scenes line
 up for before/after comparison.
@@ -492,7 +495,13 @@ as the original variant.
 python tools/building_refine/blender_refine.py segmented.mtscene cleaned.mtscene [--only building_123 ...] [--blender G:/blender/blender.exe] [--job dir]
 ```
 
-Bellevue (467 buildings, about 3.3 M faces) runs in about 12 minutes.
+Windows are rebuilt too (`--no-windows` turns this off): on every wall plane the
+panes are found from the rectified capture (dark runs inside window rows and
+columns that repeat), panes whose frames touch become one window with
+mullions, and Blender replaces the captured faces there with a reveal into the
+wall, the frame and the panes set back behind it. Everything stays textured from
+the capture at its finest level of detail; panes get the glass material with a
+dark interior behind them.
 
 ## Scene files
 

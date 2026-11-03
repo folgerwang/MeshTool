@@ -55,7 +55,7 @@ MeshToolApp::~MeshToolApp() = default;
 // Init
 // ---------------------------------------------------------------------------
 
-bool MeshToolApp::Init()
+bool MeshToolApp::Init(bool headless)
 {
     // ---- GLFW ----
     if (!glfwInit())
@@ -66,6 +66,8 @@ bool MeshToolApp::Init()
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    if (headless)
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 
     m_window = glfwCreateWindow(1600, 900, "MeshTool", nullptr, nullptr);
     if (!m_window)

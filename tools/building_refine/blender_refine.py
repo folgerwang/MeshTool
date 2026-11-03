@@ -3,10 +3,15 @@
     python blender_refine.py IN.mtscene OUT.mtscene [--only NAME ...] [--blender G:/blender/blender.exe]
 
 Unlike the PCG facade (facade.py) nothing is regenerated: every kept face is
-the captured face with its captured texture. Blender (blender_cleanup.py)
-welds tile seams and removes the obvious capture artifacts: smeared faces
-whose texture collapses to a line, slivers, and small floating fragments, and
-closes the small holes this leaves. The cleaned building is stored as the
+the captured face with its captured texture, at the capture's finest level of
+detail. Blender (blender_cleanup.py) welds tile seams and removes the obvious
+capture artifacts: smeared faces whose texture collapses to a line, slivers,
+and small floating fragments, and closes the small holes this leaves.
+
+Windows: captured_glass finds the panes on every wall plane of the capture;
+Blender replaces each window's captured faces with a reveal, a frame ring and
+a pane set back behind it, textured from the wall's rectified capture. Panes
+get the viewer's glass material with a dark interior behind them. The cleaned building is stored as the
 refined variant (2) with the capture archived as the original (1), so the
 viewer can still compare both.
 """
@@ -20,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+import captured_facade
+import captured_glass
 import mtscene
 
 BLENDER = 'G:/blender/blender.exe'
@@ -27,6 +34,7 @@ SMEAR_AREA = .05      # m2: smaller faces are not visible as smears
 SMEAR_DENSITY = .02   # texel density below this share of the building median is a smear
 BURIED = .5           # metres: faces wholly this far below the captured ground are hidden fragments
 GROUND_CLASSES = (1, 2, 6, 7)
+GLASS, BACKING = 1, 4 # blender_cleanup 'mat' of pane and backing faces
 SMEARED, UNDERGROUND = 1, 2   # face flags handed to blender_cleanup
 
 
@@ -76,24 +84,70 @@ class Ground:
         return pos[:, :, 2].max(1) < z-BURIED
 
 
-def rebuild(meshes, out, center):
+def rebuild(meshes, out, center, planes=(), plane_textures=()):
+    """Refined meshes: the captured faces per source mesh, and per wall plane
+    and level of detail the built windows (frame, reveal, glass pane and the
+    interior backing behind it) on the plane's baked capture."""
+    pos, uv = out['pos'], out['uv']
+    mat = out['mat'] if 'mat' in out else np.zeros(len(pos), np.int32)
+    plane = out['plane'] if 'plane' in out else np.full(len(pos), -1)
+
+    def emit(template, p, t, tex_index, material):
+        n = len(p)
+        mesh = copy.copy(template)
+        mesh.tex_index = tex_index
+        mesh.vertices = (p.reshape(-1, 3)+center-template.translation).astype(np.float32)
+        mesh.uvs = t.reshape(-1, 2).astype(np.float32) if template.uvs is not None else None
+        mesh.colors = None if template.colors is None else np.repeat(template.colors[:1], 3*n)
+        mesh.draw_calls = [(4, np.arange(3*n, dtype=np.uint32))]
+        mesh.material = material
+        mesh.model_variant = 2
+        return mesh
     new = []
     for k, m in enumerate(meshes):
-        sel = out['src'] == k
-        if not sel.any():
+        sel = (out['src'] == k) & (mat == 0)
+        if sel.any():
+            new.append(emit(m, pos[sel], uv[sel], m.tex_index, m.material))
+    built = mat != 0
+    for pid, f in enumerate(planes):
+        tex_index, scale = plane_textures[pid]
+        here = built & (plane == pid)
+        if not here.any():
             continue
-        n = int(sel.sum())
-        mesh = copy.copy(m)
-        mesh.vertices = (out['pos'][sel].reshape(-1, 3)+center-m.translation).astype(np.float32)
-        mesh.uvs = out['uv'][sel].reshape(-1, 2).astype(np.float32) if m.uvs is not None else None
-        mesh.colors = None if m.colors is None else np.repeat(m.colors[:1], 3*n)
-        mesh.draw_calls = [(4, np.arange(3*n, dtype=np.uint32))]
-        mesh.model_variant = 2
-        new.append(mesh)
+        size = np.array(f['image_size'])
+        mapped = np.stack([uv[..., 0]/size[0]*scale[0], (1-uv[..., 1]/size[1])*scale[1]], -1)
+        lods = np.array([meshes[k].lod_size for k in out['src']])
+        for lod in np.unique(lods[here]):
+            part = here & (lods == lod)
+            # A template at this level of detail keeps the windows in depth order with their wall.
+            template = meshes[out['src'][np.flatnonzero(part)[0]]]
+            glass = part & (mat == GLASS)
+            backing = part & (mat == BACKING)
+            other = part & (mat != GLASS) & (mat != BACKING)
+            if other.any():
+                new.append(emit(template, pos[other], mapped[other], tex_index, mtscene.MAT_CAPTURED))
+            if glass.any():
+                new.append(emit(template, pos[glass], mapped[glass], tex_index, mtscene.MAT_GLASS))
+            if backing.any():
+                new.append(emit(template, pos[backing], mapped[backing], tex_index, mtscene.MAT_INTERIOR))
     return new
 
 
-def run(batches, only=None, blender=BLENDER, job=None, log=print):
+def find_panes(source, textures, data, center):
+    """Wall planes with their panes (captured_glass), in building-centred
+    metres, and each plane's rectified capture."""
+    keep = data['bad'] == 0
+    planes = [captured_glass.frame(p, data['pos'][keep]) for p in captured_glass.wall_planes(data['pos'][keep])]
+    cap = captured_glass.capture(source, textures)
+    if cap is None:
+        return []
+    return [dict(origin=list(map(float, f['origin'])), u=list(map(float, f['u'])), v=list(map(float, f['v'])),
+                 n=list(map(float, f['n'])), size=list(f['size']), rects=[list(map(float, r)) for r in f['rects']],
+                 image=f['image'], image_size=[f['image'].shape[1]*f['pitch'], f['image'].shape[0]*f['pitch']])
+            for f in captured_glass.detect(cap, planes, center)]
+
+
+def run(batches, only=None, blender=BLENDER, job=None, log=print, windows=True):
     jobs = []
     work = Path(job or tempfile.mkdtemp(prefix='blender_refine_'))
     work.mkdir(parents=True, exist_ok=True)
@@ -116,23 +170,32 @@ def run(batches, only=None, blender=BLENDER, job=None, log=print):
                 data['pos'] = data['pos']-center
                 name = f'{bi}_{gi}_{oid}'
                 np.savez(work/f'{name}_in.npz', **data)
-                jobs.append((name, group, oid, source, bool(original), center))
+                planes = find_panes(source, group.textures, data, center) if windows else []
+                (work/f'{name}_glass.json').write_text(json.dumps(
+                    [{k: v for k, v in f.items() if k != 'image'} for f in planes]))
+                jobs.append((name, group, oid, source, bool(original), center, planes))
     if not jobs:
         return {}
     log(f'blender_refine: cleaning {len(jobs)} building(s) in {work}')
     subprocess.run([blender, '-b', '--factory-startup', '--python', str(Path(__file__).with_name('blender_cleanup.py')),
                     '--', str(work)], check=True, stdout=subprocess.DEVNULL if log is None else None)
     report = json.loads((work/'report.json').read_text())
-    for name, group, oid, source, archived, center in jobs:
+    for name, group, oid, source, archived, center, planes in jobs:
         out = dict(np.load(work/f'{name}_out.npz'))
-        new = rebuild(source, out, center)
+        plane_textures = []
+        for f in planes:
+            texture, scale = captured_facade._texture(f['image'])
+            plane_textures.append((len(group.textures), scale))
+            group.textures.append(texture)
+        new = rebuild(source, out, center, planes, plane_textures)
         original = source if archived else [copy.copy(m) for m in source]
         for m in original:
             m.model_variant = 1
         group.meshes = [m for m in group.meshes if m.object_id != oid]+original+new
         s = report[name]
         log(f'  {group.objects[oid].name}: {s["input"]} -> {s["output"]} faces; removed {s["smear"]} smeared, {s["underground"]} underground, '
-            f'{s["sliver"]} sliver, {s["fragments"]} fragment(s) ({s["fragment_area"]:.1f} m2); closed {s["filled"]} hole face(s)')
+            f'{s["sliver"]} sliver, {s["fragments"]} fragment(s) ({s["fragment_area"]:.1f} m2); closed {s["filled"]} hole face(s); '
+            f'rebuilt {s["panes"]} window pane(s) with frames on {s["window_planes"]} wall plane(s)')
     return report
 
 
@@ -142,9 +205,10 @@ def main():
     ap.add_argument('--only', nargs='*', help='object names or indices')
     ap.add_argument('--blender', default=BLENDER)
     ap.add_argument('--job', help='keep the Blender exchange files here')
+    ap.add_argument('--no-windows', action='store_true', help='clean only; keep the captured windows flat')
     a = ap.parse_args()
     batches = mtscene.load(a.input, {})
-    run(batches, set(a.only) if a.only else None, a.blender, a.job)
+    run(batches, set(a.only) if a.only else None, a.blender, a.job, windows=not a.no_windows)
     mtscene.save(a.output, batches, {})
 
 
