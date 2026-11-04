@@ -8,7 +8,7 @@ building centre, uv float[T,3,2], src int[T] source mesh, bad int[T] faces the
 driver flagged: 1 smeared, 2 underground) and optionally *_glass.json (wall
 planes with their pane rectangles, captured_glass.detect). It gets one
 *_out.npz back with the same arrays for the result, plus mat int[T] (0 wall,
-1 glass, 2 frame, 3 reveal, 4 dark backing) and plane int[T] (window plane, -1 if none), and
+1 glass, 2 frame, 3 reveal) and plane int[T] (window plane, -1 if none), and
 a stats JSON.
 
 The captured surface is kept and no texture is changed. Only obvious capture
@@ -45,9 +45,7 @@ CORNER_REACH = .4     # metres: wall vertices this close set a window corner's d
 CORNER_SPREAD = .15   # and it stays this close to the window's own depth (m)
 FLANGE = .03          # metres the reveal laps over the wall around an opening
 CELL = 2.0            # metres: plane grid used to find the faces near a pane
-BACKING_DEPTH = .35   # metres behind the wall
-BACKING_GROW = .2     # metres past the opening on each side
-WALL, GLASS, FRAME_FACE, REVEAL_FACE, BACKING = 0, 1, 2, 3, 4   # 'mat' face attribute
+WALL, GLASS, FRAME_FACE, REVEAL_FACE = 0, 1, 2, 3   # 'mat' face attribute
 
 
 def build(data):
@@ -276,7 +274,7 @@ def rebuild_window(bm, grid, pid, o, u, v, n, panes, outer, layers):
                  src, REVEAL_FACE, pid, center-point(*mid, 0.), layers)
     # The frame at the reveal depth: the opening minus its panes (ring and
     # mullions), on a grid of the pane edges so every edge is shared and no
-    # crack shows the backing. Then each pane is set back behind the frame.
+    # crack opens. Then each pane is set back behind the frame.
     xs = sorted({x0, x1} | {p[0] for p in panes} | {p[2] for p in panes})
     ys = sorted({y0, y1} | {p[1] for p in panes} | {p[3] for p in panes})
     level = {}
@@ -314,11 +312,6 @@ def rebuild_window(bm, grid, pid, o, u, v, n, panes, outer, layers):
                      edge+[outside(b, pane), outside(a, pane)], src, FRAME_FACE, pid,
                      pane_center-point(*mid, base+REVEAL), layers)
         add_face(bm, glass_verts, inner_xy, src, GLASS, pid, n, layers)
-    # Dark backing wider than the opening: where the wall bulges past the
-    # window's rectangle a crack reads as shadow, not as the ground behind.
-    grown = [(x0-BACKING_GROW, y0-BACKING_GROW), (x1+BACKING_GROW, y0-BACKING_GROW),
-             (x1+BACKING_GROW, y1+BACKING_GROW), (x0-BACKING_GROW, y1+BACKING_GROW)]
-    add_face(bm, [bm.verts.new(point(x, y, base+BACKING_DEPTH)) for x, y in grown], grown, src, BACKING, pid, n, layers)
     return True
 
 
@@ -350,6 +343,31 @@ def openings(rects):
         else:
             out.append((panes, outer))
     return out
+
+
+def flatten_repairs(bm, planes, stats):
+    """Vertices of wall faces inside a repaired cell move onto the wall plane:
+    the cell's texture was rebuilt from a clean like cell, its shape follows."""
+    moved = set()
+    for plane in planes:
+        if not plane.get('repairs'):
+            continue
+        o, u, v, n = (Vector(plane[k]) for k in ('origin', 'u', 'v', 'n'))
+        for f in bm.faces:
+            if abs(f.normal.dot(n)) < .5:
+                continue
+            for vert in f.verts:
+                if vert in moved:
+                    continue
+                q = vert.co-o
+                d = q.dot(n)
+                if abs(d) > NEAR:
+                    continue
+                x, y = q.dot(u), q.dot(v)
+                if any(r[0]-1e-3 <= x <= r[2]+1e-3 and r[1]-1e-3 <= y <= r[3]+1e-3 for r in plane['repairs']):
+                    vert.co -= n*d
+                    moved.add(vert)
+    stats['flattened'] = len(moved)
 
 
 def windows(bm, planes, layers, stats):
@@ -428,6 +446,7 @@ def clean(data, planes=None):
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
     close_holes(bm, s_layer, uv_layer, stats)
     stats['open_edges_before'] = sum(e.is_boundary for e in bm.edges)
+    flatten_repairs(bm, planes or [], stats)
     windows(bm, planes or [], (s_layer, m_layer, p_layer, uv_layer), stats)
     stats['open_edges_after'] = sum(e.is_boundary for e in bm.edges)
     bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])

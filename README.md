@@ -500,8 +500,17 @@ panes are found from the rectified capture (dark runs inside window rows and
 columns that repeat), panes whose frames touch become one window with
 mullions, and Blender replaces the captured faces there with a reveal into the
 wall, the frame and the panes set back behind it. Everything stays textured from
-the capture at its finest level of detail; panes get the glass material with a
-dark interior behind them.
+the capture at its finest level of detail; panes get the glass material.
+
+Two corrections work on each wall's rectified capture (`--no-repair`,
+`--no-shadows` turn them off). Cells of a repeating facade the capture barely
+saw, where the mesh was guessed and distorted, are rebuilt from a captured like
+cell of the same wall (same floor first; never the ground floor) and their
+faces flattened onto the wall. Cast shadows are lifted in the captured textures
+themselves: a region counts as shadow only when it is darker than the lit wall
+around it, slightly bluer, of the same hue, reaches the wall's edge and lies in
+the wall plane (recesses such as arcades keep their shade); murals, signs and
+glazing stay as captured.
 
 ## Scene files
 

@@ -26,7 +26,9 @@ vec3 Sky(vec3 r)
 {
     // Analytic environment with broad horizon light and directional soft lights.
     // This is environment lighting, not a reflection of local scene geometry.
-    vec3 ground = vec3(0.12, 0.19, 0.27);
+    // Below the horizon glass mirrors the street and the buildings opposite,
+    // a mid grey; a near-black ground turned every pane seen from above black.
+    vec3 ground = vec3(0.30, 0.33, 0.37);
     vec3 horizon = vec3(0.78, 0.88, 1.0);
     vec3 zenith = vec3(0.20, 0.40, 0.72);
     vec3 env = r.z < 0.0 ? mix(horizon * 0.75, ground, smoothstep(0.0, 0.85, -r.z))

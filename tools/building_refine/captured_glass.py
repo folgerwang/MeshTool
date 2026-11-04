@@ -33,6 +33,10 @@ def wall_planes(pos, min_area=MIN_AREA):
     cross = np.cross(pos[:, 1]-pos[:, 0], pos[:, 2]-pos[:, 0])
     area = np.linalg.norm(cross, axis=1)/2
     unit = cross/np.maximum(2*area, 1e-12)[:, None]
+    # Captured meshes wind faces either way: fold both sides of a wall
+    # together and orient each plane outward once it is found.
+    wound = unit.copy()
+    unit = np.where(((unit[:, 1] < 0) | ((unit[:, 1] == 0) & (unit[:, 0] < 0)))[:, None], -unit, unit)
     center = pos.mean(1)
     vertical = (np.abs(unit[:, 2]) < .2) & (area > 1e-4)
     theta = np.arctan2(unit[:, 1], unit[:, 0])
@@ -71,6 +75,12 @@ def wall_planes(pos, min_area=MIN_AREA):
             remaining &= ~near
             continue
         remaining &= ~members
+        # Outward: the way most of its faces are wound (captures face outward
+        # in the main); away from the building's centre when the winding is
+        # split. Courtyard walls face the centre, so winding comes first.
+        votes = (wound[members, :2]@h*area[members]).sum()
+        if (votes < 0) if abs(votes) > .3*area[members].sum() else (d0 < 0):
+            h, d0 = -h, -d0
         planes.append(dict(n=np.array([h[0], h[1], 0.]), d=float(d0), faces=np.flatnonzero(members)))
     return planes
 
@@ -125,12 +135,12 @@ def panes(image, mask, pitch, dark_min=DARK):
             if mask[a:b, x0:x1].mean() < .8 or dark[a:b, x0:x1].mean() < .55:
                 continue
             found.append((x0, a, x1, b))
-    # A pane under .5 m is a transom or sill light only next to a full pane.
-    tall = [r for r in found if (r[3]-r[1])*pitch >= .5]
+    # A pane under .8 m is a transom or sill light only next to a full pane.
+    tall = [r for r in found if (r[3]-r[1])*pitch >= .8]
     def beside(r):
         return any(min(r[2], t[2])-max(r[0], t[0]) > .5*(r[2]-r[0]) and
                    min(abs(r[1]-t[3]), abs(t[1]-r[3]))*pitch < .3 for t in tall)
-    found = tall+[r for r in found if (r[3]-r[1])*pitch < .5 and beside(r)]
+    found = tall+[r for r in found if (r[3]-r[1])*pitch < .8 and beside(r)]
     # Windows repeat: a pane needs a like-sized pane in its row or column.
     def repeated(r):
         w, h = r[2]-r[0], r[3]-r[1]
@@ -143,15 +153,41 @@ def panes(image, mask, pitch, dark_min=DARK):
     return [r for r in found if repeated(r)]
 
 
+def wall_pixels(cap, f, center, pitch):
+    """Rectified capture of a wall plane and the pixels that show the wall
+    itself: ground, roofs and ledges crossing the plane are not wall."""
+    from types import SimpleNamespace
+    import raster
+    face = SimpleNamespace(origin=f['origin']+center, u=f['u'], v=f['v'], normal=f['n'], size=f['size'])
+    w = max(1, int(np.ceil(face.size[0]/pitch)))
+    h = max(1, int(np.ceil(face.size[1]/pitch)))
+    P = cap.src.pos-face.origin
+    scr = np.empty_like(P)
+    scr[..., 0] = (P@face.u)/pitch
+    scr[..., 1] = h-(P@face.v)/pitch
+    scr[..., 2] = P@face.normal
+    depth = np.full((h, w), -np.inf)
+    color = np.zeros((h, w, 3), np.uint8)
+    ids = np.full((h, w), -1, np.int32)
+    raster.rasterize(scr, cap.src.uv, cap.src.tex, np.arange(len(scr), dtype=np.int32), cap.tex, w, h,
+                     depth, color, ids, -.8, .8, False)
+    cross = np.cross(cap.src.pos[:, 1]-cap.src.pos[:, 0], cap.src.pos[:, 2]-cap.src.pos[:, 0])
+    # Steep faces only: window reveals and wrinkles stay, ground and roofs go.
+    facing = np.abs(cross[:, 2]) < .6*np.linalg.norm(cross, axis=1)
+    wall = (ids >= 0) & facing[np.maximum(ids, 0)]
+    return color, wall, np.where(ids >= 0, depth, -np.inf)
+
+
 def detect(cap, planes, center):
-    """Pane rectangles per plane: [dict(frame..., rects=[(u0, v0, u1, v1)])] in plane metres."""
+    """Captured wall planes with their panes: [dict(frame..., rects, image,
+    mask, pitch)], rects as captured_glass.framed in plane metres."""
     from refine import fill_holes
     found = []
     for f in planes:
         if f['size'][0] < 2 or f['size'][1] < 2.5:
             continue
         pitch = max(PITCH, max(f['size'])/4096)
-        image, mask = facade_pattern.project_patch(cap, f['origin']+center, f['u'], f['v'], f['n'], f['size'], pitch)
+        image, mask, depth = wall_pixels(cap, f, center, pitch)
         h, w = mask.shape
         ys, xs = (np.mgrid[:h, :w]+.5)*pitch
         inside = shapely.contains_xy(f['region'], xs, h*pitch-ys)
@@ -162,8 +198,7 @@ def detect(cap, planes, center):
         rects = []
         for x0, y0, x1, y1 in panes(image, mask, pitch):
             rects.append((x0*pitch, (h-y1)*pitch, x1*pitch, (h-y0)*pitch))
-        if rects:
-            found.append(dict(f, rects=framed(rects), image=raw, pitch=pitch))
+        found.append(dict(f, rects=framed(rects), image=raw, mask=mask, depth=depth, pitch=pitch))
     return found
 
 
