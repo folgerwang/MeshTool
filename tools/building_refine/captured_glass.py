@@ -52,7 +52,9 @@ def wall_planes(pos, min_area=MIN_AREA):
     while remaining.any():
         acc = np.zeros((nt, nd))
         np.add.at(acc, (tb[remaining], db[remaining]), area[remaining])
-        smooth = sum(np.roll(np.roll(acc, i, 0), j, 1) for i in (-1, 0, 1) for j in (-1, 0, 1))
+        # Angle wraps around; offset does not (a wrapped peak would never be retired).
+        padded = np.pad(acc, ((0, 0), (1, 1)))
+        smooth = sum(np.roll(padded, i, 0)[:, 1+j:1+j+nd] for i in (-1, 0, 1) for j in (-1, 0, 1))
         t, k = np.unravel_index(np.argmax(smooth), smooth.shape)
         if smooth[t, k] < min_area:
             break
@@ -72,6 +74,8 @@ def wall_planes(pos, min_area=MIN_AREA):
         if area[members].sum() < min_area:
             # The peak was spread over several planes: retire its neighbourhood.
             near = (np.minimum((tb-t) % nt, (t-tb) % nt) <= 1) & (np.abs(db-k) <= 1)
+            if not (remaining & near).any():
+                break
             remaining &= ~near
             continue
         remaining &= ~members

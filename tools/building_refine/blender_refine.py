@@ -203,24 +203,28 @@ def lift_shadows(source, textures, data, planes):
     pos, uv = data['pos'], data['uv']
     cross = np.cross(pos[:, 1]-pos[:, 0], pos[:, 2]-pos[:, 0])
     steep = np.abs(cross[:, 2]) < .6*np.linalg.norm(cross, axis=1)
-    for k, m in enumerate(source):
+    # Faces on each shadowed plane, grouped by source mesh: one pass per plane.
+    work = {}
+    for f in planes:
+        if f.get('delta') is None:
+            continue
+        q = pos-np.array(f['origin'])
+        d = q@np.array(f['n'])
+        x, y = q@np.array(f['u']), q@np.array(f['v'])
+        sel = np.flatnonzero(steep & (np.abs(d).max(1) < .8) & (x.min(1) > -.1) & (x.max(1) < f['size'][0]+.1) &
+                             (y.min(1) > -.1) & (y.max(1) < f['size'][1]+.1))
+        for k in np.unique(data['src'][sel]):
+            mine = sel[data['src'][sel] == k]
+            work.setdefault(int(k), []).append((f, np.stack([x[mine], y[mine]], -1), mine))
+    for k, items in work.items():
+        m = source[k]
         tex = textures[m.tex_index]
         if m.uvs is None or tex.internal_format != raster.GL_COMPRESSED_RGB_S3TC_DXT1:
             continue
         w, h, payload = tex.mips[0]
-        image, total = None, 0
-        for f in planes:
-            if f.get('delta') is None:
-                continue
-            q = pos-np.array(f['origin'])
-            d = q@np.array(f['n'])
-            sel = (data['src'] == k) & steep & (np.abs(d).max(1) < .8)
-            if not sel.any():
-                continue
-            if image is None:
-                image = raster.decode_dxt1(w, h, payload)[..., :3].copy()
-            xy = np.stack([q[sel]@np.array(f['u']), q[sel]@np.array(f['v'])], -1)
-            image, n = deshadow.correct_texture(image, uv[sel]*[w, h], xy, f['delta'], f['pitch'])
+        image, total = raster.decode_dxt1(w, h, payload)[..., :3].copy(), 0
+        for f, xy, mine in items:
+            image, n = deshadow.correct_texture(image, uv[mine]*[w, h], xy, f['delta'], f['pitch'])
             total += n
         if total:
             lifted[k] = mtscene.Texture(tex.internal_format, tex.format, tex.type,
